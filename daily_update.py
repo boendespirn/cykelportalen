@@ -155,7 +155,7 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
     races = sb_get(
         "races",
         f"start_date=gte.{YEAR}-01-01&start_date=lte.{YEAR}-12-31"
-        f"&select=id,slug,name,start_date,end_date&order=start_date.asc",
+        f"&select=id,slug,name,start_date,end_date,race_type&order=start_date.asc",
     )
     print(f"{len(races)} løb fundet i DB\n")
 
@@ -234,7 +234,9 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
         if not has_stages or force_stages or missing_img:
             reason = "mangler" if not has_stages else ("mangler billeder" if missing_img else "force")
             print(f"  [Etaper — {reason}]")
-            ok = run_script("stage_pcs_agent.py", pcs_slug, label=f"stages {slug}")
+            is_oneday = race.get("race_type") == "oneday"
+            extra_args = ["--oneday"] if is_oneday else []
+            ok = run_script("stage_pcs_agent.py", pcs_slug, *extra_args, label=f"stages {slug}")
             if ok:
                 updated_stages += 1
 

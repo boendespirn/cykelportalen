@@ -330,6 +330,123 @@ async def scrape_race_stages(pcs_slug: str) -> list[dict]:
     return stages
 
 
+# ── One-day race scraper ──────────────────────────────────────────────────────
+
+async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
+    """
+    Scraper profil og ruteinformation for et endagsløb fra PCS-løbets hovedside.
+    URL: /race/{slug}/{year}  (ingen /stage-N)
+    """
+    from playwright.async_api import async_playwright
+
+    url = f"{BASE_URL}/race/{pcs_slug}/{YEAR}"
+    print(f"    One-day: {url}")
+    CF_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0"
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        page = await browser.new_page(user_agent=CF_UA)
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(2500)
+
+        page_title = await page.title()
+        if ("not found" in page_title.lower() or "404" in page_title
+                or "just a moment" in page_title.lower()):
+            await browser.close()
+            print(f"    Ingen data (404 eller Cloudflare)")
+            return []
+
+        await page.evaluate("document.querySelectorAll('[id*=cmp],[class*=cmpbox]').forEach(e=>e.remove())")
+
+        race_data = await page.evaluate("""() => {
+            const result = {};
+
+            const titleEl = document.querySelector('.titleCont, .page-title, h1');
+            result.title = titleEl ? titleEl.innerText.trim() : '';
+
+            const allImgs = [...document.querySelectorAll('img')];
+            const profileImg = allImgs.find(img => img.src && img.src.includes('/profiles/'));
+            result.elevation_image_url = profileImg ? profileImg.src : null;
+
+            const iconEl = document.querySelector('span.icon.profile');
+            result.icon_class = iconEl ? iconEl.className : '';
+
+            const pairs = [];
+            const allTitleEls = [...document.querySelectorAll('.title')];
+            let infoContainer = null;
+            for (const t of allTitleEls) {
+                const txt = t.innerText.trim();
+                if (txt.includes('Distance') || txt.includes('Departure') || txt.includes('Date:')) {
+                    infoContainer = t.closest('.borderbox, .right, .left, section, article, form')
+                                 || t.parentElement?.parentElement;
+                    break;
+                }
+            }
+            if (infoContainer) {
+                const els = [...infoContainer.querySelectorAll('.title, .value')];
+                let pendingTitle = null;
+                for (const el of els) {
+                    const cls = [...el.classList];
+                    if (cls.includes('title')) {
+                        pendingTitle = el.innerText.trim();
+                    } else if (cls.includes('value') && pendingTitle !== null) {
+                        pairs.push({ title: pendingTitle, value: el.innerText.trim() });
+                        pendingTitle = null;
+                    }
+                }
+            }
+            result.pairs = pairs;
+            return result;
+        }""")
+
+        await browser.close()
+
+    if not race_data or (not race_data.get("elevation_image_url") and not race_data.get("pairs")):
+        print("    Ingen profildata på siden")
+        return []
+
+    icon_class = race_data.get("icon_class", "")
+    stage_type = None
+    for cls in icon_class.split():
+        if cls in PROFILE_TYPE_MAP:
+            stage_type = PROFILE_TYPE_MAP[cls]
+            break
+
+    info = extract_info(race_data.get("pairs", []))
+
+    # Fallback: parse titel "Race Name | City › City (147km)"
+    title_text = race_data.get("title", "")
+    if not info.get("start_location") or not info.get("finish_location"):
+        route_m = re.search(r"[»›|]\s*(.+?)\s*[›»]\s*(.+?)\s*[\(\|]", title_text)
+        if route_m:
+            info.setdefault("start_location", route_m.group(1).strip())
+            info.setdefault("finish_location", route_m.group(2).strip())
+    if not info.get("distance_km"):
+        dist_m = re.search(r"\((\d+(?:\.\d+)?)\s*km\)", title_text)
+        if dist_m:
+            info["distance_km"] = float(dist_m.group(1))
+
+    has_img = bool(race_data.get("elevation_image_url"))
+    stage_name = f"{info['start_location']} – {info['finish_location']}" if info.get("start_location") and info.get("finish_location") else pcs_slug.replace("-", " ").title()
+    print(f"      OK {stage_name} | {info.get('distance_km','?')}km | +{info.get('elevation_gain_m','?')}m | {stage_type or '?'} | img:{has_img}")
+
+    return [{
+        "stage_number": 1,
+        "name": stage_name,
+        "date": info.get("date"),
+        "distance_km": info.get("distance_km"),
+        "start_location": info.get("start_location"),
+        "finish_location": info.get("finish_location"),
+        "elevation_gain_m": info.get("elevation_gain_m"),
+        "profile_score": info.get("profile_score"),
+        "stage_type": stage_type,
+        "elevation_image_url": race_data.get("elevation_image_url"),
+        "pcs_stage_url": url,
+        "source": "pcs",
+        "source_url": url,
+    }]
+
+
 # ── Gem til DB ────────────────────────────────────────────────────────────────
 
 def save_stages(race_id: str, stages: list[dict]) -> None:
@@ -341,12 +458,12 @@ def save_stages(race_id: str, stages: list[dict]) -> None:
 
 # ── Hovedprogram ──────────────────────────────────────────────────────────────
 
-async def run(target_slug: str | None = None):
+async def run(target_slug: str | None = None, oneday: bool = False):
     slugs = [target_slug] if target_slug else PCS_RACE_SLUGS
 
     for pcs_slug in slugs:
         print(f"\n{'='*50}")
-        print(f"Løb: {pcs_slug}")
+        print(f"Løb: {pcs_slug} {'[endagsløb]' if oneday else ''}")
 
         race_id = get_race_id(pcs_slug)
         if not race_id:
@@ -354,7 +471,10 @@ async def run(target_slug: str | None = None):
             continue
 
         try:
-            stages = await scrape_race_stages(pcs_slug)
+            if oneday:
+                stages = await scrape_oneday_race(pcs_slug)
+            else:
+                stages = await scrape_race_stages(pcs_slug)
         except Exception as e:
             print(f"  SCRAPE FEJL: {e}")
             import traceback
@@ -364,11 +484,15 @@ async def run(target_slug: str | None = None):
         if stages:
             save_stages(race_id, stages)
         else:
-            print("  Ingen etapedata (løbet er måske endags eller ikke annonceret endnu)")
+            print("  Ingen profildata (løbet er endnu ikke annonceret på PCS)")
 
     print("\n\nFærdig!")
 
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else None
-    asyncio.run(run(target))
+    import argparse as _ap
+    p = _ap.ArgumentParser()
+    p.add_argument("slug", nargs="?", default=None)
+    p.add_argument("--oneday", action="store_true", help="Scraper løbets hovedside (endagsløb)")
+    args = p.parse_args()
+    asyncio.run(run(args.slug, oneday=args.oneday))
