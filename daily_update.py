@@ -44,7 +44,7 @@ RACE_MAP: dict[str, str] = {
 
     # Etapeløb
     "tour-de-suisse":                                   "tour-de-suisse",
-    "criterium-du-dauphine":                            "criterium-du-dauphine",
+    "criterium-du-dauphine":                            "tour-auvergne-rhone-alpes",
     "tour-de-romandie":                                 "tour-de-romandie",
     "paris-nice":                                       "paris-nice",
     "tirreno-adriatico":                                "tirreno-adriatico",
@@ -52,7 +52,6 @@ RACE_MAP: dict[str, str] = {
     "itzulia-basque-country":                           "itzulia-basque-country",
     "uae-tour":                                         "uae-tour",
     "santos-tour-down-under":                           "tour-down-under",
-    "tour-auvergne-rhone-alpes":                        "tour-auvergne-rhone-alpes",
     "tour-de-pologne":                                  "tour-de-pologne",
     "renewi-tour":                                      "renewi-tour",
     "tour-of-guangxi":                                  "tour-of-guangxi",

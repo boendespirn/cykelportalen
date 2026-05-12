@@ -103,9 +103,18 @@ def get_race(our_slug: str) -> dict | None:
 
 # PCS-slug → vores DB-slug (når de afviger fra hinanden)
 PCS_TO_DB_SLUG: dict[str, str] = {
-    "vuelta-a-espana":      "la-vuelta-ciclista-a-espana",
-    "paris-roubaix":        "paris-roubaix-hauts-de-france",
-    "gent-wevelgem":        "in-flanders-fields-from-middelkerke-to-wevelgem",
+    "vuelta-a-espana":          "la-vuelta-ciclista-a-espana",
+    "paris-roubaix":            "paris-roubaix-hauts-de-france",
+    "gent-wevelgem":            "in-flanders-fields-from-middelkerke-to-wevelgem",
+    "bretagne-classic":         "bretagne-classic-cic",
+    "cyclassics-hamburg":       "adac-cyclassics",
+    "donostia-san-sebastian":   "dssk-donostia-san-sebastian-klasikoa",
+    "tour-of-flanders":         "ronde-van-vlaanderen",
+    "omloop-het-nieuwsblad":    "omloop-nieuwsblad",
+    "cadel-evans-great-ocean-road-race": "mapei-cadel-evans-great-ocean-road-race-men",
+    "tour-down-under":          "santos-tour-down-under",
+    "milan-san-remo":           "milano-sanremo",
+    "tour-auvergne-rhone-alpes": "criterium-du-dauphine",
 }
 
 
