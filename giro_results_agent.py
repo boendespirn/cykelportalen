@@ -102,15 +102,11 @@ def parse_time(s: str) -> int | None:
 # ---------- JS-ekstraktion -------------------------------------------------
 
 _EXTRACT_STAGE_JS = r"""() => {
-    function parseBonus(s) {
-        if (!s) return 0;
-        const m = s.match(/(\d+)/);
-        return m ? parseInt(m[1]) : 0;
-    }
+    // Find den store resultattabel (min. 50 rækker)
     const tables = document.querySelectorAll('table');
     let tbl = null;
     for (const t of tables) {
-        if (t.querySelectorAll('a[href*="/rider/"]').length > 5) { tbl = t; break; }
+        if (t.querySelectorAll('tbody tr').length > 50) { tbl = t; break; }
     }
     if (!tbl) return { rows: [], headers: [] };
 
@@ -120,28 +116,37 @@ _EXTRACT_STAGE_JS = r"""() => {
     const idxRnk     = headers.indexOf('rnk');
     const idxGC      = headers.indexOf('gc');
     const idxTimelag = headers.indexOf('timelag');
+    const idxBIB     = headers.indexOf('bib');
+    const idxRider   = headers.indexOf('rider');
     const idxPnt     = headers.indexOf('pnt');
     const idxTime    = headers.lastIndexOf('time');
-
-    // Bonus-kolonne (kolonne med ″-tegn i header eller tomme header)
-    // er den efter Pnt
     const idxBonus   = idxPnt >= 0 ? idxPnt + 1 : -1;
 
     const rows = [];
     for (const tr of tbl.querySelectorAll('tbody tr')) {
         const cells = Array.from(tr.querySelectorAll('td')).map(c => c.innerText.trim());
-        const link  = tr.querySelector('a[href*="/rider/"]');
-        if (!link || cells.length < 4) continue;
+        if (cells.length < 4) continue;
 
-        const pcsSlug = link.href.split('/rider/')[1] || null;
+        // PCS-slug fra link (ikke altid til stede i headless mode)
+        const link    = tr.querySelector('a[href*="/rider/"]');
+        const pcsSlug = link ? link.href.split('/rider/')[1] : null;
+        const bib     = idxBIB    >= 0 ? (parseInt(cells[idxBIB])    || null) : null;
+        const name    = idxRider  >= 0 ? cells[idxRider]              : null;
+
+        const bonusStr = idxBonus >= 0 ? cells[idxBonus] : '';
+        const bonusMatch = bonusStr ? bonusStr.match(/(\d+)/) : null;
+        const bonusSec = bonusMatch ? parseInt(bonusMatch[1]) : 0;
+
         rows.push({
             stage_pos : parseInt(cells[idxRnk])     || null,
-            gc_pos    : parseInt(cells[idxGC])      || null,
-            gc_gap    : cells[idxTimelag]            || null,
-            pnt       : parseInt(cells[idxPnt])     || 0,
-            bonus_sec : idxBonus >= 0 ? parseBonus(cells[idxBonus]) : 0,
-            time_str  : idxTime >= 0 ? cells[idxTime] : null,
+            gc_pos    : parseInt(cells[idxGC])       || null,
+            gc_gap    : idxTimelag >= 0 ? cells[idxTimelag] : null,
+            pnt       : parseInt(cells[idxPnt])      || 0,
+            bonus_sec : bonusSec,
+            time_str  : idxTime   >= 0 ? cells[idxTime]    : null,
             pcs_slug  : pcsSlug,
+            bib       : bib,
+            rider_name: name,
         });
     }
     return { rows, headers };
@@ -149,33 +154,38 @@ _EXTRACT_STAGE_JS = r"""() => {
 
 
 _EXTRACT_CLASSIF_JS = r"""(classifType) => {
-    // Klassement-sider (gc, points, mountains, youth)
     const tables = document.querySelectorAll('table');
     let tbl = null;
     for (const t of tables) {
-        if (t.querySelectorAll('a[href*="/rider/"]').length > 5) { tbl = t; break; }
+        if (t.querySelectorAll('tbody tr').length > 10) { tbl = t; break; }
     }
     if (!tbl) return [];
 
     const headers = Array.from(tbl.querySelectorAll('th'))
         .map(th => th.innerText.trim().toLowerCase());
-    const idxRnk  = headers.indexOf('rnk');
-    const idxTime = headers.lastIndexOf('time');
-    const idxPnt  = headers.indexOf('pnt');
-    const idxGap  = headers.indexOf('gap');
+    const idxRnk    = headers.indexOf('rnk');
+    const idxBIB    = headers.indexOf('bib');
+    const idxRider  = headers.indexOf('rider');
+    const idxTime   = headers.lastIndexOf('time');
+    const idxPnt    = headers.indexOf('pnt');
+    const idxGap    = headers.indexOf('gap');
 
     const rows = [];
     for (const tr of tbl.querySelectorAll('tbody tr')) {
-        const cells = Array.from(tr.querySelectorAll('td')).map(c => c.innerText.trim());
-        const link  = tr.querySelector('a[href*="/rider/"]');
-        if (!link || cells.length < 4) continue;
-        const pcsSlug = link.href.split('/rider/')[1] || null;
+        const cells  = Array.from(tr.querySelectorAll('td')).map(c => c.innerText.trim());
+        if (cells.length < 3) continue;
+        const link    = tr.querySelector('a[href*="/rider/"]');
+        const pcsSlug = link ? link.href.split('/rider/')[1] : null;
+        const bib     = idxBIB   >= 0 ? (parseInt(cells[idxBIB])   || null) : null;
+        const name    = idxRider >= 0 ? cells[idxRider]             : null;
         rows.push({
             pos      : parseInt(cells[idxRnk]) || null,
             time_str : idxTime >= 0 ? cells[idxTime] : null,
             gap_str  : idxGap  >= 0 ? cells[idxGap]  : null,
             pnt      : idxPnt  >= 0 ? (parseInt(cells[idxPnt]) || 0) : 0,
             pcs_slug : pcsSlug,
+            bib      : bib,
+            rider_name: name,
         });
     }
     return rows;
@@ -193,6 +203,23 @@ def build_slug_map() -> dict[str, str]:
             slug = r["source_url"].rstrip("/").split("/rider/")[-1]
             m[slug] = r["id"]
     return m
+
+
+def build_bib_map(race_id: str) -> dict[int, str]:
+    """BIB-nummer → rider_id (fra startliste)"""
+    sl = sb_get("startlists", f"?race_id=eq.{race_id}&select=bib_number,rider_id&bib_number=not.is.null")
+    return {row["bib_number"]: row["rider_id"] for row in sl if row.get("bib_number")}
+
+
+def resolve_rider(row: dict, slug_map: dict, bib_map: dict) -> str | None:
+    """Find rider_id fra PCS-slug eller BIB-nummer."""
+    if row.get("pcs_slug"):
+        rid = slug_map.get(row["pcs_slug"])
+        if rid:
+            return rid
+    if row.get("bib"):
+        return bib_map.get(row["bib"])
+    return None
 
 
 def get_race() -> dict:
@@ -222,32 +249,53 @@ def get_startlist_map(race_id: str) -> dict[str, dict]:
 
 # ---------- scraping -------------------------------------------------------
 
+_COOKIES_ACCEPTED = False
+
+
 async def accept_cookies(page):
+    global _COOKIES_ACCEPTED
+    if _COOKIES_ACCEPTED:
+        return
     try:
-        await page.wait_for_selector("text=Accepter alle", timeout=4000)
+        await page.wait_for_selector("text=Accepter alle", timeout=5000)
         await page.click("text=Accepter alle")
-        await page.wait_for_timeout(800)
+        await page.wait_for_timeout(3000)
+        _COOKIES_ACCEPTED = True
     except Exception:
         pass
+
+
+async def load_page(page, url: str):
+    """Load page og vent til indholdet er klar."""
+    await page.goto(url, wait_until="load", timeout=45000)
+    await page.wait_for_timeout(1500)
+    await accept_cookies(page)
+    await page.wait_for_timeout(3000)
 
 
 async def scrape_stage(page, stage_num: int) -> list[dict]:
     url = f"{PCS_BASE}/stage-{stage_num}"
     print(f"  → {url}")
-    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    await accept_cookies(page)
-    await page.wait_for_timeout(1500)
-    data = await page.evaluate(_EXTRACT_STAGE_JS)
-    print(f"    {len(data['rows'])} ryttere fundet")
-    return data["rows"]
+    await load_page(page, url)
+
+    # Retry op til 3 gange hvis ingen data
+    for attempt in range(3):
+        data = await page.evaluate(_EXTRACT_STAGE_JS)
+        if data["rows"]:
+            print(f"    {len(data['rows'])} ryttere fundet (forsøg {attempt+1})")
+            return data["rows"]
+        if attempt < 2:
+            print(f"    Ingen data endnu, venter 3s... (forsøg {attempt+1})")
+            await page.wait_for_timeout(3000)
+
+    print(f"    0 ryttere fundet (headers: {data.get('headers', [])})")
+    return []
 
 
 async def scrape_classification(page, classif: str) -> list[dict]:
     url = f"{PCS_BASE}/{classif}"
     print(f"  → {url}")
-    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    await accept_cookies(page)
-    await page.wait_for_timeout(1500)
+    await load_page(page, url)
     rows = await page.evaluate(_EXTRACT_CLASSIF_JS, classif)
     print(f"    {len(rows)} ryttere fundet")
     return rows
@@ -261,6 +309,7 @@ def store_stage_results(
     stage_id: str,
     stage_num: int,
     slug_map: dict,
+    bib_map: dict,
     startlist: dict,
 ) -> int:
     today = date.today().isoformat()
@@ -274,10 +323,7 @@ def store_stage_results(
             break
 
     for row in rows:
-        pcs_slug = row.get("pcs_slug")
-        if not pcs_slug:
-            continue
-        rider_id = slug_map.get(pcs_slug)
+        rider_id = resolve_rider(row, slug_map, bib_map)
         if not rider_id:
             continue
 
@@ -315,6 +361,7 @@ def store_gc_from_stage(
     race_id: str,
     stage_num: int,
     slug_map: dict,
+    bib_map: dict,
 ) -> int:
     """Bygger GC-klassement ud fra stage-resultaters GC-kolonne."""
     gc_rows = [r for r in rows if r.get("gc_pos")]
@@ -324,10 +371,7 @@ def store_gc_from_stage(
     leader_time = None
 
     for row in gc_rows:
-        pcs_slug = row.get("pcs_slug")
-        if not pcs_slug:
-            continue
-        rider_id = slug_map.get(pcs_slug)
+        rider_id = resolve_rider(row, slug_map, bib_map)
         if not rider_id:
             continue
 
@@ -356,13 +400,11 @@ def store_classification(
     stage_num: int,
     classif_type: str,
     slug_map: dict,
+    bib_map: dict,
 ) -> int:
     records = []
     for row in rows:
-        pcs_slug = row.get("pcs_slug")
-        if not pcs_slug:
-            continue
-        rider_id = slug_map.get(pcs_slug)
+        rider_id = resolve_rider(row, slug_map, bib_map)
         if not rider_id:
             continue
 
@@ -426,8 +468,10 @@ async def main(stages_to_scrape: list[int], gc_only: bool):
     print(f"Henter etaper: {targets}")
 
     slug_map   = build_slug_map()
+    bib_map    = build_bib_map(race["id"])
     startlist  = get_startlist_map(race["id"])
     latest_stage_rows = []
+    print(f"Slug-map: {len(slug_map)} ryttere, BIB-map: {len(bib_map)} ryttere")
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
@@ -443,10 +487,10 @@ async def main(stages_to_scrape: list[int], gc_only: bool):
                     print("  Ingen data — springer over.")
                     continue
 
-                n = store_stage_results(rows, race["id"], stage["id"], stage_num, slug_map, startlist)
+                n = store_stage_results(rows, race["id"], stage["id"], stage_num, slug_map, bib_map, startlist)
                 print(f"  Gemt {n} etaperesultater")
 
-                gc_n = store_gc_from_stage(rows, race["id"], stage_num, slug_map)
+                gc_n = store_gc_from_stage(rows, race["id"], stage_num, slug_map, bib_map)
                 print(f"  Gemt {gc_n} GC-poster (fra etapeside)")
 
                 latest_stage_rows = rows
@@ -459,7 +503,7 @@ async def main(stages_to_scrape: list[int], gc_only: bool):
                 try:
                     c_rows = await scrape_classification(page, classif)
                     if c_rows:
-                        n = store_classification(c_rows, race["id"], last_stage, ctype, slug_map)
+                        n = store_classification(c_rows, race["id"], last_stage, ctype, slug_map, bib_map)
                         print(f"  Gemt {n} {ctype}-poster")
                 except Exception as e:
                     print(f"  Fejl ved {classif}: {e}")
