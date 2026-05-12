@@ -419,6 +419,18 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
         await browser.close()
 
     if not race_data or (not race_data.get("elevation_image_url") and not race_data.get("pairs")):
+        # PCS har ikke annonceret løbet endnu — gem stadig byer fra hardkodet dict
+        if pcs_slug in ONEDAY_CITIES:
+            start_city, finish_city = ONEDAY_CITIES[pcs_slug]
+            print(f"    Ingen profildata — hardkodet: {start_city} – {finish_city}")
+            return [{
+                "stage_number": 1,
+                "name": f"{start_city} – {finish_city}",
+                "start_location": start_city,
+                "finish_location": finish_city,
+                "source": "pcs",
+                "source_url": url,
+            }]
         print("    Ingen profildata på siden")
         return []
 
@@ -429,6 +441,7 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
             stage_type = PROFILE_TYPE_MAP[cls]
             break
 
+    title_text = race_data.get("title", "")
     info = extract_info(race_data.get("pairs", []))
 
     # Fallback: hardcoded cities (PCS main page never shows departure/arrival for one-day races)
