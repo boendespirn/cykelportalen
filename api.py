@@ -239,6 +239,82 @@ def get_startlist_for_race(slug: str):
     return res.json()
 
 
+@app.get("/races/{slug}/gc")
+def get_gc_for_race(slug: str):
+    race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"
+    race_data = requests.get(race_url, headers=get_headers()).json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+
+    # Seneste etape med GC-data
+    latest_url = (
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=eq.{race_id}&classification_type=eq.gc"
+        f"&select=after_stage_number&order=after_stage_number.desc&limit=1"
+    )
+    latest = requests.get(latest_url, headers=get_headers()).json()
+    if not latest:
+        return []
+    after_stage = latest[0]["after_stage_number"]
+
+    gc_url = (
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=eq.{race_id}&classification_type=eq.gc&after_stage_number=eq.{after_stage}"
+        f"&select=position,time_gap_seconds,riders(name,slug,nationality,speciality,teams(name,slug))"
+        f"&order=position.asc&limit=20"
+    )
+    data = requests.get(gc_url, headers=get_headers()).json()
+    return {"after_stage": after_stage, "standings": data}
+
+
+@app.get("/races/{slug}/classifications/{classif_type}")
+def get_classification(slug: str, classif_type: str):
+    if classif_type not in ("gc", "points", "mountains", "youth"):
+        return {"error": "Ukendt klassement"}
+    race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"
+    race_data = requests.get(race_url, headers=get_headers()).json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+
+    latest_url = (
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=eq.{race_id}&classification_type=eq.{classif_type}"
+        f"&select=after_stage_number&order=after_stage_number.desc&limit=1"
+    )
+    latest = requests.get(latest_url, headers=get_headers()).json()
+    if not latest:
+        return []
+    after_stage = latest[0]["after_stage_number"]
+
+    url = (
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=eq.{race_id}&classification_type=eq.{classif_type}&after_stage_number=eq.{after_stage}"
+        f"&select=position,time_gap_seconds,points,riders(name,slug,nationality)"
+        f"&order=position.asc&limit=20"
+    )
+    data = requests.get(url, headers=get_headers()).json()
+    return {"after_stage": after_stage, "standings": data}
+
+
+@app.get("/races/{slug}/dnfs")
+def get_dnfs_for_race(slug: str):
+    race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"
+    race_data = requests.get(race_url, headers=get_headers()).json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+
+    url = (
+        f"{SUPABASE_URL}/rest/v1/startlists"
+        f"?race_id=eq.{race_id}&status=neq.active"
+        f"&select=status,dnf_stage_number,bib_number,riders(name,slug,nationality),teams(name,slug)"
+        f"&order=dnf_stage_number.asc.nullslast"
+    )
+    return requests.get(url, headers=get_headers()).json()
+
+
 @app.get("/riders/{slug}")
 def get_rider_by_slug(slug: str):
     url = (
