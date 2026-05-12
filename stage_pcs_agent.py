@@ -91,6 +91,32 @@ def sb_upsert(table: str, records: list, conflict: str) -> bool:
 
 
 # PCS-slug → vores DB-slug (når de afviger)
+# Hardcoded start/finish cities for one-day classics (PCS main page never shows departure/arrival)
+ONEDAY_CITIES: dict[str, tuple[str, str]] = {
+    "omloop-het-nieuwsblad":           ("Gent",          "Ninove"),
+    "strade-bianche":                  ("Siena",          "Siena"),
+    "milan-san-remo":                  ("Milano",         "San Remo"),
+    "e3-saxo-bank-classic":            ("Harelbeke",      "Harelbeke"),
+    "ronde-van-brugge":                ("Brugge",         "Brugge"),
+    "gent-wevelgem":                   ("Deinze",         "Wevelgem"),
+    "dwars-door-vlaanderen":           ("Roeselare",      "Waregem"),
+    "tour-of-flanders":                ("Brugge",         "Oudenaarde"),
+    "paris-roubaix":                   ("Compiègne",      "Roubaix"),
+    "amstel-gold-race":                ("Maastricht",     "Valkenburg"),
+    "la-fleche-wallonne":              ("Charleroi",      "Huy"),
+    "liege-bastogne-liege":            ("Liège",          "Liège"),
+    "eschborn-frankfurt":              ("Eschborn",       "Frankfurt am Main"),
+    "il-lombardia":                    ("Como",           "Bergamo"),
+    "donostia-san-sebastian":          ("San Sebastián",  "San Sebastián"),
+    "cyclassics-hamburg":              ("Hamburg",        "Hamburg"),
+    "bretagne-classic":                ("Brest",          "Brest"),
+    "grand-prix-cycliste-de-quebec":   ("Québec City",    "Québec City"),
+    "grand-prix-cycliste-de-montreal": ("Montréal",       "Montréal"),
+    "cadel-evans-great-ocean-road-race": ("Geelong",      "Geelong"),
+    "tour-down-under":                 ("Adelaide",       "Adelaide"),
+    "copenhagen-sprint":               ("Copenhagen",     "Copenhagen"),
+}
+
 PCS_TO_DB_SLUG: dict[str, str] = {
     "vuelta-a-espana":          "la-vuelta-ciclista-a-espana",
     "paris-roubaix":            "paris-roubaix-hauts-de-france",
@@ -367,10 +393,6 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
             const titleEl = document.querySelector('.titleCont, .page-title, h1');
             result.title = titleEl ? titleEl.innerText.trim() : '';
 
-            // Sub-title sometimes has "City › City" format
-            const subTitleEl = document.querySelector('.sub-title, .subtitle, .race-header__sub');
-            result.sub_title = subTitleEl ? subTitleEl.innerText.trim() : '';
-
             const allImgs = [...document.querySelectorAll('img')];
             const profileImg = allImgs.find(img => img.src && img.src.includes('/profiles/'));
             result.elevation_image_url = profileImg ? profileImg.src : null;
@@ -378,33 +400,16 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
             const iconEl = document.querySelector('span.icon.profile');
             result.icon_class = iconEl ? iconEl.className : '';
 
-            // Scan full page text for "City › City" patterns near the title
-            const allText = document.body.innerText;
-            const routeMatch = allText.match(/([A-Z][\\w\\s\\-éèêàùûîôäëïüç]+)\\s*[›»→]\\s*([A-Z][\\w\\s\\-éèêàùûîôäëïüç]+)/);
-            result.route_from_text = routeMatch ? [routeMatch[1].trim(), routeMatch[2].trim()] : null;
-
+            // Global scan — PCS main race page has title/value pairs spread across DOM
             const pairs = [];
-            const allTitleEls = [...document.querySelectorAll('.title')];
-            let infoContainer = null;
-            for (const t of allTitleEls) {
-                const txt = t.innerText.trim();
-                if (txt.includes('Distance') || txt.includes('Departure') || txt.includes('Date:')) {
-                    infoContainer = t.closest('.borderbox, .right, .left, section, article, form')
-                                 || t.parentElement?.parentElement;
-                    break;
-                }
-            }
-            if (infoContainer) {
-                const els = [...infoContainer.querySelectorAll('.title, .value')];
-                let pendingTitle = null;
-                for (const el of els) {
-                    const cls = [...el.classList];
-                    if (cls.includes('title')) {
-                        pendingTitle = el.innerText.trim();
-                    } else if (cls.includes('value') && pendingTitle !== null) {
-                        pairs.push({ title: pendingTitle, value: el.innerText.trim() });
-                        pendingTitle = null;
-                    }
+            const allEls = [...document.querySelectorAll('.title, .value')];
+            let pendingTitle = null;
+            for (const el of allEls) {
+                if (el.classList.contains('title')) {
+                    pendingTitle = el.innerText.trim();
+                } else if (el.classList.contains('value') && pendingTitle !== null) {
+                    pairs.push({ title: pendingTitle, value: el.innerText.trim() });
+                    pendingTitle = null;
                 }
             }
             result.pairs = pairs;
@@ -426,23 +431,12 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
 
     info = extract_info(race_data.get("pairs", []))
 
-    # Fallback 1: sub_title "City › City"
-    title_text = race_data.get("title", "")
-    sub_title = race_data.get("sub_title", "")
+    # Fallback: hardcoded cities (PCS main page never shows departure/arrival for one-day races)
     if not info.get("start_location") or not info.get("finish_location"):
-        for src in [sub_title, title_text]:
-            route_m = re.search(r"(.+?)\s*[›»→]\s*(.+?)(?:\s*\(|$)", src)
-            if route_m:
-                info.setdefault("start_location", route_m.group(1).strip())
-                info.setdefault("finish_location", route_m.group(2).strip())
-                break
-
-    # Fallback 2: route_from_text extracted via JS regex scan
-    if not info.get("start_location") or not info.get("finish_location"):
-        route_pair = race_data.get("route_from_text")
-        if route_pair and len(route_pair) == 2:
-            info.setdefault("start_location", route_pair[0])
-            info.setdefault("finish_location", route_pair[1])
+        if pcs_slug in ONEDAY_CITIES:
+            start_city, finish_city = ONEDAY_CITIES[pcs_slug]
+            info.setdefault("start_location", start_city)
+            info.setdefault("finish_location", finish_city)
 
     if not info.get("distance_km"):
         dist_m = re.search(r"\((\d+(?:\.\d+)?)\s*km\)", title_text)
