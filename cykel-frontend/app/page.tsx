@@ -10,6 +10,8 @@ type Race = {
   end_date: string | null;
   country_code: string | null;
   category: string;
+  startlist_count: number;
+  stage_count: number;
 };
 
 type TodayStage = {
@@ -249,6 +251,8 @@ export default async function Home() {
                 <div className="space-y-1.5">
                   {monthRaces.map((race) => {
                     const days = daysUntil(race.start_date);
+                    const hasStartlist = race.startlist_count > 0;
+                    const hasStages = race.stage_count > 0;
                     return (
                       <Link
                         key={race.slug}
@@ -263,9 +267,21 @@ export default async function Home() {
                           <p className="font-semibold text-slate-100 group-hover:text-emerald-400 transition-colors truncate">
                             {race.name}
                           </p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {formatDate(race.start_date)}
-                          </p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="text-xs text-slate-500">
+                              {formatDate(race.start_date)}
+                            </span>
+                            {hasStartlist && (
+                              <span className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                {race.startlist_count} ryttere
+                              </span>
+                            )}
+                            {hasStages && (
+                              <span className="text-[10px] font-medium text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
+                                {race.stage_count} etaper
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-2 flex-shrink-0">

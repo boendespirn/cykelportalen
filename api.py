@@ -47,10 +47,46 @@ def get_races():
 @app.get("/upcoming-races")
 def get_upcoming_races():
     today = date.today().isoformat()
-    # Løb der ikke er startet endnu (ekskl. igangværende)
-    url = f"{SUPABASE_URL}/rest/v1/races?select=name,slug,start_date,end_date,country_code,category&start_date=gt.{today}&order=start_date.asc"
-    response = requests.get(url, headers=get_headers())
-    return response.json()
+    url = f"{SUPABASE_URL}/rest/v1/races?select=id,name,slug,start_date,end_date,country_code,category&start_date=gt.{today}&order=start_date.asc"
+    races = requests.get(url, headers=get_headers()).json()
+
+    # Hent startlist-count per løb
+    if races:
+        race_ids = [r["id"] for r in races]
+        # Supabase understøtter ikke GROUP BY via REST — hent counts enkeltvis i batch
+        id_list = ",".join(race_ids)
+        sl_url = (
+            f"{SUPABASE_URL}/rest/v1/startlists"
+            f"?race_id=in.({id_list})&status=eq.active"
+            f"&select=race_id"
+        )
+        sl_data = requests.get(sl_url, headers=get_headers()).json()
+        counts: dict[str, int] = {}
+        for row in sl_data:
+            rid = row["race_id"]
+            counts[rid] = counts.get(rid, 0) + 1
+
+        stage_url = (
+            f"{SUPABASE_URL}/rest/v1/stages"
+            f"?race_id=in.({id_list})&select=race_id"
+        )
+        stage_data = requests.get(stage_url, headers=get_headers()).json()
+        stage_counts: dict[str, int] = {}
+        for row in stage_data:
+            rid = row["race_id"]
+            stage_counts[rid] = stage_counts.get(rid, 0) + 1
+
+        result = []
+        for r in races:
+            rid = r["id"]
+            result.append({
+                **{k: v for k, v in r.items() if k != "id"},
+                "startlist_count": counts.get(rid, 0),
+                "stage_count": stage_counts.get(rid, 0),
+            })
+        return result
+
+    return races
 
 
 @app.get("/ongoing-races")

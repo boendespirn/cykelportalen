@@ -101,9 +101,18 @@ def get_race(our_slug: str) -> dict | None:
     return rows[0] if rows else None
 
 
+# PCS-slug → vores DB-slug (når de afviger fra hinanden)
+PCS_TO_DB_SLUG: dict[str, str] = {
+    "vuelta-a-espana":      "la-vuelta-ciclista-a-espana",
+    "paris-roubaix":        "paris-roubaix-hauts-de-france",
+    "gent-wevelgem":        "in-flanders-fields-from-middelkerke-to-wevelgem",
+}
+
+
 def get_or_create_race(pcs_slug: str) -> dict | None:
     """Finder løbet i DB ud fra PCS-slug. Opretter det hvis det ikke findes."""
-    our_slug = f"{pcs_slug}-{YEAR}"
+    db_base = PCS_TO_DB_SLUG.get(pcs_slug, pcs_slug)
+    our_slug = f"{db_base}-{YEAR}"
     race = get_race(our_slug)
     if race:
         return race

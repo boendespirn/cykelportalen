@@ -90,8 +90,17 @@ def sb_upsert(table: str, records: list, conflict: str) -> bool:
     return res.ok
 
 
+# PCS-slug → vores DB-slug (når de afviger)
+PCS_TO_DB_SLUG: dict[str, str] = {
+    "vuelta-a-espana":  "la-vuelta-ciclista-a-espana",
+    "paris-roubaix":    "paris-roubaix-hauts-de-france",
+    "gent-wevelgem":    "in-flanders-fields-from-middelkerke-to-wevelgem",
+}
+
+
 def get_race_id(pcs_slug: str) -> str | None:
-    our_slug = f"{pcs_slug}-{YEAR}"
+    db_base = PCS_TO_DB_SLUG.get(pcs_slug, pcs_slug)
+    our_slug = f"{db_base}-{YEAR}"
     rows = sb_get("races", f"slug=eq.{our_slug}&select=id&limit=1")
     if rows:
         return rows[0]["id"]
