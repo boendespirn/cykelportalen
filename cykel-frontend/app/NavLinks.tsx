@@ -6,6 +6,8 @@ const links = [
   { href: "/", label: "Løb" },
   { href: "/teams", label: "Hold" },
   { href: "/riders", label: "Ryttere" },
+  { href: "/nyheder", label: "Nyheder" },
+  { href: "/kontakt", label: "Kontakt" },
 ];
 
 export default function NavLinks() {

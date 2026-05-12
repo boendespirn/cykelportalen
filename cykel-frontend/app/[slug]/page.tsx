@@ -4,12 +4,14 @@ import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import SpoilerSection from "./SpoilerSection";
 import DnfSection from "./DnfSection";
+import StageMapLoader from "./stage/[n]/StageMapLoader";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type Race = {
   name: string; slug: string; start_date: string; end_date: string | null;
   country_code: string | null; category: string; pcs_url: string | null;
+  race_type: string;
 };
 
 type Stage = {
@@ -93,6 +95,22 @@ async function getDnfs(slug: string): Promise<DnfEntry[]> {
   } catch { return []; }
 }
 
+async function geocodeCity(cityName: string): Promise<[number, number] | null> {
+  if (!cityName) return null;
+  try {
+    const query = cityName.replace(/\(.*\)/, "").trim();
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+      {
+        headers: { "User-Agent": "Cykelportalen/1.0 (jonasb408@gmail.com)" },
+        next: { revalidate: 86400 },
+      }
+    );
+    const data = await res.json();
+    if (data[0]) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  } catch {}
+  return null;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -159,6 +177,77 @@ const SPECIALITY_ICON: Record<string, string> = {
   Classics:        "🏛️",
 };
 
+// ── Shared: Startlist block ────────────────────────────────────────────────
+
+function StartlistBlock({
+  teamGroups, totalRiders, gcData,
+}: {
+  teamGroups: Map<string, StartlistEntry[]>;
+  totalRiders: number;
+  gcData: { after_stage: number; standings: GCEntry[] } | null;
+}) {
+  return (
+    <div className="space-y-4">
+      {[...teamGroups.entries()].map(([teamName, riders]) => {
+        const team = riders[0]?.teams;
+        const gcCaptain = riders.find(r => r.is_gc_captain);
+        const sprintCaptain = riders.find(r => r.is_sprint_captain);
+        return (
+          <div key={teamName} className="rounded-xl border border-slate-800 overflow-hidden">
+            <div className="bg-slate-900/80 px-4 py-3 flex items-center justify-between">
+              <Link href={team ? `/teams/${team.slug}` : "#"} className="flex items-center gap-2 hover:text-emerald-400 transition-colors">
+                {team?.country_code && <span className="text-base">{flagEmoji(team.country_code)}</span>}
+                <span className="font-semibold text-slate-200 text-sm">{teamName}</span>
+              </Link>
+              <span className="text-xs text-slate-600">{riders.length} ryttere</span>
+            </div>
+            {(gcCaptain || sprintCaptain) && (
+              <div className="px-4 py-2 bg-emerald-500/5 border-b border-slate-800 flex flex-wrap gap-2">
+                {gcCaptain?.riders && (
+                  <Link href={`/riders/${gcCaptain.riders.slug}`}
+                    className="flex items-center gap-1.5 text-xs bg-emerald-500/15 text-emerald-300 px-2.5 py-1 rounded-full hover:bg-emerald-500/25 transition-colors">
+                    <span>🏆</span><span>{gcCaptain.riders.name}</span><span className="text-emerald-500 font-medium">GC</span>
+                  </Link>
+                )}
+                {sprintCaptain?.riders && sprintCaptain.riders.slug !== gcCaptain?.riders?.slug && (
+                  <Link href={`/riders/${sprintCaptain.riders.slug}`}
+                    className="flex items-center gap-1.5 text-xs bg-blue-500/15 text-blue-300 px-2.5 py-1 rounded-full hover:bg-blue-500/25 transition-colors">
+                    <span>⚡</span><span>{sprintCaptain.riders.name}</span><span className="text-blue-400 font-medium">Sprint</span>
+                  </Link>
+                )}
+              </div>
+            )}
+            <div className="divide-y divide-slate-800/40">
+              {riders.map((entry) => {
+                const rider = entry.riders;
+                if (!rider) return null;
+                const isLeader = entry.is_gc_captain || entry.is_sprint_captain;
+                const gcEntry = gcData?.standings.find(g => g.riders?.slug === rider.slug);
+                return (
+                  <Link key={rider.slug} href={`/riders/${rider.slug}`}
+                    className={`flex items-center gap-3 px-4 py-2.5 hover:bg-slate-900/60 transition-colors ${isLeader ? "bg-slate-900/30" : ""}`}>
+                    {entry.bib_number && <span className="text-xs font-mono text-slate-700 w-6 text-right flex-shrink-0">{entry.bib_number}</span>}
+                    <span className="text-sm flex-shrink-0 w-5 text-center">{flagEmoji(rider.nationality)}</span>
+                    <span className={`flex-1 text-sm ${isLeader ? "text-slate-100 font-medium" : "text-slate-300"}`}>{rider.name}</span>
+                    <div className="flex gap-1 flex-shrink-0">
+                      {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-medium">GC</span>}
+                      {entry.is_sprint_captain && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">Sprint</span>}
+                      {gcEntry?.position != null && <span className="text-xs font-mono text-pink-400">#{gcEntry.position}</span>}
+                    </div>
+                    {rider.date_of_birth && (
+                      <span className="text-xs text-slate-600 flex-shrink-0 hidden sm:block">{calculateAge(rider.date_of_birth)} år</span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default async function RacePage(props: { params: Promise<{ slug: string }> }) {
@@ -187,21 +276,219 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   }
 
   const isOngoing   = race.start_date <= today && (!race.end_date || race.end_date >= today);
+  const isOneDay    = race.race_type === "oneday";
+  const singleStage = isOneDay && stages.length > 0 ? stages[0] : null;
   const completedStages = stages.filter((s) => stageStatus(s.date, today) === "completed");
   const todayStage  = stages.find((s) => stageStatus(s.date, today) === "today") ?? null;
-  // Hero: vis i dag-etape, ellers næste kommende etape (bruges øverst på siden)
   const heroStage   = todayStage ?? stages.find((s) => stageStatus(s.date, today) === "upcoming") ?? null;
   const teamGroups  = groupByTeam(startlist.filter(e => e.status === "active"));
   const totalRiders = startlist.filter(e => e.status === "active").length;
 
-  // Udvalgte ryttere
   const danishRiders = startlist.filter((e) => e.riders?.nationality === "DK" && e.status === "active");
   const gcFavorites  = startlist.filter((e) => e.is_gc_captain && e.status === "active").slice(0, 8);
-  const topUCIRiders = startlist
-    .filter((e) => e.status === "active" && !e.is_gc_captain && e.riders?.speciality)
-    .slice(0, 6);
+  const hasResults   = gcData && gcData.standings.length > 0;
 
-  const hasResults = gcData && gcData.standings.length > 0;
+  // For one-day races: geocode start/finish if we have a stage
+  let startCoords: [number, number] | null = null;
+  let finishCoords: [number, number] | null = null;
+  if (isOneDay && singleStage?.start_location && singleStage?.finish_location) {
+    [startCoords, finishCoords] = await Promise.all([
+      geocodeCity(singleStage.start_location),
+      geocodeCity(singleStage.finish_location),
+    ]);
+  }
+
+  // ── Shared header ──────────────────────────────────────────────────────
+  const header = (
+    <header className="mb-10">
+      <div className="flex items-center gap-3 mb-4">
+        {race.country_code && <span className="text-4xl">{flagEmoji(race.country_code)}</span>}
+        <span className="text-xs uppercase tracking-[0.2em] text-emerald-400">{race.category}</span>
+        {isOngoing && (
+          <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+            </span>
+            LIVE
+          </span>
+        )}
+      </div>
+      <h1 className="font-display text-5xl sm:text-7xl tracking-wide leading-none text-white mb-3">
+        {race.name}
+      </h1>
+      <p className="text-slate-400 text-sm">
+        {formatDate(race.start_date)}
+        {race.end_date && race.end_date !== race.start_date && ` — ${formatDate(race.end_date)}`}
+      </p>
+      {race.pcs_url && (
+        <a href={race.pcs_url} target="_blank" rel="noopener noreferrer"
+          className="mt-2 inline-block text-xs text-slate-600 hover:text-emerald-400 transition-colors">
+          ProCyclingStats →
+        </a>
+      )}
+    </header>
+  );
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ONE-DAY RACE LAYOUT
+  // ══════════════════════════════════════════════════════════════════════
+  if (isOneDay) {
+    const typeConfig = singleStage?.stage_type ? STAGE_TYPE_CONFIG[singleStage.stage_type] : null;
+
+    return (
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-10">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Alle løb
+        </Link>
+
+        {header}
+
+        {/* Race stats bar */}
+        {singleStage && (
+          <div className="flex flex-wrap items-center gap-4 mb-6 pb-6 border-b border-slate-800">
+            {typeConfig && (
+              <span className={`text-sm font-medium ${typeConfig.color}`}>{typeConfig.label}</span>
+            )}
+            {singleStage.distance_km && (
+              <span className="text-sm font-mono text-slate-400">{singleStage.distance_km} km</span>
+            )}
+            {singleStage.elevation_gain_m && (
+              <span className={`text-sm font-mono ${typeConfig?.color ?? "text-slate-400"}`}>
+                ↑ {singleStage.elevation_gain_m.toLocaleString("da-DK")} m
+              </span>
+            )}
+            {singleStage.start_location && singleStage.finish_location && (
+              <span className="text-sm text-slate-400">
+                {singleStage.start_location}
+                <svg className="inline w-4 h-4 mx-1.5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+                <span className="font-medium text-slate-200">{singleStage.finish_location}</span>
+              </span>
+            )}
+            {singleStage.pcs_stage_url && (
+              <a href={singleStage.pcs_stage_url} target="_blank" rel="noopener noreferrer"
+                className="ml-auto text-xs text-slate-600 hover:text-emerald-400 transition-colors">
+                PCS →
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Elevation profile — full width, prominent */}
+        {singleStage?.elevation_image_url && (
+          <div className="mb-8 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={singleStage.elevation_image_url}
+              alt="Højdeprofil"
+              className="w-full"
+            />
+          </div>
+        )}
+
+        {/* Route map + startlist side by side */}
+        <div className={`grid gap-8 mb-10 ${startCoords && finishCoords ? "lg:grid-cols-[1fr_420px]" : ""}`}>
+
+          {/* Map */}
+          {startCoords && finishCoords && singleStage && (
+            <div className="rounded-xl overflow-hidden border border-slate-800" style={{ minHeight: "320px" }}>
+              <StageMapLoader
+                start={startCoords}
+                finish={finishCoords}
+                startName={singleStage.start_location ?? "Start"}
+                finishName={singleStage.finish_location ?? "Mål"}
+              />
+            </div>
+          )}
+
+          {/* Startlist */}
+          <section>
+            <div className="flex items-baseline justify-between mb-5">
+              <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase">
+                Startliste
+              </h2>
+              {totalRiders > 0 && (
+                <span className="text-slate-700 text-sm font-mono">{totalRiders} ryttere</span>
+              )}
+            </div>
+
+            {startlist.length === 0 ? (
+              <div className="rounded-xl border border-slate-800 p-10 text-center text-slate-600 text-sm">
+                Startliste ikke tilgængelig endnu.
+              </div>
+            ) : (
+              <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} />
+            )}
+          </section>
+        </div>
+
+        {/* Danish riders & GC favorites */}
+        {(danishRiders.length > 0 || gcFavorites.length > 0) && (
+          <div className="grid gap-6 sm:grid-cols-2 mb-10">
+            {gcFavorites.length > 0 && (
+              <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+                <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 mb-4">🏆 Favoritter</h2>
+                <div className="space-y-2">
+                  {gcFavorites.map((entry) => {
+                    const r = entry.riders;
+                    if (!r) return null;
+                    return (
+                      <Link key={r.slug} href={`/riders/${r.slug}`}
+                        className="flex items-center gap-2.5 hover:bg-slate-800/50 rounded-lg px-2 py-1.5 transition-colors -mx-2">
+                        <span className="w-5 text-center text-sm flex-shrink-0">{flagEmoji(r.nationality)}</span>
+                        <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
+                        {r.speciality && <span className="text-xs text-slate-600">{SPECIALITY_ICON[r.speciality] ?? ""}</span>}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+            {danishRiders.length > 0 && (
+              <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+                <h2 className="text-xs uppercase tracking-[0.2em] text-red-400 mb-4">🇩🇰 Danskere</h2>
+                <div className="space-y-2">
+                  {danishRiders.map((entry) => {
+                    const r = entry.riders;
+                    if (!r) return null;
+                    return (
+                      <Link key={r.slug} href={`/riders/${r.slug}`}
+                        className="flex items-center gap-2.5 hover:bg-slate-800/50 rounded-lg px-2 py-1.5 transition-colors -mx-2">
+                        <span className="text-sm">🇩🇰</span>
+                        <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
+                        {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">Favorit</span>}
+                        {r.speciality && <span className="text-xs text-slate-600">{SPECIALITY_ICON[r.speciality] ?? ""}</span>}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+
+        {dnfs.length > 0 && <DnfSection entries={dnfs} />}
+        {hasResults && (
+          <SpoilerSection
+            afterStage={gcData!.after_stage}
+            gcStandings={gcData!.standings}
+            pointsLeader={pointsLeader}
+            mountainsLeader={mountainsLeader}
+            youthLeader={youthLeader}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // STAGE RACE LAYOUT (unchanged)
+  // ══════════════════════════════════════════════════════════════════════
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
@@ -212,35 +499,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         Alle løb
       </Link>
 
-      {/* ── Header ── */}
-      <header className="mb-10">
-        <div className="flex items-center gap-3 mb-4">
-          {race.country_code && <span className="text-4xl">{flagEmoji(race.country_code)}</span>}
-          <span className="text-xs uppercase tracking-[0.2em] text-emerald-400">{race.category}</span>
-          {isOngoing && (
-            <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-              </span>
-              LIVE
-            </span>
-          )}
-        </div>
-        <h1 className="font-display text-5xl sm:text-7xl tracking-wide leading-none text-white mb-3">
-          {race.name}
-        </h1>
-        <p className="text-slate-400 text-sm">
-          {formatDate(race.start_date)}
-          {race.end_date && race.end_date !== race.start_date && ` — ${formatDate(race.end_date)}`}
-        </p>
-        {race.pcs_url && (
-          <a href={race.pcs_url} target="_blank" rel="noopener noreferrer"
-            className="mt-2 inline-block text-xs text-slate-600 hover:text-emerald-400 transition-colors">
-            ProCyclingStats →
-          </a>
-        )}
-      </header>
+      {header}
 
       {/* ── Live status strip ── */}
       {isOngoing && stages.length > 0 && (
@@ -269,11 +528,10 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         </div>
       )}
 
-      {/* ── Hero: dagens / næste etapes højdeprofil ── */}
+      {/* ── Hero elevation profile ── */}
       {isOngoing && heroStage?.elevation_image_url && (
         <Link href={`/${race.slug}/stage/${heroStage.stage_number}`} className="block mb-8 group">
           <div className="rounded-2xl border border-slate-800 overflow-hidden hover:border-emerald-500/30 transition-colors">
-            {/* Label */}
             <div className="flex items-center gap-3 px-5 pt-4 pb-3">
               {todayStage && todayStage.stage_number === heroStage.stage_number ? (
                 <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/15 px-2.5 py-1 rounded-full">I dag</span>
@@ -292,16 +550,8 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 <span className="text-xs font-mono text-slate-600 ml-auto">{heroStage.distance_km} km</span>
               )}
             </div>
-
-            {/* Højdeprofil — fuld bredde, ingen crop */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={heroStage.elevation_image_url}
-              alt={`Højdeprofil etape ${heroStage.stage_number}`}
-              className="w-full"
-            />
-
-            {/* Start → Mål */}
+            <img src={heroStage.elevation_image_url} alt={`Højdeprofil etape ${heroStage.stage_number}`} className="w-full" />
             {heroStage.start_location && heroStage.finish_location && (
               <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-800">
                 <span className="text-sm text-slate-400">{heroStage.start_location}</span>
@@ -320,7 +570,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         </Link>
       )}
 
-      {/* ── Spoiler-sektion (GC + trøjer) ── */}
+      {/* ── Spoiler-sektion ── */}
       {hasResults && (
         <SpoilerSection
           afterStage={gcData!.after_stage}
@@ -334,8 +584,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       {/* ── Udvalgte ryttere ── */}
       {(danishRiders.length > 0 || gcFavorites.length > 0) && (
         <div className="grid gap-6 sm:grid-cols-2 mb-10">
-
-          {/* GC-favoritter */}
           {gcFavorites.length > 0 && (
             <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
               <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 mb-4">🏆 GC-favoritter</h2>
@@ -352,17 +600,13 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                       {gcEntry && gcEntry.position != null && (
                         <span className="text-xs font-mono text-pink-400">#{gcEntry.position}</span>
                       )}
-                      {r.speciality && (
-                        <span className="text-xs text-slate-600">{SPECIALITY_ICON[r.speciality] ?? ""}</span>
-                      )}
+                      {r.speciality && <span className="text-xs text-slate-600">{SPECIALITY_ICON[r.speciality] ?? ""}</span>}
                     </Link>
                   );
                 })}
               </div>
             </section>
           )}
-
-          {/* Danske ryttere */}
           {danishRiders.length > 0 && (
             <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
               <h2 className="text-xs uppercase tracking-[0.2em] text-red-400 mb-4">🇩🇰 Danskere i løbet</h2>
@@ -376,9 +620,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                       className="flex items-center gap-2.5 hover:bg-slate-800/50 rounded-lg px-2 py-1.5 transition-colors -mx-2">
                       <span className="text-sm">🇩🇰</span>
                       <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
-                      {gcEntry && gcEntry.position != null && (
-                        <span className="text-xs font-mono text-pink-400">#{gcEntry.position}</span>
-                      )}
+                      {gcEntry && gcEntry.position != null && <span className="text-xs font-mono text-pink-400">#{gcEntry.position}</span>}
                       {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">GC</span>}
                       {entry.is_sprint_captain && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Sprint</span>}
                       {r.speciality && !entry.is_gc_captain && !entry.is_sprint_captain && (
@@ -393,7 +635,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         </div>
       )}
 
-      {/* ── Udgåede ryttere ── */}
       {dnfs.length > 0 && <DnfSection entries={dnfs} />}
 
       {/* ── Stats bar ── */}
@@ -411,68 +652,12 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase mb-5">
             Startliste {totalRiders > 0 && <span className="text-slate-700">({totalRiders})</span>}
           </h2>
-
           {startlist.length === 0 ? (
             <div className="rounded-xl border border-slate-800 p-10 text-center text-slate-600 text-sm">
               Startliste ikke tilgængelig endnu.
             </div>
           ) : (
-            <div className="space-y-4">
-              {[...teamGroups.entries()].map(([teamName, riders]) => {
-                const team = riders[0]?.teams;
-                const gcCaptain = riders.find(r => r.is_gc_captain);
-                const sprintCaptain = riders.find(r => r.is_sprint_captain);
-                return (
-                  <div key={teamName} className="rounded-xl border border-slate-800 overflow-hidden">
-                    <div className="bg-slate-900/80 px-4 py-3 flex items-center justify-between">
-                      <Link href={team ? `/teams/${team.slug}` : "#"} className="flex items-center gap-2 hover:text-emerald-400 transition-colors">
-                        {team?.country_code && <span className="text-base">{flagEmoji(team.country_code)}</span>}
-                        <span className="font-semibold text-slate-200 text-sm">{teamName}</span>
-                      </Link>
-                      <span className="text-xs text-slate-600">{riders.length} ryttere</span>
-                    </div>
-                    {(gcCaptain || sprintCaptain) && (
-                      <div className="px-4 py-2 bg-emerald-500/5 border-b border-slate-800 flex flex-wrap gap-2">
-                        {gcCaptain?.riders && (
-                          <Link href={`/riders/${gcCaptain.riders.slug}`}
-                            className="flex items-center gap-1.5 text-xs bg-emerald-500/15 text-emerald-300 px-2.5 py-1 rounded-full hover:bg-emerald-500/25 transition-colors">
-                            <span>🏆</span><span>{gcCaptain.riders.name}</span><span className="text-emerald-500 font-medium">GC</span>
-                          </Link>
-                        )}
-                        {sprintCaptain?.riders && sprintCaptain.riders.slug !== gcCaptain?.riders?.slug && (
-                          <Link href={`/riders/${sprintCaptain.riders.slug}`}
-                            className="flex items-center gap-1.5 text-xs bg-blue-500/15 text-blue-300 px-2.5 py-1 rounded-full hover:bg-blue-500/25 transition-colors">
-                            <span>⚡</span><span>{sprintCaptain.riders.name}</span><span className="text-blue-400 font-medium">Sprint</span>
-                          </Link>
-                        )}
-                      </div>
-                    )}
-                    <div className="divide-y divide-slate-800/40">
-                      {riders.map((entry) => {
-                        const rider = entry.riders;
-                        if (!rider) return null;
-                        const isLeader = entry.is_gc_captain || entry.is_sprint_captain;
-                        return (
-                          <Link key={rider.slug} href={`/riders/${rider.slug}`}
-                            className={`flex items-center gap-3 px-4 py-2.5 hover:bg-slate-900/60 transition-colors ${isLeader ? "bg-slate-900/30" : ""}`}>
-                            {entry.bib_number && <span className="text-xs font-mono text-slate-700 w-6 text-right flex-shrink-0">{entry.bib_number}</span>}
-                            <span className="text-sm flex-shrink-0 w-5 text-center">{flagEmoji(rider.nationality)}</span>
-                            <span className={`flex-1 text-sm ${isLeader ? "text-slate-100 font-medium" : "text-slate-300"}`}>{rider.name}</span>
-                            <div className="flex gap-1 flex-shrink-0">
-                              {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-medium">GC</span>}
-                              {entry.is_sprint_captain && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">Sprint</span>}
-                            </div>
-                            {rider.date_of_birth && (
-                              <span className="text-xs text-slate-600 flex-shrink-0 hidden sm:block">{calculateAge(rider.date_of_birth)} år</span>
-                            )}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} />
           )}
         </section>
 
@@ -481,7 +666,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase mb-5">
             Etaper {stages.length > 0 && <span className="text-slate-700">({stages.length})</span>}
           </h2>
-
           {stages.length === 0 ? (
             <div className="rounded-xl border border-slate-800 p-8 text-center text-slate-600 text-sm">Etapedata ikke tilgængelig endnu.</div>
           ) : (
@@ -546,7 +730,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           )}
         </aside>
       </div>
-
     </div>
   );
 }

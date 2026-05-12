@@ -366,3 +366,30 @@ def get_rider_by_slug(slug: str):
         return {"error": "Rytter ikke fundet"}
 
     return data[0]
+
+
+# --- News ---
+
+@app.get("/news")
+def get_news(advertorial: bool = False, limit: int = 20, offset: int = 0):
+    url = (
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?is_advertorial=eq.{str(advertorial).lower()}"
+        f"&select=id,slug,title,excerpt,category,author,image_url,published_at,race_id,races(name,slug)"
+        f"&order=published_at.desc"
+        f"&limit={limit}&offset={offset}"
+    )
+    return requests.get(url, headers=get_headers()).json()
+
+
+@app.get("/news/{slug}")
+def get_news_article(slug: str):
+    url = (
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?slug=eq.{slug}&limit=1"
+        f"&select=*,races(name,slug)"
+    )
+    data = requests.get(url, headers=get_headers()).json()
+    if not data:
+        return {"error": "Artikel ikke fundet"}
+    return data[0]
