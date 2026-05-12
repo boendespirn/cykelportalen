@@ -27,7 +27,7 @@ type OngoingRace = Race & {
 
 async function getOngoingRaces(): Promise<OngoingRace[]> {
   try {
-    const res = await fetch("${API_BASE}/ongoing-races", { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/ongoing-races`, { cache: "no-store" });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -37,7 +37,7 @@ async function getOngoingRaces(): Promise<OngoingRace[]> {
 
 async function getUpcomingRaces(): Promise<Race[]> {
   try {
-    const res = await fetch("${API_BASE}/upcoming-races", { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/upcoming-races`, { cache: "no-store" });
     if (!res.ok) return [];
     return res.json();
   } catch {

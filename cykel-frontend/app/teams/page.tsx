@@ -11,7 +11,7 @@ type Team = {
 
 async function getTeams(): Promise<Team[]> {
   try {
-    const res = await fetch("${API_BASE}/teams", { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/teams`, { cache: "no-store" });
     if (!res.ok) return [];
     return res.json();
   } catch {

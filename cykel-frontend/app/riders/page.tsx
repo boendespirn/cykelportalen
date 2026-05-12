@@ -12,7 +12,7 @@ type Rider = {
 
 async function getRiders(): Promise<Rider[]> {
   try {
-    const res = await fetch("${API_BASE}/riders", { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/riders`, { cache: "no-store" });
     if (!res.ok) return [];
     return res.json();
   } catch {
