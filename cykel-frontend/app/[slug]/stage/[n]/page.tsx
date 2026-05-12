@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
 import { API_BASE } from "@/lib/api";
