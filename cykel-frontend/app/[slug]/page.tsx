@@ -188,6 +188,8 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const isOngoing   = race.start_date <= today && (!race.end_date || race.end_date >= today);
   const completedStages = stages.filter((s) => stageStatus(s.date, today) === "completed");
   const todayStage  = stages.find((s) => stageStatus(s.date, today) === "today") ?? null;
+  // Hero: vis i dag-etape, ellers næste kommende etape (bruges øverst på siden)
+  const heroStage   = todayStage ?? stages.find((s) => stageStatus(s.date, today) === "upcoming") ?? null;
   const teamGroups  = groupByTeam(startlist.filter(e => e.status === "active"));
   const totalRiders = startlist.filter(e => e.status === "active").length;
 
@@ -264,6 +266,57 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Hero: dagens / næste etapes højdeprofil ── */}
+      {isOngoing && heroStage?.elevation_image_url && (
+        <Link href={`/${race.slug}/stage/${heroStage.stage_number}`} className="block mb-8 group">
+          <div className="rounded-2xl border border-slate-800 overflow-hidden hover:border-emerald-500/30 transition-colors">
+            {/* Label */}
+            <div className="flex items-center gap-3 px-5 pt-4 pb-3">
+              {todayStage && todayStage.stage_number === heroStage.stage_number ? (
+                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/15 px-2.5 py-1 rounded-full">I dag</span>
+              ) : (
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 bg-slate-800 px-2.5 py-1 rounded-full">Næste etape</span>
+              )}
+              <span className="text-sm text-slate-400">
+                Etape {heroStage.stage_number}
+                {heroStage.stage_type && (
+                  <span className={`ml-2 ${STAGE_TYPE_CONFIG[heroStage.stage_type]?.color ?? "text-slate-400"}`}>
+                    · {STAGE_TYPE_CONFIG[heroStage.stage_type]?.label}
+                  </span>
+                )}
+              </span>
+              {heroStage.distance_km && (
+                <span className="text-xs font-mono text-slate-600 ml-auto">{heroStage.distance_km} km</span>
+              )}
+            </div>
+
+            {/* Højdeprofil — fuld bredde, ingen crop */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={heroStage.elevation_image_url}
+              alt={`Højdeprofil etape ${heroStage.stage_number}`}
+              className="w-full"
+            />
+
+            {/* Start → Mål */}
+            {heroStage.start_location && heroStage.finish_location && (
+              <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-800">
+                <span className="text-sm text-slate-400">{heroStage.start_location}</span>
+                <svg className="w-4 h-4 text-slate-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+                <span className="text-sm font-semibold text-slate-200 group-hover:text-emerald-400 transition-colors">
+                  {heroStage.finish_location}
+                </span>
+                {heroStage.elevation_gain_m && (
+                  <span className="ml-auto text-xs font-mono text-red-400">↑ {heroStage.elevation_gain_m.toLocaleString("da-DK")} m</span>
+                )}
+              </div>
+            )}
+          </div>
+        </Link>
       )}
 
       {/* ── Spoiler-sektion (GC + trøjer) ── */}
@@ -447,7 +500,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                       {stage.elevation_image_url && (
                         <div className={`w-full bg-slate-950 border-b border-slate-800/60 relative ${isCompleted ? "opacity-50" : ""}`}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={stage.elevation_image_url} alt="" className="w-full h-16 object-cover object-bottom" />
+                          <img src={stage.elevation_image_url} alt="" className="w-full h-28 object-cover" />
                           {isCompleted && (
                             <div className="absolute inset-0 flex items-center justify-center">
                               <svg className="w-5 h-5 text-emerald-500 drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
