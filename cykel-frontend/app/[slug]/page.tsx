@@ -93,6 +93,21 @@ async function getDnfs(slug: string): Promise<DnfEntry[]> {
   } catch { return []; }
 }
 
+type NewsArticle = {
+  title: string;
+  url: string;
+  source: string | null;
+  summary: string | null;
+  published_at: string | null;
+};
+
+async function getNews(slug: string): Promise<NewsArticle[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/news`, { cache: "no-store" });
+    return res.ok ? res.json() : [];
+  } catch { return []; }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function flagEmoji(code: string | null): string {
@@ -164,7 +179,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const { slug } = await props.params;
   const today = getToday();
 
-  const [race, stages, startlist, gcData, pointsLeader, mountainsLeader, youthLeader, dnfs] =
+  const [race, stages, startlist, gcData, pointsLeader, mountainsLeader, youthLeader, dnfs, news] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -174,6 +189,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getClassification(slug, "mountains"),
       getClassification(slug, "youth"),
       getDnfs(slug),
+      getNews(slug),
     ]);
 
   if (!race) {
@@ -545,6 +561,45 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           )}
         </aside>
       </div>
+
+      {/* ── Nyheder ── */}
+      {news.length > 0 && (
+        <section className="mt-12">
+          <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase mb-5">
+            Nyheder
+          </h2>
+          <div className="space-y-2">
+            {news.map((article, i) => (
+              <a
+                key={i}
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-4 rounded-xl border border-slate-800 bg-slate-900/40 px-5 py-4 hover:border-slate-700 hover:bg-slate-900/70 transition-colors group"
+              >
+                {article.source && (
+                  <span className="flex-shrink-0 mt-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-800 px-2 py-0.5 rounded whitespace-nowrap">
+                    {article.source}
+                  </span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-200 group-hover:text-emerald-400 transition-colors leading-snug">
+                    {article.title}
+                  </p>
+                  {article.summary && (
+                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">{article.summary}</p>
+                  )}
+                </div>
+                <span className="flex-shrink-0 text-xs text-slate-600 mt-0.5 whitespace-nowrap">
+                  {article.published_at
+                    ? new Date(article.published_at).toLocaleDateString("da-DK", { day: "numeric", month: "short" })
+                    : ""}
+                </span>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

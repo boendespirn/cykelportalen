@@ -315,6 +315,23 @@ def get_dnfs_for_race(slug: str):
     return requests.get(url, headers=get_headers()).json()
 
 
+@app.get("/races/{slug}/news")
+def get_news_for_race(slug: str):
+    race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"
+    race_data = requests.get(race_url, headers=get_headers()).json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+
+    url = (
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?race_id=eq.{race_id}"
+        f"&select=title,url,source,summary,published_at"
+        f"&order=published_at.desc&limit=10"
+    )
+    return requests.get(url, headers=get_headers()).json()
+
+
 @app.get("/riders/{slug}")
 def get_rider_by_slug(slug: str):
     url = (
