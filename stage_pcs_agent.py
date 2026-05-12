@@ -103,7 +103,10 @@ PCS_TO_DB_SLUG: dict[str, str] = {
     "cadel-evans-great-ocean-road-race": "mapei-cadel-evans-great-ocean-road-race-men",
     "tour-down-under":          "santos-tour-down-under",
     "milan-san-remo":           "milano-sanremo",
-    "tour-auvergne-rhone-alpes": "criterium-du-dauphine",
+    "tour-auvergne-rhone-alpes":  "criterium-du-dauphine",
+    "dwars-door-vlaanderen":      "dwars-door-vlaanderen-a-travers-la-flandre",
+    "e3-saxo-bank-classic":       "e3-saxo-classic",
+    "ronde-van-brugge":           "ronde-van-brugge-tour-of-bruges",
 }
 
 
@@ -364,12 +367,21 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
             const titleEl = document.querySelector('.titleCont, .page-title, h1');
             result.title = titleEl ? titleEl.innerText.trim() : '';
 
+            // Sub-title sometimes has "City › City" format
+            const subTitleEl = document.querySelector('.sub-title, .subtitle, .race-header__sub');
+            result.sub_title = subTitleEl ? subTitleEl.innerText.trim() : '';
+
             const allImgs = [...document.querySelectorAll('img')];
             const profileImg = allImgs.find(img => img.src && img.src.includes('/profiles/'));
             result.elevation_image_url = profileImg ? profileImg.src : null;
 
             const iconEl = document.querySelector('span.icon.profile');
             result.icon_class = iconEl ? iconEl.className : '';
+
+            // Scan full page text for "City › City" patterns near the title
+            const allText = document.body.innerText;
+            const routeMatch = allText.match(/([A-Z][\\w\\s\\-éèêàùûîôäëïüç]+)\\s*[›»→]\\s*([A-Z][\\w\\s\\-éèêàùûîôäëïüç]+)/);
+            result.route_from_text = routeMatch ? [routeMatch[1].trim(), routeMatch[2].trim()] : null;
 
             const pairs = [];
             const allTitleEls = [...document.querySelectorAll('.title')];
@@ -414,13 +426,24 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
 
     info = extract_info(race_data.get("pairs", []))
 
-    # Fallback: parse titel "Race Name | City › City (147km)"
+    # Fallback 1: sub_title "City › City"
     title_text = race_data.get("title", "")
+    sub_title = race_data.get("sub_title", "")
     if not info.get("start_location") or not info.get("finish_location"):
-        route_m = re.search(r"[»›|]\s*(.+?)\s*[›»]\s*(.+?)\s*[\(\|]", title_text)
-        if route_m:
-            info.setdefault("start_location", route_m.group(1).strip())
-            info.setdefault("finish_location", route_m.group(2).strip())
+        for src in [sub_title, title_text]:
+            route_m = re.search(r"(.+?)\s*[›»→]\s*(.+?)(?:\s*\(|$)", src)
+            if route_m:
+                info.setdefault("start_location", route_m.group(1).strip())
+                info.setdefault("finish_location", route_m.group(2).strip())
+                break
+
+    # Fallback 2: route_from_text extracted via JS regex scan
+    if not info.get("start_location") or not info.get("finish_location"):
+        route_pair = race_data.get("route_from_text")
+        if route_pair and len(route_pair) == 2:
+            info.setdefault("start_location", route_pair[0])
+            info.setdefault("finish_location", route_pair[1])
+
     if not info.get("distance_km"):
         dist_m = re.search(r"\((\d+(?:\.\d+)?)\s*km\)", title_text)
         if dist_m:

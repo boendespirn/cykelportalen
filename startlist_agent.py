@@ -114,7 +114,10 @@ PCS_TO_DB_SLUG: dict[str, str] = {
     "cadel-evans-great-ocean-road-race": "mapei-cadel-evans-great-ocean-road-race-men",
     "tour-down-under":          "santos-tour-down-under",
     "milan-san-remo":           "milano-sanremo",
-    "tour-auvergne-rhone-alpes": "criterium-du-dauphine",
+    "tour-auvergne-rhone-alpes":  "criterium-du-dauphine",
+    "dwars-door-vlaanderen":      "dwars-door-vlaanderen-a-travers-la-flandre",
+    "e3-saxo-bank-classic":       "e3-saxo-classic",
+    "ronde-van-brugge":           "ronde-van-brugge-tour-of-bruges",
 }
 
 
