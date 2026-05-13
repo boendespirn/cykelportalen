@@ -78,7 +78,7 @@ async function geocodeCity(
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
       {
-        headers: { "User-Agent": "Cykelportalen/1.0 (jonasb408@gmail.com)" },
+        headers: { "User-Agent": "Klassementet/1.0 (jonasb408@gmail.com)" },
         next: { revalidate: 86400 }, // Cache 24 h
       }
     );

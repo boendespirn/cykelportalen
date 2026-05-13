@@ -43,7 +43,7 @@ export default function KontaktPage() {
           Kontakt
         </h1>
         <p className="mt-5 text-slate-400 text-sm max-w-sm leading-relaxed">
-          Interesseret i at annoncere, publicere indhold eller samarbejde med Cykelportalen?
+          Interesseret i at annoncere, publicere indhold eller samarbejde med Klassementet?
           Udfyld formularen og vi vender tilbage hurtigst muligt.
         </p>
       </header>
@@ -163,7 +163,7 @@ export default function KontaktPage() {
 
           <p className="text-xs text-slate-700 text-center">
             Formularen aktiveres ved domæne-lancering. Vi kan kontaktes på{" "}
-            <span className="text-slate-600">kontakt@cykelportalen.dk</span> i mellemtiden.
+            <span className="text-slate-600">kontakt@klassementet.dk</span> i mellemtiden.
           </p>
         </form>
       )}

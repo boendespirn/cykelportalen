@@ -85,7 +85,7 @@ export default async function AdvertorialPage(props: { params: Promise<{ slug: s
       />
 
       <div className="mt-12 pt-8 border-t border-slate-800 text-xs text-slate-600">
-        Dette er sponsoreret indhold. Artiklens indhold er leveret af annoncøren og er ikke redaktionelt indhold fra Cykelportalen.
+        Dette er sponsoreret indhold. Artiklens indhold er leveret af annoncøren og er ikke redaktionelt indhold fra Klassementet.
       </div>
     </div>
   );
