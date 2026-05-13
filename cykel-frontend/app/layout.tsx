@@ -9,7 +9,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const bebasNeue = Bebas_Neue({ weight: "400", variable: "--font-bebas", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Cykelportalen",
+  title: "Klassementet",
   description: "Dansk portal for professionel cykling",
 };
 
@@ -23,7 +23,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               href="/"
               className="font-display text-xl tracking-widest text-emerald-400 hover:text-emerald-300 transition-colors"
             >
-              Cykelportalen
+              Klassementet
             </Link>
             <NavLinks />
           </div>
@@ -32,7 +32,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <main className="flex-1">{children}</main>
 
         <footer className="border-t border-slate-800/60 py-8 text-center text-xs text-slate-600">
-          Cykelportalen · Data fra UCI, ProCyclingStats og VeloWire
+          Klassementet · Data fra UCI, ProCyclingStats og VeloWire
         </footer>
       </body>
     </html>

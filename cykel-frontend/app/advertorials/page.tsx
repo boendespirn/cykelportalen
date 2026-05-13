@@ -36,7 +36,7 @@ export default async function AdvertorialsPage() {
         </h1>
         <p className="mt-5 text-slate-400 text-sm max-w-md leading-relaxed">
           Sponsoreret og kommercielt indhold fra partnere. Alle artikler er tydeligt mærket som sponsoreret.
-          Vil du publicere en artikel på Cykelportalen?{" "}
+          Vil du publicere en artikel på Klassementet?{" "}
           <Link href="/kontakt" className="text-emerald-400 hover:underline">Kontakt os →</Link>
         </p>
       </header>
@@ -45,7 +45,7 @@ export default async function AdvertorialsPage() {
         <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-16 text-center">
           <p className="text-slate-500 text-sm mb-2">Ingen advertorials endnu.</p>
           <p className="text-slate-700 text-xs mb-6">
-            Interesseret i at publicere sponsoreret indhold på Cykelportalen?
+            Interesseret i at publicere sponsoreret indhold på Klassementet?
           </p>
           <Link
             href="/kontakt"
