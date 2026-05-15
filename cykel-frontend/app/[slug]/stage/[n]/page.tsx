@@ -33,6 +33,7 @@ type StartlistEntry = {
     nationality: string | null;
     speciality: string | null;
     date_of_birth: string | null;
+    uci_ranking: number | null;
   } | null;
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
@@ -176,32 +177,28 @@ function getRidersForStage(
   // Prioritér specialitet-match hvis data er tilgængeligt
   const target = STAGE_SPECIALISTS[stageType] ?? [];
   const bySpeciality = startlist.filter(
-    (e) => e.riders?.speciality && target.includes(e.riders.speciality)
+    (e) => e.status === "active" && e.riders?.speciality && target.includes(e.riders.speciality)
   );
 
+  const sortFn = (a: StartlistEntry, b: StartlistEntry) => {
+    // 1. UCI-rangering (lavest = bedst)
+    const rankA = a.riders?.uci_ranking ?? 9999;
+    const rankB = b.riders?.uci_ranking ?? 9999;
+    if (rankA !== rankB) return rankA - rankB;
+    // 2. Kaptajn-flag som tiebreaker
+    const capA = (stageType === "flat" ? a.is_sprint_captain : a.is_gc_captain) ? 0 : 1;
+    const capB = (stageType === "flat" ? b.is_sprint_captain : b.is_gc_captain) ? 0 : 1;
+    return capA - capB;
+  };
+
   if (bySpeciality.length >= 4) {
-    return bySpeciality
-      .sort((a, b) => {
-        if (a.is_gc_captain !== b.is_gc_captain) return a.is_gc_captain ? -1 : 1;
-        if (a.is_sprint_captain !== b.is_sprint_captain) return a.is_sprint_captain ? -1 : 1;
-        return 0;
-      })
-      .slice(0, 16);
+    return bySpeciality.sort(sortFn).slice(0, 16);
   }
 
-  // Fallback: brug kaptajn-flags baseret på etapetype
-  if (stageType === "mountain" || stageType === "tt" || stageType === "itt") {
-    return startlist.filter((e) => e.is_gc_captain).slice(0, 16);
-  }
-  if (stageType === "flat") {
-    return startlist
-      .filter((e) => e.is_sprint_captain || e.is_gc_captain)
-      .sort((a, b) => (a.is_sprint_captain ? -1 : 1))
-      .slice(0, 16);
-  }
-  // hilly: begge kaptajntyper
+  // Fallback: vis alle aktive ryttere sorteret efter UCI-rangering
   return startlist
-    .filter((e) => e.is_gc_captain || e.is_sprint_captain)
+    .filter((e) => e.status === "active")
+    .sort(sortFn)
     .slice(0, 16);
 }
 
