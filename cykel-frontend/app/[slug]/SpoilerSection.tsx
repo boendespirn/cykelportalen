@@ -102,12 +102,7 @@ export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {JERSEY_CONFIG.map(({ key, color, label, emoji }) => {
               const leader = jerseyLeaders[key];
-              if (!leader?.riders) return (
-                <div key={key} className={`rounded-xl border px-4 py-3 ${color}`}>
-                  <p className="text-xs opacity-60 mb-1">{emoji} {label}</p>
-                  <p className="text-sm text-slate-500">Ingen data</p>
-                </div>
-              );
+              if (!leader?.riders) return null;
               return (
                 <Link key={key} href={`/riders/${leader.riders.slug}`}
                   className={`rounded-xl border px-4 py-3 hover:opacity-80 transition-opacity ${color}`}>
