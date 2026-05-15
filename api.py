@@ -352,6 +352,24 @@ def get_dnfs_for_race(slug: str):
 
 
 
+@app.get("/riders/{slug}/races")
+def get_rider_races(slug: str):
+    rider_url = f"{SUPABASE_URL}/rest/v1/riders?select=id&slug=eq.{slug}&limit=1"
+    rider_data = requests.get(rider_url, headers=get_headers()).json()
+    if not rider_data:
+        return []
+    rider_id = rider_data[0]["id"]
+    url = (
+        f"{SUPABASE_URL}/rest/v1/startlists"
+        f"?rider_id=eq.{rider_id}&status=eq.active"
+        f"&select=bib_number,is_gc_captain,is_sprint_captain,"
+        f"races(name,slug,start_date,end_date,country_code,category,race_type)"
+    )
+    data = requests.get(url, headers=get_headers()).json()
+    data.sort(key=lambda x: (x.get("races") or {}).get("start_date") or "")
+    return data
+
+
 @app.get("/riders/{slug}")
 def get_rider_by_slug(slug: str):
     url = (

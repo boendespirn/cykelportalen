@@ -437,6 +437,123 @@ def mark_dnfs(
             pass  # Kræver bekræftelse fra PCS DNF-liste; springer over for nu
 
 
+# ---------- official giro classifications ----------------------------------
+
+_EXTRACT_OFFICIAL_JS = r"""() => {
+    const rows = [];
+    // Find klassement-tabel — rækker med rytternavne og point/tid
+    const trs = document.querySelectorAll('table tbody tr, .classification-table tr, .ranking-table tr');
+    for (const tr of trs) {
+        const cells = Array.from(tr.querySelectorAll('td')).map(c => c.innerText.trim());
+        if (cells.length < 3) continue;
+        const link = tr.querySelector('a[href*="/rider/"], a[href*="/atleta/"], a[href*="/ciclista/"]');
+        rows.push({
+            pos:  parseInt(cells[0]) || null,
+            name: cells.find(c => /[A-Z][a-z]/.test(c) && c.length > 3) || null,
+            val:  cells[cells.length - 1] || null,
+            url:  link ? link.href : null,
+        });
+    }
+    return rows;
+}"""
+
+
+async def scrape_official_classification(page, param: str, ctype: str, year: int) -> list[dict]:
+    url = f"https://www.giroditalia.it/en/classifiche/?classifica={param}"
+    print(f"  → {url}")
+    await page.goto(url, wait_until="load", timeout=30000)
+    await page.wait_for_timeout(3000)
+
+    rows = await page.evaluate(_EXTRACT_OFFICIAL_JS)
+
+    # Fallback: prøv at finde alle tekstnoder der ligner rytternavne + tal
+    if not rows or all(r["pos"] is None for r in rows):
+        content = await page.inner_text("body")
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        rows = []
+        pos = 0
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].isdigit():
+                pos = int(parts[0])
+                name = " ".join(p for p in parts[1:] if not p.replace(":", "").replace(".", "").replace("+", "").isdigit())
+                val = parts[-1] if parts[-1] != name else None
+                if name:
+                    rows.append({"pos": pos, "name": name.strip(), "val": val, "url": None})
+
+    print(f"    {len(rows)} rækker fundet")
+    return rows
+
+
+def normalize_name(name: str) -> tuple[str, str]:
+    """Returnerer (fornavn, efternavn) normaliseret til lowercase."""
+    parts = name.strip().split()
+    if not parts:
+        return ("", "")
+    # PCS format: "LASTNAME Firstname" — håndtér begge retninger
+    return tuple(p.lower() for p in (parts[0], parts[-1]))  # type: ignore
+
+
+def store_official_classification(
+    rows: list[dict],
+    race_id: str,
+    stage_num: int,
+    ctype: str,
+) -> int:
+    # Hent alle ryttere én gang og byg et navn-map
+    all_riders = sb_get("riders", "?select=id,name&limit=2000")
+    name_map: dict[str, str] = {}
+    for r in all_riders:
+        raw = r["name"].strip()
+        parts = raw.split()
+        # PCS: "LASTNAME Firstname" → gem både fuld string og dele
+        name_map[raw.lower()] = r["id"]
+        if len(parts) >= 2:
+            # "firstname lastname" variant
+            reversed_name = " ".join(reversed(parts)).lower()
+            name_map[reversed_name] = r["id"]
+            # Kun efternavn (fallback)
+            name_map[parts[0].lower()] = r["id"]
+
+    records = []
+    for row in rows:
+        if not row.get("name") or not row.get("pos"):
+            continue
+        name_lower = row["name"].lower()
+        rider_id = name_map.get(name_lower)
+        if not rider_id:
+            # Prøv med dele af navnet
+            parts = name_lower.split()
+            for p in parts:
+                if len(p) > 3:
+                    rider_id = name_map.get(p)
+                    if rider_id:
+                        break
+        if not rider_id:
+            continue
+
+        val = row.get("val") or ""
+        pts = 0
+        try:
+            pts = int(val.replace(".", ""))
+        except Exception:
+            pass
+
+        records.append({
+            "race_id"             : race_id,
+            "after_stage_number"  : stage_num,
+            "classification_type" : ctype,
+            "rider_id"            : rider_id,
+            "position"            : row["pos"],
+            "time_gap_seconds"    : 0,
+            "points"              : pts,
+            "dnf"                 : False,
+        })
+
+    sb_upsert("classifications", records, "race_id,after_stage_number,classification_type,rider_id")
+    return len(records)
+
+
 # ---------- main -----------------------------------------------------------
 
 async def main(stages_to_scrape: list[int], gc_only: bool, db_slug: str, pcs_slug: str, year: int):
@@ -496,18 +613,24 @@ async def main(stages_to_scrape: list[int], gc_only: bool, db_slug: str, pcs_slu
 
                 latest_stage_rows = rows
 
-        # Hent klassementer fra PCS klassement-sider
+        # Hent klassementer fra officiel Giro-side
         last_stage = max(targets) if targets else max(done_stages) if done_stages else None
         if last_stage:
-            print(f"\nHenter klassementer efter etape {last_stage}:")
-            for classif, ctype in [("points", "points"), ("mountains", "mountains"), ("youth", "youth")]:
+            print(f"\nHenter klassementer efter etape {last_stage} (giroditalia.it):")
+            for param, ctype in [
+                ("CLPUNGEN", "points"),
+                ("CLGPMGEN", "mountains"),
+                ("CLBIANC",  "youth"),
+            ]:
                 try:
-                    c_rows = await scrape_classification(page, classif)
+                    c_rows = await scrape_official_classification(page, param, ctype, year)
                     if c_rows:
-                        n = store_classification(c_rows, race["id"], last_stage, ctype, slug_map, bib_map)
+                        n = store_official_classification(c_rows, race["id"], last_stage, ctype)
                         print(f"  Gemt {n} {ctype}-poster")
+                    else:
+                        print(f"  Ingen data for {ctype}")
                 except Exception as e:
-                    print(f"  Fejl ved {classif}: {e}")
+                    print(f"  Fejl ved {ctype}: {e}")
 
         await browser.close()
 

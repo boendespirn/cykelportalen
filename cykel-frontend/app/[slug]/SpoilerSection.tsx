@@ -50,14 +50,15 @@ function formatGap(secs: number | null): string {
 }
 
 const JERSEY_CONFIG = [
-  { key: "gc",        color: "text-pink-400  border-pink-500/30  bg-pink-500/10",  label: "Maglia Rosa",    emoji: "🩷" },
-  { key: "points",    color: "text-purple-400 border-purple-500/30 bg-purple-500/10", label: "Ciclamino",   emoji: "🟣" },
-  { key: "mountains", color: "text-blue-400  border-blue-500/30  bg-blue-500/10",  label: "Maglia Azzurra", emoji: "🔵" },
-  { key: "youth",     color: "text-slate-200 border-slate-400/30  bg-slate-500/10", label: "Maglia Bianca",  emoji: "⬜" },
+  { key: "gc",        color: "text-pink-400  border-pink-500/30  bg-pink-500/10",  label: "Maglia Rosa",    emoji: "🩷", description: "Den lyserøde trøje gives til rytteren med den laveste samlede tid. Den er det ultimative symbol på sejr i Giro d'Italia." },
+  { key: "points",    color: "text-purple-400 border-purple-500/30 bg-purple-500/10", label: "Ciclamino",   emoji: "🟣", description: "Den blomsterfarvede trøje gives til rytteren med flest sprintpoints fra etapemål og mellemspurter." },
+  { key: "mountains", color: "text-blue-400  border-blue-500/30  bg-blue-500/10",  label: "Maglia Azzurra", emoji: "🔵", description: "Den blå bjergtrøje gives til rytteren med flest point fra kategoriserede stigninger i løbet." },
+  { key: "youth",     color: "text-slate-200 border-slate-400/30  bg-slate-500/10", label: "Maglia Bianca",  emoji: "⬜", description: "Den hvide trøje gives til den bedst placerede rytter under 26 år i det samlede klassement." },
 ];
 
 export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, mountainsLeader, youthLeader }: Props) {
   const [open, setOpen] = useState(false);
+  const [tooltip, setTooltip] = useState<string | null>(null);
 
   const jerseyLeaders: Record<string, ClassifEntry | null> = {
     gc: gcStandings[0] ? { position: 1, time_gap_seconds: 0, points: null, riders: gcStandings[0].riders ? { name: gcStandings[0].riders.name, slug: gcStandings[0].riders.slug, nationality: gcStandings[0].riders.nationality } : null } : null,
@@ -100,17 +101,33 @@ export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, 
 
           {/* Jersey leaders */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {JERSEY_CONFIG.map(({ key, color, label, emoji }) => {
+            {JERSEY_CONFIG.map(({ key, color, label, emoji, description }) => {
               const leader = jerseyLeaders[key];
               if (!leader?.riders) return null;
               return (
-                <Link key={key} href={`/riders/${leader.riders.slug}`}
-                  className={`rounded-xl border px-4 py-3 hover:opacity-80 transition-opacity ${color}`}>
-                  <p className="text-xs opacity-70 mb-1">{emoji} {label}</p>
-                  <p className="text-sm font-semibold leading-tight">
-                    {flagEmoji(leader.riders.nationality)} {leader.riders.name}
-                  </p>
-                </Link>
+                <div key={key} className="relative group">
+                  <Link href={`/riders/${leader.riders.slug}`}
+                    className={`block rounded-xl border px-4 py-3 pr-7 hover:opacity-80 transition-opacity ${color}`}>
+                    <p className="text-xs opacity-70 mb-1">{emoji} {label}</p>
+                    <p className="text-sm font-semibold leading-tight">
+                      {flagEmoji(leader.riders.nationality)} {leader.riders.name}
+                    </p>
+                  </Link>
+                  <button
+                    onClick={() => setTooltip(tooltip === key ? null : key)}
+                    className="absolute top-2 right-2 w-4 h-4 rounded-full bg-black/30 text-[9px] flex items-center justify-center hover:bg-black/50 transition-colors"
+                    aria-label={`Info om ${label}`}
+                  >
+                    ?
+                  </button>
+                  <div className={`absolute bottom-full left-0 right-0 mb-2 z-20 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-xs text-slate-300 shadow-xl transition-all duration-150 pointer-events-none
+                    ${tooltip === key
+                      ? 'opacity-100 visible'
+                      : 'opacity-0 invisible group-hover:opacity-100 group-hover:visible'
+                    }`}>
+                    {description}
+                  </div>
+                </div>
               );
             })}
           </div>

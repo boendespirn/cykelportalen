@@ -18,6 +18,28 @@ type Rider = {
   } | null;
 };
 
+type RiderRace = {
+  bib_number: number | null;
+  is_gc_captain: boolean;
+  is_sprint_captain: boolean;
+  races: {
+    name: string;
+    slug: string;
+    start_date: string;
+    end_date: string | null;
+    country_code: string | null;
+    category: string;
+    race_type: string;
+  } | null;
+};
+
+async function getRiderRaces(slug: string): Promise<RiderRace[]> {
+  try {
+    const res = await fetch(`${API_BASE}/riders/${slug}/races`, { cache: "no-store" });
+    return res.ok ? res.json() : [];
+  } catch { return []; }
+}
+
 async function getRider(slug: string): Promise<Rider | null> {
   try {
     const res = await fetch(`${API_BASE}/riders/${slug}`, { cache: "no-store" });
@@ -70,7 +92,7 @@ const SPECIALITY_COLORS: Record<string, string> = {
 
 export default async function RiderPage(props: { params: Promise<{ slug: string }> }) {
   const { slug } = await props.params;
-  const rider = await getRider(slug);
+  const [rider, riderRaces] = await Promise.all([getRider(slug), getRiderRaces(slug)]);
 
   if (!rider) {
     return (
@@ -123,7 +145,7 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
       </header>
 
       {/* Info grid */}
-      <div className="grid gap-px sm:grid-cols-2 rounded-xl overflow-hidden border border-slate-800 mb-8">
+      <div className="grid gap-px sm:grid-cols-2 rounded-xl overflow-hidden border border-slate-800 mb-8 mt-6">
         {rider.date_of_birth && (
           <div className="bg-slate-900/60 px-5 py-4">
             <p className="text-xs uppercase tracking-widest text-slate-600 mb-1">Fødselsdato</p>
@@ -161,6 +183,48 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
           </div>
         )}
       </div>
+
+      {/* Race calendar */}
+      {riderRaces.length > 0 && (
+        <section className="mt-8">
+          <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase mb-4">
+            Løb 2026
+          </h2>
+          <div className="space-y-2">
+            {riderRaces.map((entry, i) => {
+              const race = entry.races;
+              if (!race) return null;
+              const today = new Date().toISOString().slice(0, 10);
+              const isOngoing = race.start_date <= today && (!race.end_date || race.end_date >= today);
+              const isPast = race.end_date ? race.end_date < today : race.start_date < today;
+              const startDate = new Date(race.start_date + "T00:00:00").toLocaleDateString("da-DK", { day: "numeric", month: "short" });
+              return (
+                <Link key={i} href={`/${race.slug}`}
+                  className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors hover:border-emerald-500/30
+                    ${isOngoing ? "border-emerald-500/30 bg-emerald-500/5" : "border-slate-800 bg-slate-900/40"}`}>
+                  {race.country_code && (
+                    <span className="text-lg flex-shrink-0">{race.country_code.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")}</span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium truncate ${isPast ? "text-slate-500" : "text-slate-200"}`}>{race.name}</p>
+                    <p className="text-xs text-slate-600">{race.category}</p>
+                  </div>
+                  {isOngoing && (
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full flex-shrink-0">Live</span>
+                  )}
+                  {entry.is_gc_captain && !isOngoing && (
+                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded flex-shrink-0">GC</span>
+                  )}
+                  {entry.is_sprint_captain && !entry.is_gc_captain && (
+                    <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded flex-shrink-0">Sprint</span>
+                  )}
+                  <span className={`text-xs font-mono flex-shrink-0 ${isPast ? "text-slate-700" : "text-slate-500"}`}>{startDate}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
