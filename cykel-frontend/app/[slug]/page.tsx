@@ -25,7 +25,7 @@ type Stage = {
 type StartlistEntry = {
   bib_number: number | null; is_gc_captain: boolean; is_sprint_captain: boolean;
   status: string; role: string | null;
-  riders: { name: string; slug: string; nationality: string | null; speciality: string | null; date_of_birth: string | null } | null;
+  riders: { name: string; slug: string; nationality: string | null; speciality: string | null; date_of_birth: string | null; uci_ranking: number | null } | null;
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
 
@@ -285,7 +285,12 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const totalRiders = startlist.filter(e => e.status === "active").length;
 
   const danishRiders = startlist.filter((e) => e.riders?.nationality === "DK" && e.status === "active");
-  const gcFavorites  = startlist.filter((e) => e.is_gc_captain && e.status === "active").slice(0, 8);
+  const gcFavorites = isOneDay
+    ? startlist.filter((e) => e.status === "active" && (e.is_gc_captain || e.is_sprint_captain)).slice(0, 8)
+    : startlist
+        .filter((e) => e.status === "active" && e.riders?.uci_ranking != null)
+        .sort((a, b) => (a.riders!.uci_ranking! - b.riders!.uci_ranking!))
+        .slice(0, 8);
   const hasResults   = gcData && gcData.standings.length > 0;
 
   // For one-day races: geocode start/finish if we have a stage
@@ -586,7 +591,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         <div className="grid gap-6 sm:grid-cols-2 mb-10">
           {gcFavorites.length > 0 && (
             <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 mb-4">🏆 GC-favoritter</h2>
+              <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 mb-4">🏆 Top-ryttere i feltet</h2>
               <div className="space-y-2">
                 {gcFavorites.map((entry) => {
                   const r = entry.riders;
@@ -598,7 +603,10 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                       <span className="w-5 text-center text-sm flex-shrink-0">{flagEmoji(r.nationality)}</span>
                       <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
                       {gcEntry && gcEntry.position != null && (
-                        <span className="text-xs font-mono text-pink-400">#{gcEntry.position}</span>
+                        <span className="text-xs font-mono text-pink-400">GC #{gcEntry.position}</span>
+                      )}
+                      {r.uci_ranking && !gcEntry && (
+                        <span className="text-xs font-mono text-slate-500">UCI #{r.uci_ranking}</span>
                       )}
                       {r.speciality && <span className="text-xs text-slate-600">{SPECIALITY_ICON[r.speciality] ?? ""}</span>}
                     </Link>

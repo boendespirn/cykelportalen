@@ -266,7 +266,7 @@ def get_startlist_for_race(slug: str):
         f"{SUPABASE_URL}/rest/v1/startlists"
         f"?race_id=eq.{race_id}"
         f"&select=bib_number,is_gc_captain,is_sprint_captain,status,role,"
-        f"riders(name,slug,nationality,speciality,date_of_birth),"
+        f"riders(name,slug,nationality,speciality,date_of_birth,uci_ranking),"
         f"teams(name,slug,country_code)"
         f"&status=eq.active"
         f"&order=bib_number.asc.nullslast"
