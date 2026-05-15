@@ -327,7 +327,7 @@ def get_classification(slug: str, classif_type: str):
     url = (
         f"{SUPABASE_URL}/rest/v1/classifications"
         f"?race_id=eq.{race_id}&classification_type=eq.{classif_type}&after_stage_number=eq.{after_stage}"
-        f"&select=position,time_gap_seconds,points,riders(name,slug,nationality)"
+        f"&select=position,time_gap_seconds,points,riders(name,slug,nationality,teams(name,slug))"
         f"&order=position.asc&limit=20"
     )
     data = requests.get(url, headers=get_headers()).json()

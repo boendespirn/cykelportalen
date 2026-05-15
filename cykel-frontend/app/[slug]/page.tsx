@@ -36,7 +36,7 @@ type GCEntry = {
 
 type ClassifEntry = {
   position: number | null; time_gap_seconds: number | null; points: number | null;
-  riders: { name: string; slug: string; nationality: string | null } | null;
+  riders: { name: string; slug: string; nationality: string | null; teams: { name: string; slug: string } | null } | null;
 };
 
 type DnfEntry = {
@@ -78,13 +78,13 @@ async function getGC(slug: string): Promise<{ after_stage: number; standings: GC
   } catch { return null; }
 }
 
-async function getClassification(slug: string, type: string): Promise<ClassifEntry | null> {
+async function getClassification(slug: string, type: string): Promise<{ after_stage: number; standings: ClassifEntry[] } | null> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/classifications/${type}`, { cache: "no-store" });
     if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data) && data.length === 0) return null;
-    return data?.standings?.[0] ?? null;
+    return data?.standings?.length ? data : null;
   } catch { return null; }
 }
 
@@ -254,7 +254,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const { slug } = await props.params;
   const today = getToday();
 
-  const [race, stages, startlist, gcData, pointsLeader, mountainsLeader, youthLeader, dnfs] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -477,9 +477,9 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           <SpoilerSection
             afterStage={gcData!.after_stage}
             gcStandings={gcData!.standings}
-            pointsLeader={pointsLeader}
-            mountainsLeader={mountainsLeader}
-            youthLeader={youthLeader}
+            pointsStandings={pointsData?.standings ?? []}
+            mountainsStandings={mountainsData?.standings ?? []}
+            youthStandings={youthData?.standings ?? []}
           />
         )}
       </div>
@@ -575,9 +575,9 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         <SpoilerSection
           afterStage={gcData!.after_stage}
           gcStandings={gcData!.standings}
-          pointsLeader={pointsLeader}
-          mountainsLeader={mountainsLeader}
-          youthLeader={youthLeader}
+          pointsStandings={pointsData?.standings ?? []}
+          mountainsStandings={mountainsData?.standings ?? []}
+          youthStandings={youthData?.standings ?? []}
         />
       )}
 

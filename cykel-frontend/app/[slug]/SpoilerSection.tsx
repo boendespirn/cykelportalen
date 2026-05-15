@@ -18,15 +18,20 @@ type ClassifEntry = {
   position: number | null;
   time_gap_seconds: number | null;
   points: number | null;
-  riders: { name: string; slug: string; nationality: string | null } | null;
+  riders: {
+    name: string;
+    slug: string;
+    nationality: string | null;
+    teams: { name: string; slug: string } | null;
+  } | null;
 };
 
 type Props = {
   afterStage: number;
   gcStandings: GCEntry[];
-  pointsLeader: ClassifEntry | null;
-  mountainsLeader: ClassifEntry | null;
-  youthLeader: ClassifEntry | null;
+  pointsStandings: ClassifEntry[];
+  mountainsStandings: ClassifEntry[];
+  youthStandings: ClassifEntry[];
 };
 
 function flagEmoji(code: string | null): string {
@@ -39,7 +44,7 @@ function flagEmoji(code: string | null): string {
 }
 
 function formatGap(secs: number | null): string {
-  if (!secs || secs === 0) return "Leader";
+  if (!secs || secs === 0) return "Leder";
   if (secs < 60) return `+${secs}″`;
   const m = Math.floor(secs / 60);
   const s = secs % 60;
@@ -50,22 +55,76 @@ function formatGap(secs: number | null): string {
 }
 
 const JERSEY_CONFIG = [
-  { key: "gc",        color: "text-pink-400  border-pink-500/30  bg-pink-500/10",  label: "Maglia Rosa",    emoji: "🩷", description: "Den lyserøde trøje gives til rytteren med den laveste samlede tid. Den er det ultimative symbol på sejr i Giro d'Italia." },
-  { key: "points",    color: "text-purple-400 border-purple-500/30 bg-purple-500/10", label: "Ciclamino",   emoji: "🟣", description: "Den blomsterfarvede trøje gives til rytteren med flest sprintpoints fra etapemål og mellemspurter." },
-  { key: "mountains", color: "text-blue-400  border-blue-500/30  bg-blue-500/10",  label: "Maglia Azzurra", emoji: "🔵", description: "Den blå bjergtrøje gives til rytteren med flest point fra kategoriserede stigninger i løbet." },
-  { key: "youth",     color: "text-slate-200 border-slate-400/30  bg-slate-500/10", label: "Maglia Bianca",  emoji: "⬜", description: "Den hvide trøje gives til den bedst placerede rytter under 26 år i det samlede klassement." },
-];
+  {
+    key: "gc",
+    color: "text-pink-400 border-pink-500/30 bg-pink-500/10",
+    activeRing: "ring-pink-500/50",
+    label: "Maglia Rosa",
+    tableLabel: "Samlet klassement",
+    emoji: "🩷",
+    valueLabel: "Tid",
+    description: "Den lyserøde trøje gives til rytteren med den laveste samlede tid. Den er det ultimative symbol på sejr i Giro d'Italia.",
+  },
+  {
+    key: "points",
+    color: "text-purple-400 border-purple-500/30 bg-purple-500/10",
+    activeRing: "ring-purple-500/50",
+    label: "Ciclamino",
+    tableLabel: "Point-klassement",
+    emoji: "🟣",
+    valueLabel: "Point",
+    description: "Den blomsterfarvede trøje gives til rytteren med flest sprintpoints fra etapemål og mellemspurter.",
+  },
+  {
+    key: "mountains",
+    color: "text-blue-400 border-blue-500/30 bg-blue-500/10",
+    activeRing: "ring-blue-500/50",
+    label: "Maglia Azzurra",
+    tableLabel: "Bjerg-klassement",
+    emoji: "🔵",
+    valueLabel: "Point",
+    description: "Den blå bjergtrøje gives til rytteren med flest point fra kategoriserede stigninger i løbet.",
+  },
+  {
+    key: "youth",
+    color: "text-slate-200 border-slate-400/30 bg-slate-500/10",
+    activeRing: "ring-slate-400/50",
+    label: "Maglia Bianca",
+    tableLabel: "Ungdomsklassement",
+    emoji: "⬜",
+    valueLabel: "Tid",
+    description: "Den hvide trøje gives til den bedst placerede rytter under 26 år i det samlede klassement.",
+  },
+] as const;
 
-export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, mountainsLeader, youthLeader }: Props) {
+export default function SpoilerSection({
+  afterStage,
+  gcStandings,
+  pointsStandings,
+  mountainsStandings,
+  youthStandings,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [tooltip, setTooltip] = useState<string | null>(null);
+  const [activeKey, setActiveKey] = useState<string>("gc");
 
-  const jerseyLeaders: Record<string, ClassifEntry | null> = {
-    gc: gcStandings[0] ? { position: 1, time_gap_seconds: 0, points: null, riders: gcStandings[0].riders ? { name: gcStandings[0].riders.name, slug: gcStandings[0].riders.slug, nationality: gcStandings[0].riders.nationality } : null } : null,
-    points: pointsLeader,
-    mountains: mountainsLeader,
-    youth: youthLeader,
+  const standingsMap: Record<string, GCEntry[] | ClassifEntry[]> = {
+    gc: gcStandings,
+    points: pointsStandings,
+    mountains: mountainsStandings,
+    youth: youthStandings,
   };
+
+  const leaders: Record<string, { name: string; slug: string; nationality: string | null } | null> = {
+    gc: gcStandings[0]?.riders ?? null,
+    points: pointsStandings[0]?.riders ?? null,
+    mountains: mountainsStandings[0]?.riders ?? null,
+    youth: youthStandings[0]?.riders ?? null,
+  };
+
+  const activeConfig = JERSEY_CONFIG.find((j) => j.key === activeKey)!;
+  const activeStandings = standingsMap[activeKey] ?? [];
+  const isTimeClassif = activeKey === "gc" || activeKey === "youth";
 
   return (
     <section className="mb-10">
@@ -90,41 +149,53 @@ export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, 
         </div>
         <svg
           className={`w-5 h-5 text-slate-500 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
       {open && (
-        <div className="mt-3 space-y-6 animate-in fade-in duration-200">
+        <div className="mt-3 space-y-4 animate-in fade-in duration-200">
 
-          {/* Jersey leaders */}
+          {/* Jersey cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {JERSEY_CONFIG.map(({ key, color, label, emoji, description }) => {
-              const leader = jerseyLeaders[key];
-              if (!leader?.riders) return null;
+            {JERSEY_CONFIG.map(({ key, color, activeRing, label, emoji, description }) => {
+              const leader = leaders[key];
+              if (!leader) return null;
+              const isActive = activeKey === key;
               return (
                 <div key={key} className="relative group">
-                  <Link href={`/riders/${leader.riders.slug}`}
-                    className={`block rounded-xl border px-4 py-3 pr-7 hover:opacity-80 transition-opacity ${color}`}>
+                  <button
+                    onClick={() => { setTooltip(null); setActiveKey(key); }}
+                    className={`w-full text-left rounded-xl border px-4 py-3 pr-7 transition-all duration-150 ${color}
+                      ${isActive
+                        ? `ring-2 ${activeRing} ring-offset-1 ring-offset-slate-950 opacity-100`
+                        : "opacity-60 hover:opacity-90"
+                      }`}
+                  >
                     <p className="text-xs opacity-70 mb-1">{emoji} {label}</p>
                     <p className="text-sm font-semibold leading-tight">
-                      {flagEmoji(leader.riders.nationality)} {leader.riders.name}
+                      {flagEmoji(leader.nationality)} {leader.name}
                     </p>
-                  </Link>
+                  </button>
                   <button
-                    onClick={() => setTooltip(tooltip === key ? null : key)}
+                    onClick={(e) => { e.stopPropagation(); setTooltip(tooltip === key ? null : key); }}
                     className="absolute top-2 right-2 w-4 h-4 rounded-full bg-black/30 text-[9px] flex items-center justify-center hover:bg-black/50 transition-colors"
                     aria-label={`Info om ${label}`}
                   >
                     ?
                   </button>
-                  <div className={`absolute bottom-full left-0 right-0 mb-2 z-20 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-xs text-slate-300 shadow-xl transition-all duration-150 pointer-events-none
-                    ${tooltip === key
-                      ? 'opacity-100 visible'
-                      : 'opacity-0 invisible group-hover:opacity-100 group-hover:visible'
-                    }`}>
+                  <div
+                    className={`pointer-events-none absolute bottom-full left-0 right-0 mb-2 z-20 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-xs text-slate-300 shadow-xl transition-all duration-150
+                      ${tooltip === key
+                        ? "opacity-100 visible"
+                        : "opacity-0 invisible group-hover:opacity-100 group-hover:visible"
+                      }`}
+                  >
                     {description}
                   </div>
                 </div>
@@ -132,10 +203,10 @@ export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, 
             })}
           </div>
 
-          {/* GC top 10 */}
+          {/* Classification table */}
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-pink-400 mb-3">
-              Samlet klassement — Top 10
+            <p className={`text-xs uppercase tracking-[0.2em] mb-3 ${activeConfig.color}`}>
+              {activeConfig.tableLabel} — Top {activeStandings.length}
             </p>
             <div className="rounded-xl border border-slate-800 overflow-hidden">
               <table className="w-full text-sm">
@@ -144,23 +215,29 @@ export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, 
                     <th className="text-left px-4 py-2.5 text-slate-500 font-medium w-10">#</th>
                     <th className="text-left px-4 py-2.5 text-slate-500 font-medium">Rytter</th>
                     <th className="text-left px-4 py-2.5 text-slate-500 font-medium hidden sm:table-cell">Hold</th>
-                    <th className="text-right px-4 py-2.5 text-slate-500 font-medium">Tid</th>
+                    <th className="text-right px-4 py-2.5 text-slate-500 font-medium">{activeConfig.valueLabel}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {gcStandings.map((entry, i) => {
+                  {(activeStandings as Array<GCEntry | ClassifEntry>).map((entry, i) => {
                     const rider = entry.riders;
                     if (!rider) return null;
                     const isLeader = !entry.time_gap_seconds || entry.time_gap_seconds === 0;
+                    const pts = "points" in entry ? entry.points : null;
+                    const leaderColor = activeConfig.color.split(" ")[0];
                     return (
-                      <tr key={rider.slug} className="border-b border-slate-800/40 hover:bg-slate-900/50 transition-colors">
+                      <tr key={rider.slug + i} className="border-b border-slate-800/40 hover:bg-slate-900/50 transition-colors">
                         <td className="px-4 py-3 text-slate-500 font-mono text-xs">{entry.position ?? i + 1}</td>
                         <td className="px-4 py-3">
-                          <Link href={`/riders/${rider.slug}`} className="flex items-center gap-2 hover:text-pink-400 transition-colors">
+                          <Link href={`/riders/${rider.slug}`} className={`flex items-center gap-2 hover:${leaderColor} transition-colors`}>
                             <span className="w-5 text-center text-sm">{flagEmoji(rider.nationality)}</span>
-                            <span className={`font-medium ${isLeader ? "text-pink-300" : "text-slate-200"}`}>
+                            <span className={`font-medium ${isLeader && isTimeClassif ? leaderColor : "text-slate-200"}`}>
                               {rider.name}
-                              {isLeader && <span className="ml-1.5 text-[10px] bg-pink-500/20 text-pink-400 px-1.5 py-0.5 rounded-full uppercase tracking-wide">Leder</span>}
+                              {isLeader && isTimeClassif && (
+                                <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide ${activeConfig.color}`}>
+                                  Leder
+                                </span>
+                              )}
                             </span>
                           </Link>
                         </td>
@@ -168,10 +245,15 @@ export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, 
                           {rider.teams?.name ?? "—"}
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-xs">
-                          {isLeader
-                            ? <span className="text-pink-400">+0:00</span>
-                            : <span className="text-slate-400">{formatGap(entry.time_gap_seconds)}</span>
-                          }
+                          {isTimeClassif ? (
+                            isLeader
+                              ? <span className={leaderColor}>+0:00</span>
+                              : <span className="text-slate-400">{formatGap(entry.time_gap_seconds)}</span>
+                          ) : (
+                            <span className={pts ? "text-slate-200" : "text-slate-600"}>
+                              {pts ?? "—"}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -180,6 +262,7 @@ export default function SpoilerSection({ afterStage, gcStandings, pointsLeader, 
               </table>
             </div>
           </div>
+
         </div>
       )}
     </section>

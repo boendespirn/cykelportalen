@@ -15,7 +15,7 @@ Brug:
 Re-run er sikkert: eksisterende resultater overskrives (upsert).
 """
 
-import os, re, sys, io, asyncio, argparse, requests
+import os, re, sys, io, asyncio, argparse, requests, unicodedata
 from datetime import date, datetime
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
@@ -439,59 +439,82 @@ def mark_dnfs(
 
 # ---------- official giro classifications ----------------------------------
 
-_EXTRACT_OFFICIAL_JS = r"""() => {
-    const rows = [];
-    // Find klassement-tabel — rækker med rytternavne og point/tid
-    const trs = document.querySelectorAll('table tbody tr, .classification-table tr, .ranking-table tr');
-    for (const tr of trs) {
-        const cells = Array.from(tr.querySelectorAll('td')).map(c => c.innerText.trim());
-        if (cells.length < 3) continue;
-        const link = tr.querySelector('a[href*="/rider/"], a[href*="/atleta/"], a[href*="/ciclista/"]');
-        rows.push({
-            pos:  parseInt(cells[0]) || null,
-            name: cells.find(c => /[A-Z][a-z]/.test(c) && c.length > 3) || null,
-            val:  cells[cells.length - 1] || null,
-            url:  link ? link.href : null,
-        });
-    }
-    return rows;
-}"""
+# Mappe fra klassifikationstype til jersey-label i giro-sidens body-tekst
+_JERSEY_LABELS = {
+    "points"   : ["CICLAMINO"],
+    "mountains": ["AZZURRA"],
+    "youth"    : ["BIANCA"],
+    "gc"       : ["ROSA"],
+}
+
+
+def _parse_giro_text(lines: list[str]) -> list[dict]:
+    """
+    Giroditalia.it body-tekst format:
+      MAGLIA\nCICLAMINO\nRider\nTeam\nPoints\n1\nFirstname\nLASTNAME\nTeam\n130\n2\n...
+    Returnerer liste med {pos, name, val}.
+    """
+    rows = []
+    # Find 'Rider\nTeam' som header-markør
+    start_idx = None
+    for i in range(len(lines) - 2):
+        if lines[i] == "Rider" and lines[i + 1] == "Team":
+            start_idx = i + 3  # Spring Rider, Team, (Points/Time) over
+            break
+    if start_idx is None:
+        return rows
+
+    i = start_idx
+    while i < len(lines) - 3:
+        line = lines[i]
+        if line.isdigit() and 1 <= int(line) <= 300:
+            pos = int(line)
+            firstname = lines[i + 1]
+            lastname  = lines[i + 2]
+            # lines[i+3] = team, lines[i+4] = value (points/time)
+            val = lines[i + 4] if i + 4 < len(lines) else None
+            # Validér: fornavn og efternavn skal indeholde bogstaver
+            if re.search(r'[A-Za-z]', firstname) and re.search(r'[A-Za-z]', lastname):
+                rows.append({"pos": pos, "name": f"{firstname} {lastname}", "val": val})
+            i += 5
+        else:
+            i += 1
+    return rows
 
 
 async def scrape_official_classification(page, param: str, ctype: str, year: int) -> list[dict]:
     url = f"https://www.giroditalia.it/en/classifiche/?classifica={param}"
     print(f"  → {url}")
-    await page.goto(url, wait_until="load", timeout=30000)
-    await page.wait_for_timeout(3000)
+    try:
+        await page.goto(url, wait_until="networkidle", timeout=45000)
+    except Exception:
+        pass
+    await page.wait_for_timeout(5000)
 
-    rows = await page.evaluate(_EXTRACT_OFFICIAL_JS)
+    content = await page.inner_text("body")
+    lines = [l.strip() for l in content.splitlines() if l.strip()]
 
-    # Fallback: prøv at finde alle tekstnoder der ligner rytternavne + tal
-    if not rows or all(r["pos"] is None for r in rows):
-        content = await page.inner_text("body")
-        lines = [l.strip() for l in content.splitlines() if l.strip()]
-        rows = []
-        pos = 0
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2 and parts[0].isdigit():
-                pos = int(parts[0])
-                name = " ".join(p for p in parts[1:] if not p.replace(":", "").replace(".", "").replace("+", "").isdigit())
-                val = parts[-1] if parts[-1] != name else None
-                if name:
-                    rows.append({"pos": pos, "name": name.strip(), "val": val, "url": None})
+    rows = _parse_giro_text(lines)
+
+    # Fallback: udtræk jersey-leder fra summary-sektion (giver kun position 1)
+    if not rows:
+        labels = _JERSEY_LABELS.get(ctype, [])
+        for i, line in enumerate(lines):
+            if line in labels:
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    candidate = lines[j]
+                    if re.search(r'[A-Z]', candidate) and re.search(r'[a-z]', candidate) and len(candidate) > 4:
+                        rows.append({"pos": 1, "name": candidate, "val": None})
+                        break
+                break
 
     print(f"    {len(rows)} rækker fundet")
     return rows
 
 
-def normalize_name(name: str) -> tuple[str, str]:
-    """Returnerer (fornavn, efternavn) normaliseret til lowercase."""
-    parts = name.strip().split()
-    if not parts:
-        return ("", "")
-    # PCS format: "LASTNAME Firstname" — håndtér begge retninger
-    return tuple(p.lower() for p in (parts[0], parts[-1]))  # type: ignore
+def normalize_accent(s: str) -> str:
+    """Strip accents og lowercase: EULÀLIO → eulalio"""
+    return unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('ASCII').lower()
 
 
 def store_official_classification(
@@ -500,42 +523,57 @@ def store_official_classification(
     stage_num: int,
     ctype: str,
 ) -> int:
-    # Hent alle ryttere én gang og byg et navn-map
     all_riders = sb_get("riders", "?select=id,name&limit=2000")
     name_map: dict[str, str] = {}
     for r in all_riders:
         raw = r["name"].strip()
         parts = raw.split()
-        # PCS: "LASTNAME Firstname" → gem både fuld string og dele
-        name_map[raw.lower()] = r["id"]
+        norm = normalize_accent(raw)
+        name_map[norm] = r["id"]
         if len(parts) >= 2:
-            # "firstname lastname" variant
-            reversed_name = " ".join(reversed(parts)).lower()
-            name_map[reversed_name] = r["id"]
-            # Kun efternavn (fallback)
-            name_map[parts[0].lower()] = r["id"]
+            # Omvendt rækkefølge: "Afonso Eulàlio" → "eulalio afonso"
+            name_map[normalize_accent(" ".join(reversed(parts)))] = r["id"]
+            # Efternavn alene
+            name_map[normalize_accent(parts[-1])] = r["id"]
+            # Fornavn alene
+            name_map[normalize_accent(parts[0])] = r["id"]
 
     records = []
     for row in rows:
         if not row.get("name") or not row.get("pos"):
             continue
-        name_lower = row["name"].lower()
-        rider_id = name_map.get(name_lower)
+
+        name_norm = normalize_accent(row["name"])
+        rider_id = name_map.get(name_norm)
+
         if not rider_id:
-            # Prøv med dele af navnet
-            parts = name_lower.split()
-            for p in parts:
+            # Prøv omvendt rækkefølge
+            rev = " ".join(reversed(name_norm.split()))
+            rider_id = name_map.get(rev)
+
+        if not rider_id:
+            for p in name_norm.split():
                 if len(p) > 3:
                     rider_id = name_map.get(p)
                     if rider_id:
                         break
+
         if not rider_id:
+            # Fuzzy: mindst 2 ord til fælles
+            scraped_words = set(name_norm.split())
+            for db_norm, db_id in name_map.items():
+                if len(scraped_words & set(db_norm.split())) >= 2:
+                    rider_id = db_id
+                    break
+
+        if not rider_id:
+            print(f"    ! Rytter ikke fundet: {row['name']}")
             continue
 
         val = row.get("val") or ""
         pts = 0
         try:
-            pts = int(val.replace(".", ""))
+            pts = int(str(val).replace(".", "").replace(",", ""))
         except Exception:
             pass
 
