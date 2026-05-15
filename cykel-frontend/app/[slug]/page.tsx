@@ -285,11 +285,24 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const totalRiders = startlist.filter(e => e.status === "active").length;
 
   const danishRiders = startlist.filter((e) => e.riders?.nationality === "DK" && e.status === "active");
+  const GC_SPECIALITIES = new Set(["GC", "Climber", "All-rounder", "Puncheur"]);
   const gcFavorites = isOneDay
     ? startlist.filter((e) => e.status === "active" && (e.is_gc_captain || e.is_sprint_captain)).slice(0, 8)
     : startlist
-        .filter((e) => e.status === "active" && e.riders?.uci_ranking != null)
-        .sort((a, b) => (a.riders!.uci_ranking! - b.riders!.uci_ranking!))
+        .filter((e) => e.status === "active" && (
+          e.riders?.uci_ranking != null ||
+          e.is_gc_captain ||
+          GC_SPECIALITIES.has(e.riders?.speciality ?? "")
+        ))
+        .sort((a, b) => {
+          const rankA = a.riders?.uci_ranking ?? 9999;
+          const rankB = b.riders?.uci_ranking ?? 9999;
+          if (rankA !== rankB) return rankA - rankB;
+          if (a.is_gc_captain !== b.is_gc_captain) return a.is_gc_captain ? -1 : 1;
+          const gcA = GC_SPECIALITIES.has(a.riders?.speciality ?? "") ? 0 : 1;
+          const gcB = GC_SPECIALITIES.has(b.riders?.speciality ?? "") ? 0 : 1;
+          return gcA - gcB;
+        })
         .slice(0, 8);
   const hasResults   = gcData && gcData.standings.length > 0;
 

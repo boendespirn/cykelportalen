@@ -200,6 +200,7 @@ def scrape_rider_detail(pcs_slug: str) -> dict:
     nationality = None
     date_of_birth = None
     speciality = None
+    uci_ranking = None
 
     for li in soup.select("ul.infolist li"):
         divs = li.select("div")
@@ -214,11 +215,17 @@ def scrape_rider_detail(pcs_slug: str) -> dict:
             date_of_birth = parse_date(value)
         elif "speciality" in label:
             speciality = value if value else None
+        elif "uci" in label and "rank" in label:
+            try:
+                uci_ranking = int(value.split()[0].replace(".", ""))
+            except (ValueError, IndexError):
+                pass
 
     return {
         "nationality": nationality,
         "date_of_birth": date_of_birth,
         "speciality": speciality,
+        "uci_ranking": uci_ranking,
     }
 
 
@@ -276,6 +283,7 @@ def run():
                 "nationality": nationality,
                 "date_of_birth": rd.get("date_of_birth"),
                 "speciality": rd.get("speciality"),
+                "uci_ranking": rd.get("uci_ranking"),
                 "team_id": team_id,
                 "source_url": f"{BASE_URL}/rider/{r['pcs_slug']}",
             })
