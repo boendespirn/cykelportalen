@@ -637,21 +637,21 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
       {dnfs.length > 0 && <DnfSection entries={dnfs} />}
 
-      {/* ── Stats bar ── */}
-      {totalRiders > 0 && (
-        <div className="flex gap-6 mb-8 text-sm">
-          <div><span className="text-2xl font-display tracking-wide text-white">{teamGroups.size}</span><span className="ml-1.5 text-slate-500">hold</span></div>
-          <div><span className="text-2xl font-display tracking-wide text-white">{totalRiders}</span><span className="ml-1.5 text-slate-500">ryttere</span></div>
-        </div>
-      )}
-
       <div className="grid gap-10 lg:grid-cols-[1fr_340px]">
 
-        {/* ── Startliste ── */}
-        <section>
-          <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase mb-5">
-            Startliste {totalRiders > 0 && <span className="text-slate-700">({totalRiders})</span>}
-          </h2>
+        {/* ── Startliste — 2. på mobil, venstre kolonne på desktop ── */}
+        <section className="order-2 lg:order-1">
+          <div className="flex items-baseline justify-between mb-5">
+            <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase">
+              Startliste {totalRiders > 0 && <span className="text-slate-700">({totalRiders})</span>}
+            </h2>
+            {totalRiders > 0 && (
+              <div className="flex gap-4 text-sm">
+                <span><span className="font-display text-white">{teamGroups.size}</span><span className="ml-1 text-slate-600">hold</span></span>
+                <span><span className="font-display text-white">{totalRiders}</span><span className="ml-1 text-slate-600">ryttere</span></span>
+              </div>
+            )}
+          </div>
           {startlist.length === 0 ? (
             <div className="rounded-xl border border-slate-800 p-10 text-center text-slate-600 text-sm">
               Startliste ikke tilgængelig endnu.
@@ -661,8 +661,8 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           )}
         </section>
 
-        {/* ── Sidebar: etaper ── */}
-        <aside>
+        {/* ── Etaper — 1. på mobil, højre kolonne på desktop ── */}
+        <aside className="order-1 lg:order-2">
           <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase mb-5">
             Etaper {stages.length > 0 && <span className="text-slate-700">({stages.length})</span>}
           </h2>

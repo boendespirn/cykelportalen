@@ -184,7 +184,7 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
         is_past    = end < today
 
         if is_ongoing:
-            ongoing_races.append(name)
+            ongoing_races.append((name, slug, pcs_slug))
 
         print(f"{'='*55}")
         print(f"{name}  ({slug})")
@@ -263,9 +263,20 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
     print(f"  Springer over (ingen PCS-slug): {skipped}")
 
     if ongoing_races:
-        print(f"\n  Igangværende løb (kør resultater manuelt):")
-        for r in ongoing_races:
-            print(f"    • {r}")
+        print(f"\n  Henter resultater for igangværende løb:")
+        for r_name, r_slug, r_pcs in ongoing_races:
+            if not r_pcs:
+                print(f"    • {r_name} — ingen PCS-slug, springer over")
+                continue
+            year = int(r_slug[-4:]) if r_slug[-4:].isdigit() else YEAR
+            print(f"    • {r_name}")
+            run_script(
+                "giro_results_agent.py",
+                "--db-slug", r_slug,
+                "--pcs-slug", r_pcs,
+                "--year", str(year),
+                label=f"results {r_slug}",
+            )
 
     print()
 

@@ -25,8 +25,6 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-GIRO_SLUG    = "giro-d-italia-2026"
-PCS_BASE     = "https://www.procyclingstats.com/race/giro-d-italia/2026"
 
 CF_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -52,9 +50,9 @@ def sb_get(path: str, params: str = "") -> list:
 def sb_upsert(table: str, rows: list, on_conflict: str) -> None:
     if not rows:
         return
-    url = f"{SUPABASE_URL}/rest/v1/{table}"
-    h = {**HEADERS(), "Prefer": f"resolution=merge-duplicates,return=minimal"}
-    r = requests.post(url, json=rows, headers={**h, "Prefer": f"resolution=merge-duplicates,return=minimal"})
+    url = f"{SUPABASE_URL}/rest/v1/{table}?on_conflict={on_conflict}"
+    h = {**HEADERS(), "Prefer": "resolution=merge-duplicates,return=minimal"}
+    r = requests.post(url, json=rows, headers=h)
     if r.status_code not in (200, 201, 204):
         print(f"  !! upsert {table} fejl {r.status_code}: {r.text[:200]}")
 
@@ -222,10 +220,10 @@ def resolve_rider(row: dict, slug_map: dict, bib_map: dict) -> str | None:
     return None
 
 
-def get_race() -> dict:
-    data = sb_get("races", f"?select=id,name,slug&slug=eq.{GIRO_SLUG}&limit=1")
+def get_race(db_slug: str) -> dict:
+    data = sb_get("races", f"?select=id,name,slug&slug=eq.{db_slug}&limit=1")
     if not data:
-        raise ValueError(f"Løb '{GIRO_SLUG}' ikke fundet i DB")
+        raise ValueError(f"Løb '{db_slug}' ikke fundet i DB")
     return data[0]
 
 
@@ -441,8 +439,11 @@ def mark_dnfs(
 
 # ---------- main -----------------------------------------------------------
 
-async def main(stages_to_scrape: list[int], gc_only: bool):
-    race   = get_race()
+async def main(stages_to_scrape: list[int], gc_only: bool, db_slug: str, pcs_slug: str, year: int):
+    global PCS_BASE
+    PCS_BASE = f"https://www.procyclingstats.com/race/{pcs_slug}/{year}"
+
+    race   = get_race(db_slug)
     stages = get_stages(race["id"])
 
     print(f"\nLøb: {race['name']} ({race['id']})")
@@ -515,7 +516,10 @@ async def main(stages_to_scrape: list[int], gc_only: bool):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--stages", nargs="*", type=int, default=[])
-    parser.add_argument("--gc-only", action="store_true")
+    parser.add_argument("--stages",   nargs="*", type=int, default=[])
+    parser.add_argument("--gc-only",  action="store_true")
+    parser.add_argument("--db-slug",  default="giro-d-italia-2026", help="DB-slug med årstal")
+    parser.add_argument("--pcs-slug", default="giro-d-italia",      help="PCS-slug til URL")
+    parser.add_argument("--year",     type=int, default=2026)
     args = parser.parse_args()
-    asyncio.run(main(args.stages, args.gc_only))
+    asyncio.run(main(args.stages, args.gc_only, args.db_slug, args.pcs_slug, args.year))

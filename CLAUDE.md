@@ -1,7 +1,7 @@
-# Cykelportalen — CLAUDE.md
+# Klassementet — CLAUDE.md
 
 ## Projektbeskrivelse
-En dansk cykelportal der samler alt data om professionel cykling: løb, ryttere, hold, etaper, resultater, klassementer, udstyr og sponsorater. Portalen fungerer primært som en løbskalender med dybdegående bagvedliggende data.
+En dansk cykelportal (klassementet.dk) der samler alt data om professionel cykling: løb, ryttere, hold, etaper, resultater, klassementer, udstyr og sponsorater. Portalen fungerer primært som en løbskalender med dybdegående bagvedliggende data.
 
 **Målgruppe:** Cykelfans der søger information om kommende løb, rytterprofiler og historiske resultater.
 
@@ -18,8 +18,8 @@ Supabase            ← PostgreSQL cloud database
 ```
 
 **Deployments:**
-- Frontend: Vercel (planlagt)
-- Backend: Railway eller Render (planlagt)
+- Frontend: Vercel → klassementet.dk (aktiv)
+- Backend: Railway (aktiv)
 - Database: Supabase (aktiv)
 
 ---
