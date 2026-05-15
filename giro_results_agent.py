@@ -448,35 +448,49 @@ _JERSEY_LABELS = {
 }
 
 
-def _parse_giro_text(lines: list[str]) -> list[dict]:
+def _parse_giro_text(lines: list[str], ctype: str) -> list[dict]:
     """
-    Giroditalia.it body-tekst format:
-      MAGLIA\nCICLAMINO\nRider\nTeam\nPoints\n1\nFirstname\nLASTNAME\nTeam\n130\n2\n...
-    Returnerer liste med {pos, name, val}.
-    """
-    rows = []
-    # Find 'Rider\nTeam' som header-markør
-    start_idx = None
-    for i in range(len(lines) - 2):
-        if lines[i] == "Rider" and lines[i + 1] == "Team":
-            start_idx = i + 3  # Spring Rider, Team, (Points/Time) over
-            break
-    if start_idx is None:
-        return rows
+    Find den korrekte MAGLIA-sektion for ctype og parse én-værdi-per-linje-formatet.
 
+    Point-klassementer (points, mountains): 5 linjer per post
+      pos / fornavn / EFTERNAVN / hold / point
+    Tidsklassementer (gc, youth): 6 linjer per post
+      pos / fornavn / EFTERNAVN / hold / samlet-tid / tidsgab
+    """
+    jersey_labels = _JERSEY_LABELS.get(ctype, [])
+
+    # Søg efter "MAGLIA\n[LABEL]\nRider\nTeam" der matcher vores ctype
+    start_idx = None
+    has_gap_col = False
+    for i in range(len(lines) - 4):
+        if lines[i] == "MAGLIA" and lines[i + 1] in jersey_labels:
+            if i + 3 < len(lines) and lines[i + 2] == "Rider" and lines[i + 3] == "Team":
+                # Tjek om der er en "Gap"-kolonne (tidsbaseret) eller ej
+                has_gap_col = (i + 5 < len(lines) and lines[i + 5] == "Gap")
+                header_cols = 2 if has_gap_col else 1  # Time+Gap eller Points
+                start_idx = i + 4 + header_cols
+                break
+
+    if start_idx is None:
+        return []
+
+    lines_per_entry = 6 if has_gap_col else 5
+    rows = []
     i = start_idx
-    while i < len(lines) - 3:
-        line = lines[i]
-        if line.isdigit() and 1 <= int(line) <= 300:
-            pos = int(line)
+    while i < len(lines) - (lines_per_entry - 1):
+        if lines[i] == "LOAD MORE":
+            break
+        if lines[i].isdigit() and 1 <= int(lines[i]) <= 300:
+            pos = int(lines[i])
             firstname = lines[i + 1]
             lastname  = lines[i + 2]
-            # lines[i+3] = team, lines[i+4] = value (points/time)
-            val = lines[i + 4] if i + 4 < len(lines) else None
-            # Validér: fornavn og efternavn skal indeholde bogstaver
+            # i+3 = hold, i+4 = samlet-tid (tids) eller point, i+5 = gap (tids)
+            val = lines[i + 5] if has_gap_col else lines[i + 4]
+            if val and i + (lines_per_entry - 1) < len(lines):
+                val = val if val != "LOAD MORE" else None
             if re.search(r'[A-Za-z]', firstname) and re.search(r'[A-Za-z]', lastname):
                 rows.append({"pos": pos, "name": f"{firstname} {lastname}", "val": val})
-            i += 5
+            i += lines_per_entry
         else:
             i += 1
     return rows
@@ -494,7 +508,7 @@ async def scrape_official_classification(page, param: str, ctype: str, year: int
     content = await page.inner_text("body")
     lines = [l.strip() for l in content.splitlines() if l.strip()]
 
-    rows = _parse_giro_text(lines)
+    rows = _parse_giro_text(lines, ctype)
 
     # Fallback: udtræk jersey-leder fra summary-sektion (giver kun position 1)
     if not rows:
@@ -572,10 +586,15 @@ def store_official_classification(
 
         val = row.get("val") or ""
         pts = 0
-        try:
-            pts = int(str(val).replace(".", "").replace(",", ""))
-        except Exception:
-            pass
+        time_gap = 0
+        if ctype in ("points", "mountains"):
+            try:
+                pts = int(str(val).replace(".", "").replace(",", ""))
+            except Exception:
+                pts = 0
+        else:
+            # Tidsbaseret klassement (youth, gc): val er tidsgab som "03:17"
+            time_gap = parse_gap(str(val)) if val else 0
 
         records.append({
             "race_id"             : race_id,
@@ -583,7 +602,7 @@ def store_official_classification(
             "classification_type" : ctype,
             "rider_id"            : rider_id,
             "position"            : row["pos"],
-            "time_gap_seconds"    : 0,
+            "time_gap_seconds"    : time_gap,
             "points"              : pts,
             "dnf"                 : False,
         })
