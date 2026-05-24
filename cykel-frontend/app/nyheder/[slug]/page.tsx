@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
 
+import type { Metadata } from "next";
 import Link from "next/link";
+import { marked } from "marked";
 import { API_BASE } from "@/lib/api";
 
 type Article = {
@@ -14,15 +16,20 @@ type Article = {
   author: string;
   image_url: string | null;
   published_at: string;
+  source_url: string | null;
   races: { name: string; slug: string } | null;
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
+  resultater:  "Resultater",
+  startliste:  "Startliste",
+  generelt:    "Nyheder",
+  transfer:    "Transfer",
+  profil:      "Profil",
+  analyse:     "Analyse",
   race_report: "Løbsrapport",
-  startlist:   "Startliste",
-  general:     "Nyheder",
   interview:   "Interview",
-  analysis:    "Analyse",
+  general:     "Nyheder",
 };
 
 async function getArticle(slug: string): Promise<Article | null> {
@@ -39,6 +46,43 @@ function formatDate(d: string): string {
   });
 }
 
+function renderMarkdown(md: string): string {
+  // Sanitér interne links: /giro-ditalia-2026 → absolute path (allerede OK)
+  const renderer = new marked.Renderer();
+  renderer.link = ({ href, title, text }) => {
+    const isInternal = href?.startsWith("/");
+    const attrs = isInternal
+      ? `href="${href}"`
+      : `href="${href}" target="_blank" rel="noopener noreferrer"`;
+    return `<a ${attrs}>${text}</a>`;
+  };
+  return marked(md, { renderer, breaks: true }) as string;
+}
+
+// ── Metadata ──────────────────────────────────────────────────────────────────
+
+export async function generateMetadata(
+  props: { params: Promise<{ slug: string }> }
+): Promise<Metadata> {
+  const { slug } = await props.params;
+  const article = await getArticle(slug);
+  if (!article) return { title: "Artikel ikke fundet" };
+  return {
+    title: article.title,
+    description: article.meta_description ?? article.excerpt ?? undefined,
+    openGraph: {
+      title: article.title,
+      description: article.meta_description ?? article.excerpt ?? undefined,
+      type: "article",
+      publishedTime: article.published_at,
+      images: article.image_url ? [{ url: article.image_url }] : [],
+    },
+    twitter: { card: "summary_large_image" },
+  };
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default async function ArticlePage(props: { params: Promise<{ slug: string }> }) {
   const { slug } = await props.params;
   const article = await getArticle(slug);
@@ -54,8 +98,32 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
     );
   }
 
+  const contentHtml = renderMarkdown(article.content);
+
+  // JSON-LD Article structured data
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: article.title,
+    description: article.meta_description ?? article.excerpt,
+    author: { "@type": "Organization", name: article.author },
+    publisher: {
+      "@type": "Organization",
+      name: "Klassementet",
+      url: "https://klassementet.dk",
+    },
+    datePublished: article.published_at,
+    image: article.image_url ?? undefined,
+    url: `https://klassementet.dk/nyheder/${article.slug}`,
+  };
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
       <Link href="/nyheder" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-10">
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -86,12 +154,26 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
         <span className="capitalize">{formatDate(article.published_at)}</span>
         <span>·</span>
         <span>{article.author}</span>
+        {article.source_url && (
+          <>
+            <span>·</span>
+            <a href={article.source_url} target="_blank" rel="noopener noreferrer"
+              className="hover:text-slate-400 transition-colors">
+              Kilde →
+            </a>
+          </>
+        )}
       </div>
 
       {/* Hero image */}
       {article.image_url && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={article.image_url} alt="" className="w-full rounded-xl mb-8 border border-slate-800" />
+        <img
+          src={article.image_url}
+          alt={article.title}
+          className="w-full rounded-xl mb-8 border border-slate-800 object-cover"
+          style={{ maxHeight: "400px" }}
+        />
       )}
 
       {/* Excerpt */}
@@ -101,16 +183,31 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
         </p>
       )}
 
-      {/* Content */}
+      {/* Content — rendered from markdown */}
       <div
         className="prose prose-invert prose-sm max-w-none
           prose-headings:font-display prose-headings:tracking-wide
           prose-p:text-slate-300 prose-p:leading-relaxed
           prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline
           prose-strong:text-slate-100
+          prose-li:text-slate-300
           prose-blockquote:border-emerald-500/50 prose-blockquote:text-slate-400"
-        dangerouslySetInnerHTML={{ __html: article.content }}
+        dangerouslySetInnerHTML={{ __html: contentHtml }}
       />
+
+      {/* Relateret løb */}
+      {article.races && (
+        <div className="mt-10 pt-8 border-t border-slate-800">
+          <p className="text-xs text-slate-600 mb-3">Relateret løb</p>
+          <Link
+            href={`/${article.races.slug}`}
+            className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-emerald-400 transition-colors"
+          >
+            <span className="text-emerald-500">→</span>
+            {article.races.name}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

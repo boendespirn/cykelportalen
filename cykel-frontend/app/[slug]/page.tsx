@@ -390,6 +390,22 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     </header>
   );
 
+  // ── JSON-LD SportsEvent ────────────────────────────────────────────────
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SportsEvent",
+    name: race.name,
+    sport: "Cycling",
+    startDate: race.start_date,
+    endDate: race.end_date ?? race.start_date,
+    location: {
+      "@type": "Place",
+      address: { "@type": "PostalAddress", addressCountry: race.country_code ?? "IT" },
+    },
+    url: `https://klassementet.dk/${race.slug}`,
+    organizer: { "@type": "Organization", name: "UCI WorldTour" },
+  };
+
   // ══════════════════════════════════════════════════════════════════════
   // ONE-DAY RACE LAYOUT
   // ══════════════════════════════════════════════════════════════════════
@@ -398,6 +414,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
         <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-10">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -552,6 +569,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-10">
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
