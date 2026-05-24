@@ -105,7 +105,7 @@ def get_ongoing_races():
         stages_url = (
             f"{SUPABASE_URL}/rest/v1/stages"
             f"?race_id=eq.{race['id']}"
-            f"&select=stage_number,date,stage_type,start_location,finish_location,distance_km"
+            f"&select=stage_number,date,stage_type,start_location,finish_location,distance_km,elevation_image_url"
             f"&order=stage_number.asc"
         )
         stages = requests.get(stages_url, headers=get_headers()).json()
@@ -166,7 +166,8 @@ def get_stage_detail(slug: str, stage_number: int):
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}&stage_number=eq.{stage_number}&limit=1"
         f"&select=stage_number,name,date,distance_km,stage_type,start_location,finish_location,"
-        f"elevation_gain_m,profile_score,elevation_image_url,pcs_stage_url"
+        f"elevation_gain_m,profile_score,elevation_image_url,pcs_stage_url,"
+        f"description,finish_type,fun_facts,stage_start_time"
     )
     stage_res = requests.get(stage_url, headers=get_headers())
     stage_data = stage_res.json()
@@ -232,7 +233,7 @@ def get_riders_for_team(slug: str):
     riders_url = (
         f"{SUPABASE_URL}/rest/v1/riders"
         f"?team_id=eq.{team_id}"
-        f"&select=name,slug,nationality,speciality,uci_ranking"
+        f"&select=name,slug,nationality,speciality,uci_ranking,photo_url"
         f"&order=name.asc"
     )
     res = requests.get(riders_url, headers=get_headers())
@@ -245,7 +246,7 @@ def get_riders_for_team(slug: str):
 def get_riders():
     url = (
         f"{SUPABASE_URL}/rest/v1/riders"
-        f"?select=name,slug,nationality,speciality,uci_ranking,teams(name,slug)"
+        f"?select=name,slug,nationality,speciality,uci_ranking,photo_url,teams(name,slug)"
         f"&order=uci_ranking.asc.nullslast"
     )
     response = requests.get(url, headers=get_headers())
@@ -266,7 +267,7 @@ def get_startlist_for_race(slug: str):
         f"{SUPABASE_URL}/rest/v1/startlists"
         f"?race_id=eq.{race_id}"
         f"&select=bib_number,is_gc_captain,is_sprint_captain,status,role,"
-        f"riders(name,slug,nationality,speciality,date_of_birth,uci_ranking),"
+        f"riders(name,slug,nationality,speciality,date_of_birth,uci_ranking,photo_url),"
         f"teams(name,slug,country_code)"
         f"&status=eq.active"
         f"&order=bib_number.asc.nullslast"
@@ -297,7 +298,7 @@ def get_gc_for_race(slug: str):
     gc_url = (
         f"{SUPABASE_URL}/rest/v1/classifications"
         f"?race_id=eq.{race_id}&classification_type=eq.gc&after_stage_number=eq.{after_stage}"
-        f"&select=position,time_gap_seconds,riders(name,slug,nationality,speciality,teams(name,slug))"
+        f"&select=position,time_gap_seconds,riders(name,slug,nationality,speciality,photo_url,teams(name,slug))"
         f"&order=position.asc&limit=20"
     )
     data = requests.get(gc_url, headers=get_headers()).json()
@@ -327,7 +328,7 @@ def get_classification(slug: str, classif_type: str):
     url = (
         f"{SUPABASE_URL}/rest/v1/classifications"
         f"?race_id=eq.{race_id}&classification_type=eq.{classif_type}&after_stage_number=eq.{after_stage}"
-        f"&select=position,time_gap_seconds,points,riders(name,slug,nationality,teams(name,slug))"
+        f"&select=position,time_gap_seconds,points,riders(name,slug,nationality,photo_url,teams(name,slug))"
         f"&order=position.asc&limit=20"
     )
     data = requests.get(url, headers=get_headers()).json()

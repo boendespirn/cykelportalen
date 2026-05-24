@@ -1,10 +1,12 @@
 export const dynamic = "force-dynamic";
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import SpoilerSection from "./SpoilerSection";
 import DnfSection from "./DnfSection";
 import StageMapLoader from "./stage/[n]/StageMapLoader";
+import RaceFavorites from "./RaceFavorites";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -25,18 +27,18 @@ type Stage = {
 type StartlistEntry = {
   bib_number: number | null; is_gc_captain: boolean; is_sprint_captain: boolean;
   status: string; role: string | null;
-  riders: { name: string; slug: string; nationality: string | null; speciality: string | null; date_of_birth: string | null; uci_ranking: number | null } | null;
+  riders: { name: string; slug: string; nationality: string | null; speciality: string | null; date_of_birth: string | null; uci_ranking: number | null; photo_url: string | null } | null;
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
 
 type GCEntry = {
   position: number | null; time_gap_seconds: number | null;
-  riders: { name: string; slug: string; nationality: string | null; speciality: string | null; teams: { name: string; slug: string } | null } | null;
+  riders: { name: string; slug: string; nationality: string | null; speciality: string | null; photo_url: string | null; teams: { name: string; slug: string } | null } | null;
 };
 
 type ClassifEntry = {
   position: number | null; time_gap_seconds: number | null; points: number | null;
-  riders: { name: string; slug: string; nationality: string | null; teams: { name: string; slug: string } | null } | null;
+  riders: { name: string; slug: string; nationality: string | null; photo_url: string | null; teams: { name: string; slug: string } | null } | null;
 };
 
 type DnfEntry = {
@@ -246,6 +248,25 @@ function StartlistBlock({
       })}
     </div>
   );
+}
+
+// ── Metadata ───────────────────────────────────────────────────────────────
+
+export async function generateMetadata(
+  props: { params: Promise<{ slug: string }> }
+): Promise<Metadata> {
+  const { slug } = await props.params;
+  const race = await getRace(slug);
+  if (!race) return { title: "Løb ikke fundet" };
+  const year = race.start_date ? new Date(race.start_date + "T00:00:00").getFullYear() : "";
+  return {
+    title: `${race.name} ${year}`,
+    description: `Alt om ${race.name} ${year}: startliste, etaper, favoritter, højdeprofiler og klassementer.`,
+    openGraph: {
+      title: `${race.name} ${year} | Klassementet`,
+      description: `Startliste, etapeinfo, favoritter og live klassement fra ${race.name} ${year}.`,
+    },
+  };
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────
@@ -588,7 +609,18 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         </Link>
       )}
 
-      {/* ── Spoiler-sektion ── */}
+      {/* ── Favorit-leaderboard (jersey-tabs) ── */}
+      {hasResults && (
+        <RaceFavorites
+          raceName={race.name}
+          gcStandings={gcData?.standings ?? []}
+          pointsStandings={pointsData?.standings ?? []}
+          mountainsStandings={mountainsData?.standings ?? []}
+          youthStandings={youthData?.standings ?? []}
+        />
+      )}
+
+      {/* ── Spoiler-sektion (fuld klassementstabel) ── */}
       {hasResults && (
         <SpoilerSection
           afterStage={gcData!.after_stage}
@@ -599,61 +631,36 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         />
       )}
 
-      {/* ── Udvalgte ryttere ── */}
-      {(danishRiders.length > 0 || gcFavorites.length > 0) && (
-        <div className="grid gap-6 sm:grid-cols-2 mb-10">
-          {gcFavorites.length > 0 && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 mb-4">🏆 Top-ryttere i feltet</h2>
-              <div className="space-y-2">
-                {gcFavorites.map((entry) => {
-                  const r = entry.riders;
-                  if (!r) return null;
-                  const gcEntry = gcData?.standings.find(g => g.riders?.slug === r.slug);
-                  return (
-                    <Link key={r.slug} href={`/riders/${r.slug}`}
-                      className="flex items-center gap-2.5 hover:bg-slate-800/50 rounded-lg px-2 py-1.5 transition-colors -mx-2">
-                      <span className="w-5 text-center text-sm flex-shrink-0">{flagEmoji(r.nationality)}</span>
-                      <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
-                      {gcEntry && gcEntry.position != null && (
-                        <span className="text-xs font-mono text-pink-400">GC #{gcEntry.position}</span>
-                      )}
-                      {r.uci_ranking && !gcEntry && (
-                        <span className="text-xs font-mono text-slate-500">UCI #{r.uci_ranking}</span>
-                      )}
-                      {r.speciality && <span className="text-xs text-slate-600">{SPECIALITY_ICON[r.speciality] ?? ""}</span>}
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-          {danishRiders.length > 0 && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="text-xs uppercase tracking-[0.2em] text-red-400 mb-4">🇩🇰 Danskere i løbet</h2>
-              <div className="space-y-2">
-                {danishRiders.map((entry) => {
-                  const r = entry.riders;
-                  if (!r) return null;
-                  const gcEntry = gcData?.standings.find(g => g.riders?.slug === r.slug);
-                  return (
-                    <Link key={r.slug} href={`/riders/${r.slug}`}
-                      className="flex items-center gap-2.5 hover:bg-slate-800/50 rounded-lg px-2 py-1.5 transition-colors -mx-2">
-                      <span className="text-sm">🇩🇰</span>
-                      <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
-                      {gcEntry && gcEntry.position != null && <span className="text-xs font-mono text-pink-400">#{gcEntry.position}</span>}
-                      {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">GC</span>}
-                      {entry.is_sprint_captain && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Sprint</span>}
-                      {r.speciality && !entry.is_gc_captain && !entry.is_sprint_captain && (
-                        <span className="text-xs text-slate-600">{SPECIALITY_ICON[r.speciality] ?? r.speciality}</span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-        </div>
+      {/* ── Danskere i løbet ── */}
+      {danishRiders.length > 0 && (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 mb-8">
+          <h2 className="text-xs uppercase tracking-[0.2em] text-red-400 mb-4">🇩🇰 Danskere i løbet</h2>
+          <div className="space-y-1">
+            {danishRiders.map((entry) => {
+              const r = entry.riders;
+              if (!r) return null;
+              const gcEntry = gcData?.standings.find(g => g.riders?.slug === r.slug);
+              return (
+                <Link key={r.slug} href={`/riders/${r.slug}`}
+                  className="flex items-center gap-3 hover:bg-slate-800/50 rounded-lg px-2 py-2 transition-colors -mx-2">
+                  <div className="relative flex-shrink-0 w-8 h-8">
+                    {r.photo_url ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={r.photo_url} alt={r.name} className="w-8 h-8 rounded-full object-cover bg-slate-800" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-red-950/60 flex items-center justify-center text-sm">🇩🇰</div>
+                    )}
+                    {r.photo_url && <span className="absolute -bottom-0.5 -right-0.5 text-[9px]">🇩🇰</span>}
+                  </div>
+                  <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
+                  {gcEntry?.position != null && <span className="text-xs font-mono text-pink-400">GC #{gcEntry.position}</span>}
+                  {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">GC</span>}
+                  {entry.is_sprint_captain && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Sprint</span>}
+                </Link>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {dnfs.length > 0 && <DnfSection entries={dnfs} />}

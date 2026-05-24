@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
 import { API_BASE } from "@/lib/api";
@@ -18,6 +19,10 @@ type Stage = {
   profile_score: number | null;
   elevation_image_url: string | null;
   pcs_stage_url: string | null;
+  description: string | null;
+  finish_type: string | null;
+  fun_facts: string[] | null;
+  stage_start_time: string | null;
 };
 
 type Race = { id: string; name: string; slug: string };
@@ -34,6 +39,7 @@ type StartlistEntry = {
     speciality: string | null;
     date_of_birth: string | null;
     uci_ranking: number | null;
+    photo_url: string | null;
   } | null;
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
@@ -202,6 +208,30 @@ function getRidersForStage(
     .slice(0, 16);
 }
 
+// ── Metadata ──────────────────────────────────────────────────────────────────
+
+export async function generateMetadata(
+  props: { params: Promise<{ slug: string; n: string }> }
+): Promise<Metadata> {
+  const { slug, n } = await props.params;
+  const detail = await getStageDetail(slug, n);
+  if (!detail) return { title: "Etape ikke fundet" };
+  const { stage, race } = detail;
+  const finish = stage.finish_location ?? "";
+  const start = stage.start_location ?? "";
+  const title = `Etape ${n}: ${start} — ${finish} | ${race.name}`;
+  const desc = `Alt om etape ${n} i ${race.name}: højdeprofil, favoritter, kort og etapeinfo. ${stage.distance_km ? `${stage.distance_km} km.` : ""}`;
+  return {
+    title,
+    description: desc,
+    openGraph: {
+      title: `${title} | Klassementet`,
+      description: desc,
+      images: stage.elevation_image_url ? [{ url: stage.elevation_image_url }] : [],
+    },
+  };
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function StagePage(props: {
@@ -313,6 +343,60 @@ export default async function StagePage(props: {
         </div>
       )}
 
+      {/* Etapeinfo */}
+      {(stage.description || stage.fun_facts?.length || stage.stage_start_time) && (
+        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          {/* Header-bar */}
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+              Etapeinfo
+            </span>
+            {stage.finish_type && (
+              <span className="text-xs text-slate-500 capitalize">
+                · {stage.finish_type === "sprint" ? "Massespurt" :
+                   stage.finish_type === "uphill" ? "Bjerg-finish" :
+                   stage.finish_type === "cobblestone" ? "Brosten-finish" :
+                   stage.finish_type === "tt" ? "Enkeltstart" :
+                   stage.finish_type === "gravel" ? "Grus-finish" :
+                   stage.finish_type === "circuit" ? "Rund bane" :
+                   stage.finish_type}
+              </span>
+            )}
+            {stage.stage_start_time && (
+              <span className="ml-auto text-xs text-slate-400 font-mono">
+                🕐 Start {stage.stage_start_time.slice(0, 5)} CET
+              </span>
+            )}
+          </div>
+
+          <div className="p-5 space-y-4">
+            {/* Beskrivelse */}
+            {stage.description && (
+              <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+                {stage.description}
+              </div>
+            )}
+
+            {/* Fun facts */}
+            {stage.fun_facts && stage.fun_facts.length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">
+                  Kendte detaljer
+                </p>
+                <ul className="space-y-1.5">
+                  {stage.fun_facts.map((fact, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-slate-400">
+                      <span className="text-emerald-500 mt-0.5 flex-shrink-0">·</span>
+                      <span>{fact}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Kort + Stats */}
       <div className="grid gap-4 lg:grid-cols-[1fr_260px] mb-10">
         {/* Kort */}
@@ -409,7 +493,25 @@ export default async function StagePage(props: {
                       : "border-slate-800/60 bg-slate-900/30"
                   }`}
                 >
-                  <span className="text-lg flex-shrink-0">{flagEmoji(rider.nationality)}</span>
+                  {/* Foto eller flag */}
+                  <div className="relative flex-shrink-0 w-10 h-10">
+                    {rider.photo_url ? (
+                      <img
+                        src={rider.photo_url}
+                        alt={rider.name}
+                        className="w-10 h-10 rounded-full object-cover bg-slate-800"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-lg">
+                        {flagEmoji(rider.nationality)}
+                      </div>
+                    )}
+                    {rider.nationality && (
+                      <span className="absolute -bottom-0.5 -right-0.5 text-[10px] leading-none">
+                        {flagEmoji(rider.nationality)}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className={`text-sm font-medium truncate ${isDanish ? "text-red-200" : "text-slate-100"}`}>
@@ -472,7 +574,20 @@ export default async function StagePage(props: {
                   href={`/riders/${rider.slug}`}
                   className="flex items-center gap-3 px-4 py-3 rounded-xl border border-red-800/40 bg-red-950/15 hover:border-red-700/50 hover:bg-red-950/25 transition-colors"
                 >
-                  <span className="text-lg">🇩🇰</span>
+                  <div className="relative flex-shrink-0 w-10 h-10">
+                    {rider.photo_url ? (
+                      <img
+                        src={rider.photo_url}
+                        alt={rider.name}
+                        className="w-10 h-10 rounded-full object-cover bg-slate-800"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-red-950/60 flex items-center justify-center text-lg">
+                        🇩🇰
+                      </div>
+                    )}
+                    <span className="absolute -bottom-0.5 -right-0.5 text-[10px] leading-none">🇩🇰</span>
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-medium text-red-100 truncate">

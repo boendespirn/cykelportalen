@@ -21,6 +21,7 @@ type TodayStage = {
   start_location: string | null;
   finish_location: string | null;
   distance_km: string | null;
+  elevation_image_url: string | null;
 };
 
 type OngoingRace = Race & {
@@ -165,30 +166,48 @@ export default async function Home() {
 
                     {/* Today's stage */}
                     {ts ? (
-                      <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 px-4 py-3">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full">
-                            I dag
-                          </span>
-                          <span className="text-xs text-slate-500">
-                            Etape {ts.stage_number}
-                          </span>
-                          {typeLabel && (
-                            <span className={`text-xs font-medium ${typeColor}`}>
-                              · {typeLabel}
+                      <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
+                        {/* Elevation profile thumbnail */}
+                        {ts.elevation_image_url && (
+                          <div className="relative">
+                            <img
+                              src={ts.elevation_image_url}
+                              alt={`Højdeprofil etape ${ts.stage_number}`}
+                              className="w-full h-20 object-cover object-bottom"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent" />
+                          </div>
+                        )}
+                        <div className="px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full">
+                                I dag
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                Etape {ts.stage_number}
+                              </span>
+                              {typeLabel && (
+                                <span className={`text-xs font-medium ${typeColor}`}>
+                                  · {typeLabel}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-emerald-400 font-medium mb-1.5">
+                              Se etapen →
                             </span>
-                          )}
+                          </div>
+                          <p className="text-sm text-slate-200">
+                            {ts.start_location}
+                            <span className="text-slate-500 mx-1.5">→</span>
+                            <span className="font-semibold text-white">{ts.finish_location}</span>
+                            {ts.distance_km && (
+                              <span className="text-slate-500 ml-2 text-xs font-mono">
+                                {parseFloat(ts.distance_km).toFixed(0)} km
+                              </span>
+                            )}
+                          </p>
                         </div>
-                        <p className="text-sm text-slate-200">
-                          {ts.start_location}
-                          <span className="text-slate-500 mx-1.5">→</span>
-                          <span className="font-semibold text-white">{ts.finish_location}</span>
-                          {ts.distance_km && (
-                            <span className="text-slate-500 ml-2 text-xs font-mono">
-                              {parseFloat(ts.distance_km).toFixed(0)} km
-                            </span>
-                          )}
-                        </p>
                       </div>
                     ) : (
                       <div className="mb-4 rounded-xl bg-slate-800/40 border border-slate-700/40 px-4 py-3">

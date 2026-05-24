@@ -9,8 +9,20 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const bebasNeue = Bebas_Neue({ weight: "400", variable: "--font-bebas", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Klassementet",
-  description: "Dansk portal for professionel cykling",
+  title: {
+    default: "Klassementet — Dansk cykelportal",
+    template: "%s | Klassementet",
+  },
+  description: "Klassementet er Danmarks bedste cykelportal med etapeinfo, favoritter, højdeprofiler og klassementer fra UCI WorldTour.",
+  metadataBase: new URL("https://klassementet.dk"),
+  openGraph: {
+    siteName: "Klassementet",
+    locale: "da_DK",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
