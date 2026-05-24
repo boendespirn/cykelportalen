@@ -69,7 +69,7 @@ def get_latest_finished_stage(race_id: str) -> dict | None:
 
 
 def get_rider_id_by_slug(slug: str) -> str | None:
-    # Prøv direkte slug (vores format: lastname-firstname)
+    # Prøv direkte slug
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/riders?slug=eq.{slug}&select=id&limit=1",
         headers=AUTH,
@@ -77,12 +77,13 @@ def get_rider_id_by_slug(slug: str) -> str | None:
     data = res.json()
     if res.ok and data:
         return data[0]["id"]
-    # PCS bruger firstname-lastname — prøv at vende rækkefølgen
+    # PCS bruger firstname-[middlename-]lastname, DB bruger lastname-[middlename-]firstname
+    # Flyt første ord til slutningen: "ben-o-connor" → "o-connor-ben"
     parts = slug.split("-")
     if len(parts) >= 2:
-        reversed_slug = "-".join(reversed(parts))
+        db_slug = "-".join(parts[1:] + [parts[0]])
         res2 = requests.get(
-            f"{SUPABASE_URL}/rest/v1/riders?slug=eq.{reversed_slug}&select=id&limit=1",
+            f"{SUPABASE_URL}/rest/v1/riders?slug=eq.{db_slug}&select=id&limit=1",
             headers=AUTH,
         )
         data2 = res2.json()
@@ -117,19 +118,33 @@ def mark_dnf(race_id: str, rider: dict, stage_number: int) -> None:
     )
 
 
-def upsert_gc(race_id: str, standings: list[dict]) -> None:
-    """Gemmer GC-klassement i startlists (gc_position, gc_time_gap_seconds)."""
+def upsert_gc(race_id: str, stage_number: int, standings: list[dict]) -> None:
+    """Gemmer GC-klassement i classifications-tabellen."""
+    # Slet eksisterende data for denne etape
+    requests.delete(
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=eq.{race_id}&after_stage_number=eq.{stage_number}&classification_type=eq.gc",
+        headers=DB,
+    )
+    # Byg rækker til batch-insert
+    rows = []
     for entry in standings:
         rid = get_rider_id(entry["slug"], entry["name"])
         if not rid:
             continue
-        requests.patch(
-            f"{SUPABASE_URL}/rest/v1/startlists?race_id=eq.{race_id}&rider_id=eq.{rid}",
-            json={
-                "gc_position":         entry.get("position"),
-                "gc_time_gap_seconds": entry.get("time_gap_seconds"),
-            },
-            headers=DB,
+        rows.append({
+            "race_id":             race_id,
+            "after_stage_number":  stage_number,
+            "classification_type": "gc",
+            "rider_id":            rid,
+            "position":            entry.get("position"),
+            "time_gap_seconds":    entry.get("time_gap_seconds", 0),
+        })
+    if rows:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/classifications",
+            json=rows,
+            headers={**DB, "Prefer": "resolution=ignore-duplicates,return=minimal"},
         )
 
 
@@ -235,11 +250,12 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                     font = time_td.find("font")
                     if font:
                         time_str = font.get_text(strip=True)
+                gap = 0 if parsed["pos"] == 1 else (parse_time_to_seconds(time_str) or 0)
                 result["gc"].append({
                     "position":         parsed["pos"],
                     "slug":             parsed["slug"],
                     "name":             parsed["name"],
-                    "time_gap_seconds": parse_time_to_seconds(time_str) or 0,
+                    "time_gap_seconds": gap,
                 })
 
     except Exception as e:
@@ -317,7 +333,7 @@ def process(race_slug: str | None, stage_number: int | None) -> None:
                 print(f"  -> GC top3: " + " | ".join(
                     f"{r['position']}. {r['name'].split()[-1]}" for r in data["gc"][:3]
                 ))
-                upsert_gc(race_id, data["gc"])
+                upsert_gc(race_id, sn, data["gc"])
 
             time.sleep(DELAY)
 
