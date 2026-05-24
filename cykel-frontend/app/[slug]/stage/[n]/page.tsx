@@ -496,8 +496,9 @@ export default async function StagePage(props: {
                 <div className="flex items-center gap-2">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
                     b.broadcaster.includes("TV 2") ? "bg-blue-500/15 text-blue-300" :
-                    b.broadcaster.includes("Kanal") ? "bg-purple-500/15 text-purple-300" :
-                    b.broadcaster.includes("GCN") ? "bg-orange-500/15 text-orange-300" :
+                    b.broadcaster.includes("Eurosport") ? "bg-orange-500/15 text-orange-300" :
+                    b.broadcaster.includes("GCN") ? "bg-yellow-500/15 text-yellow-300" :
+                    b.broadcaster.includes("Kanal") || b.broadcaster.includes("HBO") ? "bg-purple-500/15 text-purple-300" :
                     "bg-slate-700 text-slate-300"
                   }`}>
                     {b.broadcaster}

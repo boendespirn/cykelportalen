@@ -161,40 +161,47 @@ function ClimbSvg({ climb }: { climb: Climb }) {
 }
 
 export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
-  const [active, setActive] = useState<string>("profile");
+  const [activeIdx, setActiveIdx] = useState<number>(-1); // -1 = fuld profil
 
   if (!elevationImageUrl && climbs.length === 0) return null;
 
-  const tabs = [
-    { key: "profile", label: "Profil" },
-    ...climbs.map((c) => ({ key: c.id, label: c.name })),
-  ];
-
-  const activeClimb = climbs.find((c) => c.id === active);
+  const activeClimb = activeIdx >= 0 ? climbs[activeIdx] ?? null : null;
 
   return (
     <div className="mb-6 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
       {/* Tab navigation */}
       {climbs.length > 0 && (
-        <div className="flex overflow-x-auto border-b border-slate-800 bg-slate-900/60 scrollbar-hide">
-          {tabs.map((tab) => (
+        <div className="flex flex-wrap gap-1 p-2 border-b border-slate-800 bg-slate-900/60">
+          {elevationImageUrl && (
             <button
-              key={tab.key}
-              onClick={() => setActive(tab.key)}
-              className={`flex-shrink-0 px-4 py-2.5 text-xs font-medium transition-colors whitespace-nowrap border-b-2 -mb-px ${
-                active === tab.key
-                  ? "text-emerald-400 border-emerald-500"
-                  : "text-slate-500 border-transparent hover:text-slate-300"
+              onClick={() => setActiveIdx(-1)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                activeIdx === -1
+                  ? "bg-emerald-500/20 text-emerald-400"
+                  : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
               }`}
             >
-              {tab.key === "profile" ? "Fuld profil" : `⛰ ${tab.label}`}
+              Fuld profil
+            </button>
+          )}
+          {climbs.map((c, i) => (
+            <button
+              key={i}
+              onClick={() => setActiveIdx(i)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                activeIdx === i
+                  ? "bg-emerald-500/20 text-emerald-400"
+                  : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+              }`}
+            >
+              ⛰ Stigning {i + 1}
             </button>
           ))}
         </div>
       )}
 
       {/* Fuld profil */}
-      {active === "profile" && elevationImageUrl && (
+      {activeIdx === -1 && elevationImageUrl && (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
           src={elevationImageUrl}
@@ -204,8 +211,10 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
       )}
 
       {/* Enkelt stigning */}
-      {activeClimb && (
+      {activeIdx >= 0 && activeClimb && (
         <div className="p-4">
+          {/* Klatre-navn */}
+          <p className="text-slate-200 font-semibold text-sm mb-3">{activeClimb.name}</p>
           {/* Klatre-stats */}
           <div className="flex flex-wrap gap-4 mb-4 text-sm">
             {activeClimb.length_km != null && (

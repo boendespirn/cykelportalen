@@ -28,15 +28,20 @@ Log "[2/4] AI-nyhedsbehandling..."
 python "$ROOT\ai_news_processor.py" --limit 15 2>&1 | Tee-Object -Append $LOG
 Log "[2/4] Faerdig."
 
-# 3. Startlister (opdater for igangvaerende loeb)
-Log "[3/4] Opdaterer startlister..."
-python "$ROOT\startlist_agent.py" --update-status 2>&1 | Tee-Object -Append $LOG
-Log "[3/4] Faerdig."
+# 3. Resultater (seneste etape for igangvaerende loeb)
+Log "[3/5] Scraper etaperesultater..."
+python "$ROOT\results_agent.py" 2>&1 | Tee-Object -Append $LOG
+Log "[3/5] Faerdig."
 
-# 4. Social media posting (poster artikler med social_posted=false)
-Log "[4/4] Social media posting..."
+# 4. TV-tider (ugentlig opdatering)
+Log "[4/5] Opdaterer TV-tider..."
+python "$ROOT\tv_agent.py" 2>&1 | Tee-Object -Append $LOG
+Log "[4/5] Faerdig."
+
+# 5. Social media posting (poster artikler med social_posted=false)
+Log "[5/5] Social media posting..."
 python "$ROOT\social_agent.py" 2>&1 | Tee-Object -Append $LOG
-Log "[4/4] Faerdig."
+Log "[5/5] Faerdig."
 
 Log "=== Pipeline faerdig ==="
 
