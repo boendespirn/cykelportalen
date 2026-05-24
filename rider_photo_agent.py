@@ -74,39 +74,53 @@ def patch_rider_photo(rider_id: str, photo_url: str) -> None:
         print(f"  [DB FEJL] {res.status_code} {res.text[:120]}")
 
 
-def run() -> None:
+def run(limit: int = 2000, fast: bool = False) -> None:
+    """
+    fast=True: sæt photo_url direkte uden HEAD-verificering (10-100x hurtigere).
+    Frontendet håndterer 404 med flag-fallback, så det er OK.
+    """
     riders = get_riders_without_photo()
+    if limit < len(riders):
+        riders = riders[:limit]
     total = len(riders)
-    print(f"Fandt {total} ryttere uden foto\n")
+    print(f"Fandt {total} ryttere uden foto (limit={limit})\n")
 
     if not riders:
         print("Alle ryttere har allerede et foto!")
         return
 
-    found = 0
-    missing = 0
+    found = missing = 0
 
     for i, rider in enumerate(riders, 1):
         pcs_slug = extract_pcs_slug(rider["source_url"])
         if not pcs_slug:
-            print(f"  [{i}/{total}] {rider['name']} -> ingen slug")
             missing += 1
             continue
 
         photo_url = f"{PCS_PHOTO_BASE}/{pcs_slug}.jpg"
 
-        if photo_url_exists(photo_url):
+        if fast:
+            # Sæt URL uden verificering — frontend viser flag ved 404
             patch_rider_photo(rider["id"], photo_url)
-            print(f"  [{i}/{total}] {rider['name']} -> {photo_url}")
+            print(f"  [{i}/{total}] {rider['name']}")
             found += 1
         else:
-            print(f"  [{i}/{total}] {rider['name']} -> foto ikke fundet ({pcs_slug})")
-            missing += 1
-
-        time.sleep(REQUEST_DELAY)
+            if photo_url_exists(photo_url):
+                patch_rider_photo(rider["id"], photo_url)
+                print(f"  [{i}/{total}] ✓ {rider['name']}")
+                found += 1
+            else:
+                print(f"  [{i}/{total}] ✗ {rider['name']} ({pcs_slug})")
+                missing += 1
+            time.sleep(REQUEST_DELAY)
 
     print(f"\nFærdig: {found} fotos gemt, {missing} uden foto")
 
 
 if __name__ == "__main__":
-    run()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=2000, help="Max ryttere (default: alle)")
+    parser.add_argument("--fast",  action="store_true", help="Sæt URL uden HEAD-verificering (hurtigere)")
+    args = parser.parse_args()
+    run(args.limit, args.fast)

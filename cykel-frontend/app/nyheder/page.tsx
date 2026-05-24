@@ -15,6 +15,12 @@ type Article = {
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
+  resultater:  "Resultater",
+  startliste:  "Startliste",
+  transfer:    "Transfer",
+  profil:      "Profil",
+  analyse:     "Analyse",
+  generelt:    "Nyheder",
   race_report: "Løbsrapport",
   startlist:   "Startliste",
   general:     "Nyheder",

@@ -40,21 +40,25 @@ DELAY = 2.0
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
 
-def get_stages(race_slug: str, stage_number: int | None) -> list[dict]:
-    q = f"?races.slug=eq.{race_slug}" if False else ""
-    # Join via races tabel
-    url = (
-        f"{SUPABASE_URL}/rest/v1/stages"
-        f"?select=id,stage_number,pcs_stage_url,distance_km,elevation_gain_m,stage_type,start_location,finish_location"
-        f"&races.slug=eq.{race_slug}"
-        f"&order=stage_number.asc"
+def get_race_id(race_slug: str) -> str | None:
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?slug=eq.{race_slug}&select=id&limit=1",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
     )
-    # Supabase: filter via join kræver embedded filter
+    data = res.json()
+    return data[0]["id"] if res.ok and data else None
+
+
+def get_stages(race_slug: str, stage_number: int | None) -> list[dict]:
+    race_id = get_race_id(race_slug)
+    if not race_id:
+        print(f"Løb ikke fundet: {race_slug}")
+        return []
+
     url = (
         f"{SUPABASE_URL}/rest/v1/stages"
-        f"?select=id,stage_number,pcs_stage_url,distance_km,elevation_gain_m,stage_type,start_location,finish_location,"
-        f"races!inner(slug)"
-        f"&races.slug=eq.{race_slug}"
+        f"?race_id=eq.{race_id}"
+        f"&select=id,stage_number,pcs_stage_url,distance_km,elevation_gain_m,stage_type,start_location,finish_location"
         f"&order=stage_number.asc"
     )
     if stage_number:

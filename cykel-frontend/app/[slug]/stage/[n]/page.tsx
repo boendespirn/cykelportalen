@@ -68,7 +68,20 @@ type Broadcast = {
   notes: string | null;
 };
 
+type StageNav = { stage_number: number; stage_type: string | null; finish_location: string | null };
+
 // ── Data fetching ─────────────────────────────────────────────────────────────
+
+async function getAllStages(slug: string): Promise<StageNav[]> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/races/${slug}/stages`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return [];
+    return res.json();
+  } catch { return []; }
+}
 
 async function getStageDetail(
   slug: string,
@@ -298,11 +311,16 @@ export default async function StagePage(props: {
 
   const { stage, race } = result;
 
-  const [startlist, climbs, broadcastAll] = await Promise.all([
+  const [startlist, climbs, broadcastAll, allStages] = await Promise.all([
     getStartlist(slug),
     getClimbs(slug, n),
     getBroadcast(slug),
+    getAllStages(slug),
   ]);
+
+  const stageNum   = parseInt(n);
+  const prevStage  = allStages.find((s) => s.stage_number === stageNum - 1) ?? null;
+  const nextStage  = allStages.find((s) => s.stage_number === stageNum + 1) ?? null;
 
   // Filtrer broadcasts til denne etape (baseret på stage-dato)
   const stageBroadcasts = broadcastAll.filter((b) => {
@@ -329,26 +347,46 @@ export default async function StagePage(props: {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
-      {/* Tilbage */}
-      <Link
-        href={`/${slug}`}
-        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-8"
-      >
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
+      {/* Navigationsbar: tilbage + forrige/næste etape */}
+      <div className="flex items-center justify-between mb-8 gap-2">
+        <Link
+          href={`/${slug}`}
+          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M15 19l-7-7 7-7"
-          />
-        </svg>
-        {race.name}
-      </Link>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          {race.name}
+        </Link>
+
+        <div className="flex items-center gap-1">
+          {prevStage ? (
+            <Link
+              href={`/${slug}/stage/${prevStage.stage_number}`}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-400 hover:border-slate-600 hover:text-slate-200 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              E{prevStage.stage_number}
+            </Link>
+          ) : <span className="w-14" />}
+
+          <span className="text-xs text-slate-700 px-2">E{stage.stage_number}</span>
+
+          {nextStage ? (
+            <Link
+              href={`/${slug}/stage/${nextStage.stage_number}`}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-400 hover:border-slate-600 hover:text-slate-200 transition-colors"
+            >
+              E{nextStage.stage_number}
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+            </Link>
+          ) : <span className="w-14" />}
+        </div>
+      </div>
 
       {/* Header */}
       <header className="mb-8">
