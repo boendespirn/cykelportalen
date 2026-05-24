@@ -74,7 +74,7 @@ BROADCASTER_MAP = {
 }
 
 RACE_KEYWORDS = {
-    "giro":        "giro-ditalia-2026",
+    "giro":        "giro-d-italia-2026",
     "tour de fra": "tour-de-france-2026",
     "vuelta":      "vuelta-a-espana-2026",
     "flandern":    "ronde-van-vlaanderen-2026",
@@ -82,6 +82,7 @@ RACE_KEYWORDS = {
     "liège":       "liege-bastogne-liege-2026",
     "amstel":      "amstel-gold-race-2026",
     "dauphine":    "criterium-du-dauphine-2026",
+    "auvergne":    "criterium-du-dauphine-2026",
     "schweiz":     "tour-de-suisse-2026",
 }
 
@@ -153,92 +154,95 @@ def scrape_tv2(dry_run: bool) -> None:
 
     entries_found = []
 
-    # Dato-mønstre: "mandag d. 26. maj", "tirsdag 27. maj 2025" osv.
-    date_pattern = re.compile(
-        r"(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)[,\s]+(?:d\.\s*)?(\d{1,2})\.\s*"
-        r"(januar|februar|marts|april|maj|juni|juli|august|september|oktober|november|december)"
-        r"(?:\s+\d{4})?",
+    MONTH_MAP = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "maj": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12,
+    }
+
+    # TV2 Sport sendeplan-format (2025/2026):
+    # "Tirsdag 26. maj Tir 26. maj kl. 14.00 Cykling Giro d'Italia: 16. etape ..."
+    # Ingen explicit kanalmarkering — broadcaster er TV 2 Sport / TV 2 Play
+
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text)
+    year = datetime.now().year
+
+    # Match alle blokke: dato + kl. + løbsnavn
+    pattern = re.compile(
+        r"(?:man|tir|ons|tor|fre|lør|søn)\s+(\d{1,2})\.\s*"
+        r"(jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|nov|dec)\w*"
+        r"\s+kl\.\s*(\d{1,2})\.(\d{2})"
+        r"\s+Cykling\s+"
+        r"(Giro[^:]+|Tour[^:]+|Vuelta[^:]+|Paris[^:]+|Flandern[^:]+|"
+        r"Amstel[^:]+|Li[eè]ge[^:]+|Dauphine[^:]+|Crit[eé]rium[^:]+|"
+        r"Schweiz[^:]+|Auvergne[^:]+|WorldTour[^:]+)"
+        r":\s*(\d+)\.\s*etape",
         re.IGNORECASE,
     )
 
-    MONTH_MAP = {
-        "januar": 1, "februar": 2, "marts": 3, "april": 4, "maj": 5, "juni": 6,
-        "juli": 7, "august": 8, "september": 9, "oktober": 10, "november": 11, "december": 12,
-    }
+    race_id_cache: dict[str, str | None] = {}
 
-    # Udtræk tekst-blokke fra HTML
-    # Fjern HTML-tags for at arbejde med ren tekst
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text)
+    for m in pattern.finditer(text):
+        day       = int(m.group(1))
+        mon_str   = m.group(2).lower()[:3]
+        hour      = int(m.group(3))
+        minute    = m.group(4)
+        race_name = m.group(5).strip()
+        stage_num = int(m.group(6))
 
-    current_date: date | None = None
-    year = datetime.now().year
-
-    # Split i sætninger/segmenter ved nøgleord
-    segments = re.split(r"(?=(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag))", text, flags=re.IGNORECASE)
-
-    for seg in segments:
-        # Prøv at parse dato fra segmentet
-        dm = date_pattern.search(seg)
-        if dm:
-            try:
-                day = int(dm.group(2))
-                month = MONTH_MAP[dm.group(3).lower()]
-                current_date = date(year, month, day)
-            except (ValueError, KeyError):
-                pass
-
-        if not current_date:
+        month = MONTH_MAP.get(mon_str)
+        if not month:
             continue
 
-        # Find alle cykling-programmer i dette segment
-        # Se efter: titel med "Giro/Tour/Vuelta..." + tidsangivelse + kanal
-        prog_blocks = re.findall(
-            r"((?:Giro|Tour|Vuelta|Classic|Paris|Flandern|Liège|Amstel|Critérium|Dauphine|Schweiz|WorldTour|UCI)\S*[^•·\n]{0,80}?)"
-            r"\s+kl\.\s*(\d{1,2}[\.]\d{2})"
-            r"(?:\s*[-–]\s*kl\.\s*(\d{1,2}[\.]\d{2}))?"
-            r"[^•·]{0,60}?"
-            r"(TV\s*2\s*Sport\s*X?|Kanal\s*5|HBO\s*Max|GCN\+|Eurosport\s*\d?)",
-            seg,
-            re.IGNORECASE,
-        )
+        try:
+            broadcast_date = date(year, month, day)
+        except ValueError:
+            continue
 
-        for title, start_raw, end_raw, channel_raw in prog_blocks:
-            slug = match_race_slug(title, races)
-            if not slug:
-                continue
+        slug = match_race_slug(race_name, races)
+        if not slug:
+            skipped += 1
+            continue
 
-            start_time = parse_time(start_raw)
-            end_time   = parse_time(end_raw) if end_raw else None
-            broadcaster = normalize_broadcaster(channel_raw)
-            date_str = current_date.isoformat()
+        # Vælg broadcaster baseret på løb
+        if "giro" in race_name.lower():
+            broadcaster = "TV 2 Sport X"
+        elif "tour de france" in race_name.lower():
+            broadcaster = "TV 2 Sport"
+        else:
+            broadcaster = "TV 2 Play"
 
-            entry = {
-                "race_id":        None,  # sættes nedenfor
-                "broadcast_date": date_str,
-                "start_time":     start_time,
-                "end_time":       end_time,
-                "broadcaster":    broadcaster,
-                "is_live":        True,
-                "notes":          title.strip()[:200],
-            }
+        start_time = f"{hour:02d}:{minute}:00"
+        date_str   = broadcast_date.isoformat()
 
-            # Hent race_id fra slug
+        entry = {
+            "broadcast_date": date_str,
+            "stage_number":   stage_num,
+            "start_time":     start_time,
+            "broadcaster":    broadcaster,
+            "is_live":        True,
+            "notes":          f"{race_name}: etape {stage_num}",
+        }
+
+        if slug not in race_id_cache:
             res = requests.get(
                 f"{SUPABASE_URL}/rest/v1/races?slug=eq.{slug}&select=id&limit=1",
                 headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
             )
-            if res.ok and res.json():
-                entry["race_id"] = res.json()[0]["id"]
+            race_id_cache[slug] = res.json()[0]["id"] if (res.ok and res.json()) else None
 
-                entries_found.append(entry)
-                print(f"  [{date_str}] {broadcaster} {start_time} — {title.strip()[:50]}")
+        race_id = race_id_cache[slug]
+        if not race_id:
+            skipped += 1
+            continue
 
-                if not dry_run:
-                    if upsert_broadcast(entry):
-                        saved += 1
-                    else:
-                        skipped += 1
+        entry["race_id"] = race_id
+        entries_found.append(entry)
+        print(f"  [{date_str}] {broadcaster} {start_time} — {race_name} E{stage_num}")
+
+        if not dry_run:
+            if upsert_broadcast(entry):
+                saved += 1
             else:
                 skipped += 1
 
@@ -249,7 +253,6 @@ def scrape_tv2(dry_run: bool) -> None:
 
     if not entries_found:
         print("\nIngen programposter fundet — siden kan kræve tilpasning af regex")
-        print("Tip: Kør med --dry-run og inspicér html-output")
 
 
 # ── Manuelt tilføj udsendelser ────────────────────────────────────────────────
