@@ -1,13 +1,13 @@
 """
 stage_info_agent.py
-Genererer AI-beskrivelser og fun facts for etaper via OpenAI API.
+Genererer AI-beskrivelser og fun facts for etaper via Anthropic API (Claude).
 
 Krav:
-  - OPENAI_API_KEY i .env filen (hent på platform.openai.com)
+  - ANTHROPIC_API_KEY i .env filen (hent på console.anthropic.com)
 
 Kør: python stage_info_agent.py
-     python stage_info_agent.py --race giro-ditalia-2026   (kun ét løb)
-     python stage_info_agent.py --all                       (overskriv eksisterende)
+     python stage_info_agent.py --race giro-d-italia-2026   (kun ét løb)
+     python stage_info_agent.py --all                        (overskriv eksisterende)
 
 Re-run er sikkert: henter som standard kun etaper med description = NULL.
 """
@@ -15,19 +15,20 @@ Re-run er sikkert: henter som standard kun etaper med description = NULL.
 import os
 import sys
 import io
+import re
 import json
 import time
 import argparse
 import requests
-from openai import OpenAI
+from anthropic import Anthropic
 from dotenv import load_dotenv
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-OPENAI_KEY   = os.getenv("OPENAI_API_KEY")
+SUPABASE_URL  = os.getenv("SUPABASE_URL")
+SUPABASE_KEY  = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 DB_HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -36,7 +37,7 @@ DB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-MODEL = "gpt-4o-mini"   # billig og god til dansk tekst; skift til "gpt-4o" for højere kvalitet
+MODEL = "claude-haiku-4-5-20251001"  # billig og hurtig; skift til claude-sonnet-4-6 for højere kvalitet
 
 STAGE_TYPE_LABELS = {
     "flat":     "Flad (sprinteretape)",
@@ -100,11 +101,11 @@ def patch_stage(stage_id: str, description: str, fun_facts: list, finish_type: s
         print(f"  [DB FEJL] {r.status_code}: {r.text[:200]}")
 
 
-# ── OpenAI ────────────────────────────────────────────────────────────────────
+# ── Claude API ────────────────────────────────────────────────────────────────
 
 SYSTEM = (
     "Du er ekspert i professionel cykling og skriver kort, engagerende indhold på dansk "
-    "til UCI WorldTour-fans på klassementet.dk. Du svarer KUN med ren JSON — ingen markdown."
+    "til UCI WorldTour-fans på klassementet.dk. Du svarer KUN med ren JSON — ingen markdown-blokke."
 )
 
 
@@ -132,19 +133,24 @@ finish_type: sprint=massespurt, uphill=bjergfinish, cobblestone=brosten, tt=enke
 stage_start_time: null hvis usikker."""
 
 
-def call_openai(client: OpenAI, race_name: str, stage: dict) -> dict | None:
+def extract_json(text: str) -> dict:
+    """Udtræk JSON fra svar der evt. indeholder markdown-kodeblokke."""
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
+
+
+def call_claude(client: Anthropic, race_name: str, stage: dict) -> dict | None:
     try:
-        resp = client.chat.completions.create(
+        resp = client.messages.create(
             model=MODEL,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": SYSTEM},
-                {"role": "user",   "content": build_prompt(race_name, stage)},
-            ],
             max_tokens=900,
+            system=SYSTEM,
+            messages=[{"role": "user", "content": build_prompt(race_name, stage)}],
             temperature=0.7,
         )
-        return json.loads(resp.choices[0].message.content)
+        return extract_json(resp.content[0].text)
     except Exception as e:
         print(f"  [API FEJL] {e}")
         return None
@@ -153,12 +159,12 @@ def call_openai(client: OpenAI, race_name: str, stage: dict) -> dict | None:
 # ── Hoved ─────────────────────────────────────────────────────────────────────
 
 def run(race_slug: str | None, force_all: bool) -> None:
-    if not OPENAI_KEY or OPENAI_KEY == "din-nøgle-her":
-        print("FEJL: OPENAI_API_KEY mangler i .env filen")
-        print("Hent nøgle på: https://platform.openai.com/api-keys")
+    if not ANTHROPIC_KEY:
+        print("FEJL: ANTHROPIC_API_KEY mangler i .env filen")
+        print("Hent nøgle på: https://console.anthropic.com/settings/keys")
         sys.exit(1)
 
-    client = OpenAI(api_key=OPENAI_KEY)
+    client = Anthropic(api_key=ANTHROPIC_KEY)
     stages = get_stages(race_slug, force_all)
     total  = len(stages)
     print(f"Fandt {total} etaper\n")
@@ -174,7 +180,7 @@ def run(race_slug: str | None, force_all: bool) -> None:
         print(f"[{i}/{total}] {race_name} E{stage['stage_number']}: "
               f"{stage.get('start_location')} → {stage.get('finish_location')}")
 
-        result = call_openai(client, race_name, stage)
+        result = call_claude(client, race_name, stage)
         if not result or not result.get("description"):
             print("  -> FEJL")
             fail += 1
@@ -196,7 +202,7 @@ def run(race_slug: str | None, force_all: bool) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--race",    help="Løbets slug (fx giro-ditalia-2026)", default=None)
+    parser.add_argument("--race",    help="Løbets slug (fx giro-d-italia-2026)", default=None)
     parser.add_argument("--all",     dest="force_all", action="store_true")
     args = parser.parse_args()
     run(args.race, args.force_all)

@@ -1,11 +1,11 @@
 """
 ai_news_processor.py
-Behandler råartikler fra raw_news med OpenAI:
+Behandler råartikler fra raw_news med Claude (Anthropic API):
   1. Scorer relevans for danske cykelfans (1-10)
   2. Omskriver top-artikler til dansk med interne links
   3. Gemmer i news_articles
 
-Krav: OPENAI_API_KEY i .env
+Krav: ANTHROPIC_API_KEY i .env
 
 Kør: python ai_news_processor.py
      python ai_news_processor.py --limit 5   (behandl max 5 artikler)
@@ -22,15 +22,15 @@ import time
 import argparse
 import requests
 from datetime import datetime, timezone
-from openai import OpenAI
+from anthropic import Anthropic
 from dotenv import load_dotenv
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-OPENAI_KEY   = os.getenv("OPENAI_API_KEY")
+SUPABASE_URL   = os.getenv("SUPABASE_URL")
+SUPABASE_KEY   = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY")
 
 DB_HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -39,10 +39,11 @@ DB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-MODEL            = "gpt-4o-mini"
-MIN_SCORE        = 6      # artikler under denne score springes over
-MAX_ARTICLES     = 20     # max artikler per kørsel (cost-kontrol)
-DELAY            = 1.0    # sekunder mellem API-kald
+MODEL            = "claude-haiku-4-5-20251001"  # hurtig og billig; skift til claude-sonnet-4-6 for højere kvalitet
+MIN_SCORE        = 8      # kun tophistorier publiceres (8-10)
+WEEKLY_LIMIT     = 4      # max 4 AI-artikler per uge
+MAX_ARTICLES     = 15     # max artikler der scores per kørsel
+DELAY            = 0.5    # sekunder mellem API-kald
 
 # ── Løb der linkes til internt (opdateres automatisk fra DB) ─────────────────
 
@@ -53,6 +54,21 @@ def get_active_races() -> list[dict]:
         headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
     )
     return res.json() if res.ok else []
+
+
+def get_weekly_published_count() -> int:
+    """Returnerer antal AI-artikler publiceret denne uge (siden mandag 00:00)."""
+    from datetime import date, timedelta
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?author=eq.Klassementet AI"
+        f"&published_at=gte.{monday.isoformat()}"
+        f"&select=id",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+    )
+    return len(res.json()) if res.ok else 0
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -95,55 +111,60 @@ def save_article(data: dict) -> bool:
     return True
 
 
-# ── OpenAI ────────────────────────────────────────────────────────────────────
+def extract_json(text: str) -> dict:
+    """Udtræk JSON fra svar der evt. indeholder markdown-kodeblokke."""
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
+
+
+# ── Claude API ────────────────────────────────────────────────────────────────
 
 SCORE_SYSTEM = (
     "Du vurderer relevans af cykelartikler for danske UCI WorldTour-fans. "
     "Svar KUN med et heltal 1-10. Ingen anden tekst."
 )
 
-REWRITE_SYSTEM = """Du skriver cykel-nyheder til klassementet.dk — en dansk portal for UCI WorldTour-fans.
+REWRITE_SYSTEM = """Du skriver cykel-nyheder til klassementet.dk — Danmarks bedste kilde til professionel cykling og UCI WorldTour.
 
 Regler:
-- Skriv altid på korrekt, engageret dansk (sportsmedie-tone)
-- Omskriv originalen — aldrig direkte oversæt
-- Tilføj interne links med Markdown: [Giro d'Italia 2026](/giro-ditalia-2026) hvis løbet nævnes
-- SEO: inkluder de vigtigste søgeord naturligt i teksten
-- Svar KUN med ren JSON — ingen markdown-blokke"""
+- Skriv altid på korrekt, engageret dansk (sportsmedie-tone som TV 2 Sport)
+- Omskriv originalen grundigt — aldrig direkte oversæt
+- Artiklerne skal være fyldestgørende: giv al vigtig information, forklar kontekst og baggrund
+- Nævn [klassementet.dk](/) naturligt 1 gang som kilden for cykling og resultater
+- Tilføj interne links med Markdown til løb der nævnes (fx [Giro d'Italia 2026](/giro-d-italia-2026))
+- Brug SEO-søgeord naturligt: "cykling", "professionel cykling", "cykelresultater", "UCI WorldTour"
+- Svar KUN med ren JSON — ingen markdown-blokke, ingen forklaringer"""
 
 
-def score_article(client: OpenAI, article: dict) -> float:
+def score_article(client: Anthropic, article: dict) -> float:
     prompt = (
         f"Titel: {article['title']}\n"
         f"Kilde: {article['source']}\n"
         f"Resume: {article['excerpt'][:300]}"
     )
     try:
-        resp = client.chat.completions.create(
+        resp = client.messages.create(
             model=MODEL,
-            messages=[
-                {"role": "system", "content": SCORE_SYSTEM},
-                {"role": "user",   "content": prompt},
-            ],
             max_tokens=10,
-            temperature=0,
+            system=SCORE_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
         )
-        raw = resp.choices[0].message.content.strip()
-        # Udtræk første tal fra svaret (håndterer "7", "7/10", "Score: 8" osv.)
+        raw = resp.content[0].text.strip()
         m = re.search(r"\b(\d+(?:\.\d+)?)\b", raw)
         if m:
             val = float(m.group(1))
-            # Normaliser hvis modellen svarede på 0-100 skala
             if val > 10:
                 val = val / 10
             return min(val, 10.0)
-        return 5.0  # fallback: behandl som middel
+        return 5.0
     except Exception as e:
         print(f" [score fejl: {e}]", end="")
         return 5.0
 
 
-def rewrite_article(client: OpenAI, article: dict, races: list[dict]) -> dict | None:
+def rewrite_article(client: Anthropic, article: dict, races: list[dict]) -> dict | None:
     race_list = "\n".join(f"- {r['name']}: /{r['slug']}" for r in races[:15])
     prompt = f"""Omskriv denne cykelartikel til dansk for klassementet.dk.
 
@@ -159,22 +180,19 @@ Returner præcis dette JSON:
 {{
   "title": "Dansk titel (SEO-optimeret, max 70 tegn)",
   "excerpt": "Kort resume på dansk (max 160 tegn, bruges som meta-description)",
-  "content": "Fuld artikel på dansk (300-600 ord). Brug \\n\\n mellem afsnit. Tilføj interne links med Markdown der hvor de passer naturligt.",
+  "content": "Fuld artikel på dansk (600-900 ord). Brug \\n\\n mellem afsnit. Dæk emnet grundigt: baggrund, context, citater, hvad det betyder fremadrettet. Tilføj interne links med Markdown der hvor de passer naturligt.",
   "category": "resultater|startliste|transfer|profil|analyse|generelt"
 }}"""
 
     try:
-        resp = client.chat.completions.create(
+        resp = client.messages.create(
             model=MODEL,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": REWRITE_SYSTEM},
-                {"role": "user",   "content": prompt},
-            ],
             max_tokens=1200,
+            system=REWRITE_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
         )
-        return json.loads(resp.choices[0].message.content)
+        return extract_json(resp.content[0].text)
     except Exception as e:
         print(f"  [REWRITE FEJL] {e}")
         return None
@@ -183,17 +201,28 @@ Returner præcis dette JSON:
 # ── Hoved ─────────────────────────────────────────────────────────────────────
 
 def run(limit: int) -> None:
-    if not OPENAI_KEY or OPENAI_KEY == "din-nøgle-her":
-        print("FEJL: OPENAI_API_KEY mangler i .env")
-        print("Hent nøgle på: https://platform.openai.com/api-keys")
+    if not ANTHROPIC_KEY:
+        print("FEJL: ANTHROPIC_API_KEY mangler i .env")
+        print("Hent nøgle på: https://console.anthropic.com/settings/keys")
         sys.exit(1)
 
-    client = OpenAI(api_key=OPENAI_KEY)
+    client   = Anthropic(api_key=ANTHROPIC_KEY)
     articles = get_unprocessed(limit)
     races    = get_active_races()
 
+    weekly_count = get_weekly_published_count()
+    slots_left   = max(0, WEEKLY_LIMIT - weekly_count)
+
     print(f"ai_news_processor.py — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"Fandt {len(articles)} ubehandlede artikler | {len(races)} løb til interne links\n")
+    print(f"Fandt {len(articles)} ubehandlede artikler | {len(races)} løb til interne links")
+    print(f"Denne uge: {weekly_count}/{WEEKLY_LIMIT} artikler publiceret ({slots_left} pladser tilbage)\n")
+
+    if slots_left == 0:
+        print("Ugens kvote på 4 artikler er nået — springer over.")
+        # Marker alligevel alle som processed så de ikke hober sig op
+        for art in articles:
+            mark_processed(art["id"], 0.0)
+        return
 
     published = skipped = failed = 0
 
@@ -210,6 +239,14 @@ def run(limit: int) -> None:
             skipped += 1
             time.sleep(DELAY)
             continue
+
+        if published >= slots_left:
+            print(" — ugens kvote opbrugt, stopper")
+            mark_processed(art["id"], score)
+            # Marker resten som processed
+            for remaining in articles[i:]:
+                mark_processed(remaining["id"], 0.0)
+            break
 
         print(" — omskriver...")
 
