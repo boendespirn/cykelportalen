@@ -6,7 +6,6 @@ import { API_BASE } from "@/lib/api";
 import SpoilerSection from "./SpoilerSection";
 import DnfSection from "./DnfSection";
 import StageMapLoader from "./stage/[n]/StageMapLoader";
-import RaceFavorites from "./RaceFavorites";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -689,17 +688,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           </div>
         );
       })()}
-
-      {/* ── Favorit-leaderboard (jersey-tabs) ── */}
-      {hasResults && (
-        <RaceFavorites
-          raceName={race.name}
-          gcStandings={gcData?.standings ?? []}
-          pointsStandings={pointsData?.standings ?? []}
-          mountainsStandings={mountainsData?.standings ?? []}
-          youthStandings={youthData?.standings ?? []}
-        />
-      )}
 
       {/* ── Spoiler-sektion (fuld klassementstabel) ── */}
       {hasResults && (
