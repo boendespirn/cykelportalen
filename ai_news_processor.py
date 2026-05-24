@@ -56,6 +56,48 @@ def get_active_races() -> list[dict]:
     return res.json() if res.ok else []
 
 
+def get_ongoing_startlists() -> str:
+    """
+    Returnerer en tekstliste over ryttere i igangværende løb.
+    Bruges til faktuel krydsreference — AI må ikke nævne ryttere der IKKE er på listen.
+    """
+    from datetime import date
+    today = date.today().isoformat()
+
+    # Find igangværende løb
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races"
+        f"?start_date=lte.{today}&end_date=gte.{today}"
+        f"&select=id,name,slug&limit=3",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+    )
+    if not res.ok or not res.json():
+        return ""
+
+    lines = []
+    for race in res.json():
+        # Hent startliste
+        sl = requests.get(
+            f"{SUPABASE_URL}/rest/v1/startlists"
+            f"?race_id=eq.{race['id']}"
+            f"&select=riders(name,nationality)&status=neq.DNF&limit=250",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        )
+        if not sl.ok:
+            continue
+        names = [
+            e["riders"]["name"]
+            for e in sl.json()
+            if e.get("riders") and e["riders"].get("name")
+        ]
+        if names:
+            lines.append(f"{race['name']} ({race['slug']}) startliste:")
+            lines.append(", ".join(sorted(names)))
+            lines.append("")
+
+    return "\n".join(lines)
+
+
 def get_weekly_published_count() -> int:
     """Returnerer antal AI-artikler publiceret denne uge (siden mandag 00:00)."""
     from datetime import date, timedelta
@@ -135,6 +177,7 @@ Regler:
 - Nævn [klassementet.dk](/) naturligt 1 gang som kilden for cykling og resultater
 - Tilføj interne links med Markdown til løb der nævnes (fx [Giro d'Italia 2026](/giro-d-italia-2026))
 - Brug SEO-søgeord naturligt: "cykling", "professionel cykling", "cykelresultater", "UCI WorldTour"
+- FAKTUEL PRÆCISION: Nævn KUN ryttere i et løb hvis de faktisk er på startlisten. Hvis du er i tvivl, undlad at nævne dem i den løbs-kontekst
 - Svar KUN med ren JSON — ingen markdown-blokke, ingen forklaringer"""
 
 
@@ -164,15 +207,22 @@ def score_article(client: Anthropic, article: dict) -> float:
         return 5.0
 
 
-def rewrite_article(client: Anthropic, article: dict, races: list[dict]) -> dict | None:
+def rewrite_article(client: Anthropic, article: dict, races: list[dict], startlist_context: str) -> dict | None:
     race_list = "\n".join(f"- {r['name']}: /{r['slug']}" for r in races[:15])
+    factcheck_block = f"""
+FAKTUEL KRYDSREFERENCE — igangværende løb og deres startlister:
+{startlist_context}
+
+Vigtigt: Hvis artiklen nævner en rytter i forbindelse med et igangværende løb, men rytterens navn IKKE fremgår af startlisten ovenfor, må du IKKE skrive at rytteren deltager i det løb. Fjern eller korriger sådanne påstande.
+""" if startlist_context else ""
+
     prompt = f"""Omskriv denne cykelartikel til dansk for klassementet.dk.
 
 Original titel: {article['title']}
 Kilde: {article['source']}
 Indhold:
 {article['content'][:3000]}
-
+{factcheck_block}
 Interne links der må bruges (kun hvis løbet nævnes i artiklen):
 {race_list}
 
@@ -206,9 +256,10 @@ def run(limit: int) -> None:
         print("Hent nøgle på: https://console.anthropic.com/settings/keys")
         sys.exit(1)
 
-    client   = Anthropic(api_key=ANTHROPIC_KEY)
-    articles = get_unprocessed(limit)
-    races    = get_active_races()
+    client            = Anthropic(api_key=ANTHROPIC_KEY)
+    articles          = get_unprocessed(limit)
+    races             = get_active_races()
+    startlist_context = get_ongoing_startlists()
 
     weekly_count = get_weekly_published_count()
     slots_left   = max(0, WEEKLY_LIMIT - weekly_count)
@@ -251,7 +302,7 @@ def run(limit: int) -> None:
         print(" — omskriver...")
 
         # Trin 2: Omskrivning
-        result = rewrite_article(client, art, races)
+        result = rewrite_article(client, art, races, startlist_context)
         if not result or not result.get("title") or not result.get("content"):
             print("  -> FEJL ved omskrivning")
             mark_processed(art["id"], score)
