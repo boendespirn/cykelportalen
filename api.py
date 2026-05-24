@@ -353,6 +353,43 @@ def get_dnfs_for_race(slug: str):
 
 
 
+@app.get("/races/{slug}/broadcast")
+def get_broadcast(slug: str):
+    race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"
+    race_data = requests.get(race_url, headers=get_headers()).json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+    url = (
+        f"{SUPABASE_URL}/rest/v1/broadcast_schedule"
+        f"?race_id=eq.{race_id}"
+        f"&select=stage_number,broadcast_date,start_time,end_time,broadcaster,stream_url,is_live,notes"
+        f"&order=broadcast_date.asc,start_time.asc"
+    )
+    return requests.get(url, headers=get_headers()).json()
+
+
+@app.get("/races/{slug}/stages/{stage_number}/climbs")
+def get_stage_climbs(slug: str, stage_number: int):
+    race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"
+    race_data = requests.get(race_url, headers=get_headers()).json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+    stage_url = f"{SUPABASE_URL}/rest/v1/stages?race_id=eq.{race_id}&stage_number=eq.{stage_number}&select=id&limit=1"
+    stage_data = requests.get(stage_url, headers=get_headers()).json()
+    if not stage_data:
+        return []
+    stage_id = stage_data[0]["id"]
+    url = (
+        f"{SUPABASE_URL}/rest/v1/stage_climbs"
+        f"?stage_id=eq.{stage_id}"
+        f"&select=name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,gradient_sections,profile_image_url"
+        f"&order=sort_order.asc"
+    )
+    return requests.get(url, headers=get_headers()).json()
+
+
 @app.get("/riders/{slug}/races")
 def get_rider_races(slug: str):
     rider_url = f"{SUPABASE_URL}/rest/v1/riders?select=id&slug=eq.{slug}&limit=1"

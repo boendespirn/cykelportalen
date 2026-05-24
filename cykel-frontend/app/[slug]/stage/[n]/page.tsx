@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import type { Metadata } from "next";
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
+import ClimbProfile from "./ClimbProfile";
 import { API_BASE } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -44,6 +45,29 @@ type StartlistEntry = {
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
 
+type Climb = {
+  id: string;
+  name: string;
+  km_from_start: number | null;
+  length_km: number | null;
+  elevation_m: number | null;
+  avg_gradient: number | null;
+  max_gradient: number | null;
+  gradient_sections: { km: number; gradient: number }[] | null;
+  profile_image_url: string | null;
+};
+
+type Broadcast = {
+  stage_number: number | null;
+  broadcast_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  broadcaster: string;
+  stream_url: string | null;
+  is_live: boolean;
+  notes: string | null;
+};
+
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
 async function getStageDetail(
@@ -73,6 +97,24 @@ async function getStartlist(slug: string): Promise<StartlistEntry[]> {
   } catch {
     return [];
   }
+}
+
+async function getClimbs(slug: string, n: string): Promise<Climb[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/climbs`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+async function getBroadcast(slug: string): Promise<Broadcast[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
 }
 
 async function geocodeCity(
@@ -255,7 +297,19 @@ export default async function StagePage(props: {
   }
 
   const { stage, race } = result;
-  const startlist = await getStartlist(slug);
+
+  const [startlist, climbs, broadcastAll] = await Promise.all([
+    getStartlist(slug),
+    getClimbs(slug, n),
+    getBroadcast(slug),
+  ]);
+
+  // Filtrer broadcasts til denne etape (baseret på stage-dato)
+  const stageBroadcasts = broadcastAll.filter((b) => {
+    if (stage.date && b.broadcast_date === stage.date) return true;
+    if (b.stage_number === parseInt(n)) return true;
+    return false;
+  });
 
   // Geocode start og finish parallelt (cached 24h)
   const [startCoords, finishCoords] = await Promise.all([
@@ -331,17 +385,11 @@ export default async function StagePage(props: {
         )}
       </header>
 
-      {/* Høydeprofil — stor */}
-      {stage.elevation_image_url && (
-        <div className="mb-6 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={stage.elevation_image_url}
-            alt={`Høydeprofil etape ${stage.stage_number}`}
-            className="w-full"
-          />
-        </div>
-      )}
+      {/* Højdeprofil + individuelle stigninger */}
+      <ClimbProfile
+        climbs={climbs}
+        elevationImageUrl={stage.elevation_image_url}
+      />
 
       {/* Etapeinfo */}
       {(stage.description || stage.fun_facts?.length || stage.stage_start_time) && (
@@ -393,6 +441,42 @@ export default async function StagePage(props: {
                 </ul>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* TV / Streaming */}
+      {stageBroadcasts.length > 0 && (
+        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <span className="text-sm">📺</span>
+            <span className="text-xs uppercase tracking-[0.2em] text-slate-400 font-medium">Se det her</span>
+          </div>
+          <div className="p-4 space-y-2">
+            {stageBroadcasts.map((b, i) => (
+              <div key={i} className="flex items-center justify-between gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                    b.broadcaster.includes("TV 2") ? "bg-blue-500/15 text-blue-300" :
+                    b.broadcaster.includes("Kanal") ? "bg-purple-500/15 text-purple-300" :
+                    b.broadcaster.includes("GCN") ? "bg-orange-500/15 text-orange-300" :
+                    "bg-slate-700 text-slate-300"
+                  }`}>
+                    {b.broadcaster}
+                  </span>
+                  {b.is_live && (
+                    <span className="flex items-center gap-1 text-[10px] text-red-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                      LIVE
+                    </span>
+                  )}
+                </div>
+                <span className="text-slate-400 font-mono text-xs">
+                  {b.start_time?.slice(0, 5)}
+                  {b.end_time ? ` – ${b.end_time.slice(0, 5)}` : ""}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}

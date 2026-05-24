@@ -47,6 +47,17 @@ type DnfEntry = {
   teams: { name: string; slug: string } | null;
 };
 
+type Broadcast = {
+  stage_number: number | null;
+  broadcast_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  broadcaster: string;
+  stream_url: string | null;
+  is_live: boolean;
+  notes: string | null;
+};
+
 // ── Fetchers ───────────────────────────────────────────────────────────────
 
 async function getRace(slug: string): Promise<Race | null> {
@@ -94,6 +105,15 @@ async function getDnfs(slug: string): Promise<DnfEntry[]> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/dnfs`, { cache: "no-store" });
     return res.ok ? res.json() : [];
+  } catch { return []; }
+}
+
+async function getBroadcast(slug: string): Promise<Broadcast[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch { return []; }
 }
 
@@ -275,7 +295,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const { slug } = await props.params;
   const today = getToday();
 
-  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -285,6 +305,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getClassification(slug, "mountains"),
       getClassification(slug, "youth"),
       getDnfs(slug),
+      getBroadcast(slug),
     ]);
 
   if (!race) {
@@ -608,6 +629,55 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           </div>
         </Link>
       )}
+
+      {/* ── TV / Streaming ── */}
+      {broadcasts.length > 0 && (() => {
+        const upcoming = broadcasts
+          .filter((b) => b.broadcast_date >= today)
+          .slice(0, 5);
+        if (upcoming.length === 0) return null;
+        return (
+          <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <span className="text-sm">📺</span>
+              <span className="text-xs uppercase tracking-[0.2em] text-slate-400 font-medium">Se det her</span>
+            </div>
+            <div className="divide-y divide-slate-800/50">
+              {upcoming.map((b, i) => (
+                <div key={i} className="flex items-center gap-3 px-5 py-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                        b.broadcaster.includes("TV 2") ? "bg-blue-500/15 text-blue-300" :
+                        b.broadcaster.includes("Kanal") ? "bg-purple-500/15 text-purple-300" :
+                        b.broadcaster.includes("GCN") ? "bg-orange-500/15 text-orange-300" :
+                        "bg-slate-700 text-slate-300"
+                      }`}>
+                        {b.broadcaster}
+                      </span>
+                      {b.stage_number && (
+                        <span className="text-xs text-slate-500">Etape {b.stage_number}</span>
+                      )}
+                      {b.notes && (
+                        <span className="text-xs text-slate-600 truncate">{b.notes}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-xs font-mono text-slate-300">
+                      {b.start_time?.slice(0, 5)}
+                      {b.end_time ? `–${b.end_time.slice(0, 5)}` : ""}
+                    </p>
+                    <p className="text-[10px] text-slate-600">
+                      {new Date(b.broadcast_date + "T00:00:00").toLocaleDateString("da-DK", { weekday: "short", day: "numeric", month: "short" })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Favorit-leaderboard (jersey-tabs) ── */}
       {hasResults && (
