@@ -663,7 +663,8 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           if (name.includes("TV 2")) return "bg-blue-500/15 text-blue-300 border-blue-500/20";
           if (name.includes("Eurosport")) return "bg-orange-500/15 text-orange-300 border-orange-500/20";
           if (name.includes("GCN")) return "bg-yellow-500/15 text-yellow-300 border-yellow-500/20";
-          if (name.includes("Kanal") || name.includes("HBO")) return "bg-purple-500/15 text-purple-300 border-purple-500/20";
+          if (name.includes("HBO")) return "bg-purple-500/15 text-purple-300 border-purple-500/20";
+          if (name.includes("Discovery") || name.includes("Kanal 5")) return "bg-blue-400/15 text-blue-200 border-blue-400/20";
           return "bg-slate-700/50 text-slate-300 border-slate-600/30";
         }
 
