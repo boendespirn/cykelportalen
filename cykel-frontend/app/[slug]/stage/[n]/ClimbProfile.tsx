@@ -16,6 +16,33 @@ type Climb = {
   profile_image_url: string | null;
 };
 
+function avg4kmBuckets(sections: GradientSection[]): { km: number; gradient: number }[] {
+  if (sections.length === 0) return [];
+  const BUCKET = 4;
+  const maxKm = sections[sections.length - 1].km;
+  const result: { km: number; gradient: number }[] = [];
+  for (let start = 0; start <= maxKm; start += BUCKET) {
+    const inRange = sections.filter(s => s.km >= start && s.km < start + BUCKET);
+    if (inRange.length > 0) {
+      const avg = inRange.reduce((sum, s) => sum + s.gradient, 0) / inRange.length;
+      result.push({ km: start + BUCKET / 2, gradient: parseFloat(avg.toFixed(1)) });
+    }
+  }
+  return result;
+}
+
+function curvePath(points: { x: number; y: number }[]): string {
+  if (points.length < 2) return "";
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const cpx = (prev.x + curr.x) / 2;
+    d += ` C ${cpx} ${prev.y} ${cpx} ${curr.y} ${curr.x} ${curr.y}`;
+  }
+  return d;
+}
+
 type Props = {
   climbs: Climb[];
   elevationImageUrl: string | null;
@@ -142,7 +169,34 @@ function ClimbSvg({ climb }: { climb: Climb }) {
             );
           })}
 
-        {/* Toppen — gradient label */}
+        {/* Smooth 4 km-gennemsnit kurve */}
+        {(() => {
+          const buckets = avg4kmBuckets(sections);
+          if (buckets.length < 2) return null;
+          const pts = buckets.map(b => ({
+            x: PAD_LEFT + (b.km / totalKm) * innerW,
+            y: PAD_TOP + innerH - (b.gradient / (maxGrad * 1.1)) * innerH,
+            g: b.gradient,
+          }));
+          const line = curvePath(pts);
+          return (
+            <g>
+              <path d={line} fill="none" stroke="white" strokeWidth={1.8}
+                opacity={0.85} strokeLinecap="round" strokeLinejoin="round" />
+              {pts.map((p, i) => (
+                <g key={i}>
+                  <circle cx={p.x} cy={p.y} r={2.5} fill="white" opacity={0.9} />
+                  <text x={p.x} y={p.y - 5} textAnchor="middle"
+                    fontSize={7} fill="white" opacity={0.75} fontWeight="500">
+                    {p.g}%
+                  </text>
+                </g>
+              ))}
+            </g>
+          );
+        })()}
+
+        {/* Toppen — max gradient label */}
         {climb.max_gradient && (
           <text
             x={W - PAD_RIGHT}
@@ -194,20 +248,22 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
                   : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
               }`}
             >
-              ⛰ Stigning {i + 1}
+              ⛰ {c.name}
             </button>
           ))}
         </div>
       )}
 
-      {/* Fuld profil */}
+      {/* Fuld profil — klik åbner native billedvisning (roterbar på iPhone) */}
       {activeIdx === -1 && elevationImageUrl && (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={elevationImageUrl}
-          alt="Højdeprofil"
-          className="w-full"
-        />
+        <a href={elevationImageUrl} target="_blank" rel="noopener noreferrer" className="block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={elevationImageUrl}
+            alt="Højdeprofil"
+            className="w-full"
+          />
+        </a>
       )}
 
       {/* Enkelt stigning */}

@@ -106,7 +106,7 @@ _EXTRACT_STAGE_JS = r"""() => {
     for (const t of tables) {
         if (t.querySelectorAll('tbody tr').length > 50) { tbl = t; break; }
     }
-    if (!tbl) return { rows: [], headers: [] };
+    if (!tbl) return { rows: [], dnf_rows: [], headers: [] };
 
     const headers = Array.from(tbl.querySelectorAll('th'))
         .map(th => th.innerText.trim().toLowerCase());
@@ -121,19 +121,36 @@ _EXTRACT_STAGE_JS = r"""() => {
     const idxBonus   = idxPnt >= 0 ? idxPnt + 1 : -1;
 
     const rows = [];
+    const dnf_rows = [];
+    let inDnfSection = false;
+
     for (const tr of tbl.querySelectorAll('tbody tr')) {
         const cells = Array.from(tr.querySelectorAll('td')).map(c => c.innerText.trim());
-        if (cells.length < 4) continue;
+        if (cells.length < 2) continue;
 
-        // PCS-slug fra link (ikke altid til stede i headless mode)
+        // Detekter DNF-sektionshoved (celle med teksten "DNF")
+        if (cells.slice(0, 3).some(c => c === 'DNF')) {
+            inDnfSection = true;
+            continue;
+        }
+
         const link    = tr.querySelector('a[href*="/rider/"]');
         const pcsSlug = link ? link.href.split('/rider/')[1] : null;
-        const bib     = idxBIB    >= 0 ? (parseInt(cells[idxBIB])    || null) : null;
-        const name    = idxRider  >= 0 ? cells[idxRider]              : null;
+        const bib     = idxBIB   >= 0 ? (parseInt(cells[idxBIB])   || null) : null;
+        const name    = idxRider >= 0 ? cells[idxRider]             : null;
 
-        const bonusStr = idxBonus >= 0 ? cells[idxBonus] : '';
+        if (inDnfSection) {
+            if (pcsSlug || name) {
+                dnf_rows.push({ pcs_slug: pcsSlug, bib, rider_name: name });
+            }
+            continue;
+        }
+
+        if (cells.length < 4) continue;
+
+        const bonusStr   = idxBonus >= 0 ? cells[idxBonus] : '';
         const bonusMatch = bonusStr ? bonusStr.match(/(\d+)/) : null;
-        const bonusSec = bonusMatch ? parseInt(bonusMatch[1]) : 0;
+        const bonusSec   = bonusMatch ? parseInt(bonusMatch[1]) : 0;
 
         rows.push({
             stage_pos : parseInt(cells[idxRnk])     || null,
@@ -147,7 +164,7 @@ _EXTRACT_STAGE_JS = r"""() => {
             rider_name: name,
         });
     }
-    return { rows, headers };
+    return { rows, dnf_rows, headers };
 }"""
 
 
@@ -236,6 +253,12 @@ def get_stages(race_id: str) -> dict[int, dict]:
     return {s["stage_number"]: s for s in stages}
 
 
+def get_stages_with_results(race_id: str) -> set[str]:
+    """Returnerer sæt af stage_ids der allerede har resultater i DB."""
+    rows = sb_get("results", f"?race_id=eq.{race_id}&select=stage_id")
+    return {r["stage_id"] for r in rows}
+
+
 def get_startlist_map(race_id: str) -> dict[str, dict]:
     """rider_id → startlist-row"""
     sl = sb_get(
@@ -271,7 +294,8 @@ async def load_page(page, url: str):
     await page.wait_for_timeout(3000)
 
 
-async def scrape_stage(page, stage_num: int) -> list[dict]:
+async def scrape_stage(page, stage_num: int) -> tuple[list[dict], list[dict]]:
+    """Returnerer (finisher_rows, dnf_rows)."""
     url = f"{PCS_BASE}/stage-{stage_num}"
     print(f"  → {url}")
     await load_page(page, url)
@@ -280,14 +304,14 @@ async def scrape_stage(page, stage_num: int) -> list[dict]:
     for attempt in range(3):
         data = await page.evaluate(_EXTRACT_STAGE_JS)
         if data["rows"]:
-            print(f"    {len(data['rows'])} ryttere fundet (forsøg {attempt+1})")
-            return data["rows"]
+            print(f"    {len(data['rows'])} ryttere fundet, {len(data.get('dnf_rows', []))} DNF (forsøg {attempt+1})")
+            return data["rows"], data.get("dnf_rows", [])
         if attempt < 2:
             print(f"    Ingen data endnu, venter 3s... (forsøg {attempt+1})")
             await page.wait_for_timeout(3000)
 
     print(f"    0 ryttere fundet (headers: {data.get('headers', [])})")
-    return []
+    return [], []
 
 
 async def scrape_classification(page, classif: str) -> list[dict]:
@@ -423,18 +447,27 @@ def store_classification(
 
 
 def mark_dnfs(
-    stage_rows: list[dict],
+    dnf_rows: list[dict],
     race_id: str,
     stage_num: int,
     slug_map: dict,
-    startlist: dict,
-) -> None:
-    """Marker ryttere der IKKE er i resultaterne som potentielle DNF."""
-    finishers = {slug_map[r["pcs_slug"]] for r in stage_rows if r.get("pcs_slug") and slug_map.get(r["pcs_slug"])}
-    for rider_id, sl_row in startlist.items():
-        if sl_row["status"] == "active" and rider_id not in finishers:
-            # Kun marker hvis de ikke allerede er markeret
-            pass  # Kræver bekræftelse fra PCS DNF-liste; springer over for nu
+    bib_map: dict,
+) -> int:
+    """Marker ryttere fra PCS DNF-liste som DNF i startlists-tabellen."""
+    count = 0
+    for row in dnf_rows:
+        rider_id = resolve_rider(row, slug_map, bib_map)
+        if not rider_id:
+            continue
+        res = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/startlists"
+            f"?race_id=eq.{race_id}&rider_id=eq.{rider_id}",
+            json={"status": "DNF", "dnf_stage_number": stage_num},
+            headers=HEADERS(),
+        )
+        if res.status_code in (200, 204):
+            count += 1
+    return count
 
 
 # ---------- official giro classifications ----------------------------------
@@ -625,22 +658,32 @@ async def main(stages_to_scrape: list[int], gc_only: bool, db_slug: str, pcs_slu
 
     today = date.today()
 
-    # Bestem hvilke etaper der er faerdige (dato < i dag)
+    # Bestem hvilke etaper der er færdige (dato <= i dag)
     done_stages = sorted([
         n for n, s in stages.items()
-        if s["date"] and s["date"] < today.isoformat()
+        if s["date"] and s["date"] <= today.isoformat()
     ])
 
     if stages_to_scrape:
         targets = [n for n in stages_to_scrape if n in stages]
     else:
-        targets = done_stages
+        # Filtrér til kun etaper der mangler resultater i DB
+        stages_with_results = get_stages_with_results(race["id"])
+        targets = [
+            n for n in done_stages
+            if stages[n]["id"] not in stages_with_results
+        ]
+        if not targets:
+            print("Alle færdige etaper har allerede resultater — intet at hente.")
+        else:
+            already = len(done_stages) - len(targets)
+            print(f"Færdige etaper: {len(done_stages)} | Allerede i DB: {already} | Mangler: {targets}")
 
     if not targets and not gc_only:
-        print("Ingen faerdige etaper at hente endnu.")
         return
 
-    print(f"Henter etaper: {targets}")
+    if stages_to_scrape:
+        print(f"Henter etaper (manuelt): {targets}")
 
     slug_map   = build_slug_map()
     bib_map    = build_bib_map(race["id"])
@@ -657,7 +700,7 @@ async def main(stages_to_scrape: list[int], gc_only: bool, db_slug: str, pcs_slu
             for stage_num in targets:
                 stage = stages[stage_num]
                 print(f"\nEtape {stage_num} ({stage['date']}):")
-                rows = await scrape_stage(page, stage_num)
+                rows, dnf_rows = await scrape_stage(page, stage_num)
                 if not rows:
                     print("  Ingen data — springer over.")
                     continue
@@ -667,6 +710,10 @@ async def main(stages_to_scrape: list[int], gc_only: bool, db_slug: str, pcs_slu
 
                 gc_n = store_gc_from_stage(rows, race["id"], stage_num, slug_map, bib_map)
                 print(f"  Gemt {gc_n} GC-poster (fra etapeside)")
+
+                if dnf_rows:
+                    dnf_n = mark_dnfs(dnf_rows, race["id"], stage_num, slug_map, bib_map)
+                    print(f"  Markeret {dnf_n} ryttere som DNF (etape {stage_num})")
 
                 latest_stage_rows = rows
 

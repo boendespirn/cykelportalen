@@ -118,28 +118,30 @@ def mark_dnf(race_id: str, rider: dict, stage_number: int) -> None:
     )
 
 
-def upsert_gc(race_id: str, stage_number: int, standings: list[dict]) -> None:
-    """Gemmer GC-klassement i classifications-tabellen."""
-    # Slet eksisterende data for denne etape
+def upsert_classification(race_id: str, stage_number: int, classif_type: str, standings: list[dict]) -> None:
+    """Gemmer klassement i classifications-tabellen (gc, points, mountains, youth)."""
     requests.delete(
         f"{SUPABASE_URL}/rest/v1/classifications"
-        f"?race_id=eq.{race_id}&after_stage_number=eq.{stage_number}&classification_type=eq.gc",
+        f"?race_id=eq.{race_id}&after_stage_number=eq.{stage_number}&classification_type=eq.{classif_type}",
         headers=DB,
     )
-    # Byg rækker til batch-insert
     rows = []
     for entry in standings:
         rid = get_rider_id(entry["slug"], entry["name"])
         if not rid:
             continue
-        rows.append({
+        row = {
             "race_id":             race_id,
             "after_stage_number":  stage_number,
-            "classification_type": "gc",
+            "classification_type": classif_type,
             "rider_id":            rid,
             "position":            entry.get("position"),
-            "time_gap_seconds":    entry.get("time_gap_seconds", 0),
-        })
+        }
+        if "time_gap_seconds" in entry:
+            row["time_gap_seconds"] = entry["time_gap_seconds"]
+        if "points" in entry:
+            row["points"] = entry["points"]
+        rows.append(row)
     if rows:
         requests.post(
             f"{SUPABASE_URL}/rest/v1/classifications",
@@ -184,12 +186,23 @@ def _parse_pcs_row(row) -> dict | None:
     return {"pos": pos, "slug": slug, "name": name}
 
 
+def _extract_time(td) -> str:
+    """Udtræk tid fra PCS td — fjern dublet fra skjult span."""
+    if not td:
+        return ""
+    font = td.find("font")
+    raw = font.get_text(strip=True) if font else td.get_text(strip=True)
+    # PCS duplikerer tekst via skjult span: "1:561:56" → "1:56"
+    m = re.match(r"(\d+:\d+(?::\d+)?)", raw)
+    return m.group(1) if m else raw
+
+
 def scrape_stage_result(pcs_stage_url: str) -> dict:
     """
-    Scraper etaperesultat fra PCS med BeautifulSoup.
-    Returnerer: {top10: [{pos,slug,name,time}], dnf: [{slug,name}], gc: [{pos,slug,name,time_gap_seconds}]}
+    Scraper etaperesultat + alle 4 klassementer fra PCS med BeautifulSoup.
+    Returnerer: {top10, dnf, gc, points, mountains, youth}
     """
-    result = {"top10": [], "dnf": [], "gc": []}
+    result = {"top10": [], "dnf": [], "gc": [], "points": [], "mountains": [], "youth": []}
 
     try:
         with sync_playwright() as p:
@@ -238,24 +251,63 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                 if parsed:
                     result["dnf"].append({"slug": parsed["slug"], "name": parsed["name"]})
 
-        # ── Tabel 1: GC-klassement (sorteret efter GC-placering) ─────────────
+        # ── Tabel 1: GC-klassement ────────────────────────────────────────────
         if len(tables) > 1:
             for row in tables[1].find_all("tr")[1:21]:
                 parsed = _parse_pcs_row(row)
                 if not parsed:
                     continue
-                time_td = row.find("td", class_="time")
-                time_str = ""
-                if time_td:
-                    font = time_td.find("font")
-                    if font:
-                        time_str = font.get_text(strip=True)
+                time_str = _extract_time(row.find("td", class_="time"))
                 gap = 0 if parsed["pos"] == 1 else (parse_time_to_seconds(time_str) or 0)
                 result["gc"].append({
-                    "position":         parsed["pos"],
-                    "slug":             parsed["slug"],
-                    "name":             parsed["name"],
-                    "time_gap_seconds": gap,
+                    "position": parsed["pos"], "slug": parsed["slug"],
+                    "name": parsed["name"], "time_gap_seconds": gap,
+                })
+
+        # ── Tabel 2: Pointsklassement (pnt-kolonne = td[9]) ──────────────────
+        if len(tables) > 2:
+            for row in tables[2].find_all("tr")[1:21]:
+                parsed = _parse_pcs_row(row)
+                if not parsed:
+                    continue
+                tds = row.find_all("td", recursive=False)
+                try:
+                    pts = int(tds[9].get_text(strip=True)) if len(tds) > 9 else 0
+                except (ValueError, IndexError):
+                    pts = 0
+                result["points"].append({
+                    "position": parsed["pos"], "slug": parsed["slug"],
+                    "name": parsed["name"], "points": pts,
+                })
+
+        # ── Tabel 6: Bjergklassement (pnt-kolonne = td[9]) ───────────────────
+        if len(tables) > 6:
+            for row in tables[6].find_all("tr")[1:21]:
+                parsed = _parse_pcs_row(row)
+                if not parsed:
+                    continue
+                tds = row.find_all("td", recursive=False)
+                try:
+                    pts = int(tds[9].get_text(strip=True)) if len(tds) > 9 else 0
+                except (ValueError, IndexError):
+                    pts = 0
+                result["mountains"].append({
+                    "position": parsed["pos"], "slug": parsed["slug"],
+                    "name": parsed["name"], "points": pts,
+                })
+
+        # ── Tabel 7: Ungdomsklassement (time-kolonne = td[9]) ────────────────
+        if len(tables) > 7:
+            for row in tables[7].find_all("tr")[1:21]:
+                parsed = _parse_pcs_row(row)
+                if not parsed:
+                    continue
+                tds = row.find_all("td", recursive=False)
+                time_str = _extract_time(tds[9]) if len(tds) > 9 else ""
+                gap = 0 if parsed["pos"] == 1 else (parse_time_to_seconds(time_str) or 0)
+                result["youth"].append({
+                    "position": parsed["pos"], "slug": parsed["slug"],
+                    "name": parsed["name"], "time_gap_seconds": gap,
                 })
 
     except Exception as e:
@@ -333,7 +385,25 @@ def process(race_slug: str | None, stage_number: int | None) -> None:
                 print(f"  -> GC top3: " + " | ".join(
                     f"{r['position']}. {r['name'].split()[-1]}" for r in data["gc"][:3]
                 ))
-                upsert_gc(race_id, sn, data["gc"])
+                upsert_classification(race_id, sn, "gc", data["gc"])
+
+            if data["points"]:
+                print(f"  -> Points top3: " + " | ".join(
+                    f"{r['position']}. {r['name'].split()[-1]}" for r in data["points"][:3]
+                ))
+                upsert_classification(race_id, sn, "points", data["points"])
+
+            if data["mountains"]:
+                print(f"  -> Bjerge top3: " + " | ".join(
+                    f"{r['position']}. {r['name'].split()[-1]}" for r in data["mountains"][:3]
+                ))
+                upsert_classification(race_id, sn, "mountains", data["mountains"])
+
+            if data["youth"]:
+                print(f"  -> Ungdom top3: " + " | ".join(
+                    f"{r['position']}. {r['name'].split()[-1]}" for r in data["youth"][:3]
+                ))
+                upsert_classification(race_id, sn, "youth", data["youth"])
 
             time.sleep(DELAY)
 
