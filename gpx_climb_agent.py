@@ -79,9 +79,17 @@ def existing_climbs(stage_id: str) -> int:
     return len(res.json()) if res.ok else 0
 
 
+def delete_stage_climbs(stage_id: str) -> None:
+    requests.delete(
+        f"{SUPABASE_URL}/rest/v1/stage_climbs?stage_id=eq.{stage_id}",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+    )
+
+
 def upsert_climb(climb: dict) -> bool:
     res = requests.post(
-        f"{SUPABASE_URL}/rest/v1/stage_climbs",
+        f"{SUPABASE_URL}/rest/v1/stage_climbs"
+        f"?on_conflict=stage_id,km_from_start",
         json=climb,
         headers={**HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal"},
     )
@@ -291,6 +299,10 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
         if not overwrite and existing_climbs(s_id) > 0:
             print("  -> Allerede data, springer over (brug --all for at overskrive)")
             continue
+
+        # Ved --all: slet eksisterende data så vi starter frisk (undgår navne-dubletter)
+        if overwrite:
+            delete_stage_climbs(s_id)
 
         # Skip flad/enkeltstart etaper
         if s_type in ("flat", "tt", "itt"):
