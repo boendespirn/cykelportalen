@@ -305,21 +305,23 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
             )}
           </div>
 
-          {/* Gradient visualisering */}
-          {activeClimb.gradient_sections && activeClimb.gradient_sections.length > 0 ? (
+          {/* Gradient visualisering — ClimbFinder-billede foretrækkes */}
+          {activeClimb.profile_image_url ? (
+            <a href={activeClimb.profile_image_url} target="_blank" rel="noopener noreferrer" className="block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={activeClimb.profile_image_url}
+                alt={activeClimb.name}
+                className="w-full rounded-lg"
+              />
+            </a>
+          ) : activeClimb.gradient_sections && activeClimb.gradient_sections.length > 0 ? (
             <>
               <ClimbSvg climb={activeClimb} />
               <div className="mt-2">
                 <GradientLegend />
               </div>
             </>
-          ) : activeClimb.profile_image_url ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={activeClimb.profile_image_url}
-              alt={activeClimb.name}
-              className="w-full rounded-lg"
-            />
           ) : null}
         </div>
       )}
