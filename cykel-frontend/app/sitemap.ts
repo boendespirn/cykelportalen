@@ -14,19 +14,28 @@ async function safeFetch<T>(url: string): Promise<T[]> {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [races, riders, teams, news] = await Promise.all([
-    safeFetch<{ slug: string; start_date: string; stage_count: number }>(`${API_BASE}/upcoming-races`),
+  const [allRaces, riders, teams, news] = await Promise.all([
+    safeFetch<{ slug: string; start_date: string; end_date: string | null; stage_count: number; category: string }>(`${API_BASE}/races`),
     safeFetch<{ slug: string }>(`${API_BASE}/riders`),
     safeFetch<{ slug: string }>(`${API_BASE}/teams`),
     safeFetch<{ slug: string; published_at: string }>(`${API_BASE}/news?limit=500`),
   ]);
 
-  const raceUrls: MetadataRoute.Sitemap = races.map((r) => ({
-    url: `${BASE}/${r.slug}`,
-    lastModified: r.start_date,
-    changeFrequency: "daily",
-    priority: 0.9,
-  }));
+  // Prioritér WorldTour-løb og igangværende/kommende løb højere
+  const today = new Date().toISOString().slice(0, 10);
+  const races = allRaces.filter(
+    (r) => !r.end_date || r.end_date >= new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10)
+  );
+
+  const raceUrls: MetadataRoute.Sitemap = races.map((r) => {
+    const isOngoing = r.start_date <= today && (!r.end_date || r.end_date >= today);
+    return {
+      url: `${BASE}/${r.slug}`,
+      lastModified: r.start_date,
+      changeFrequency: isOngoing ? "hourly" : "weekly",
+      priority: isOngoing ? 1.0 : 0.9,
+    };
+  });
 
   const stageUrls: MetadataRoute.Sitemap = races.flatMap((r) =>
     Array.from({ length: r.stage_count ?? 0 }, (_, i) => ({

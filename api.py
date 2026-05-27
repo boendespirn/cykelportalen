@@ -73,9 +73,24 @@ def root():
 
 @app.get("/races")
 def get_races():
-    url = f"{SUPABASE_URL}/rest/v1/races?select=name,slug,start_date,end_date,country_code,category&order=start_date.asc"
-    response = requests.get(url, headers=get_headers())
-    return response.json()
+    url = f"{SUPABASE_URL}/rest/v1/races?select=id,name,slug,start_date,end_date,country_code,category&order=start_date.asc"
+    races = requests.get(url, headers=get_headers()).json()
+    if not races:
+        return races
+    race_ids = [r["id"] for r in races]
+    id_list = ",".join(race_ids)
+    stage_data = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages?race_id=in.({id_list})&select=race_id",
+        headers=get_headers(),
+    ).json()
+    stage_counts: dict[str, int] = {}
+    for row in stage_data:
+        rid = row["race_id"]
+        stage_counts[rid] = stage_counts.get(rid, 0) + 1
+    return [
+        {**{k: v for k, v in r.items() if k != "id"}, "stage_count": stage_counts.get(r["id"], 0)}
+        for r in races
+    ]
 
 
 @app.get("/upcoming-races")
