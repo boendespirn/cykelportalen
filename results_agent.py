@@ -118,6 +118,36 @@ def mark_dnf(race_id: str, rider: dict, stage_number: int) -> None:
     )
 
 
+def upsert_stage_results(race_id: str, stage_id: str, top10: list[dict]) -> None:
+    """Gemmer etaperesultater (top10) i results-tabellen."""
+    rows = []
+    for entry in top10:
+        rid = get_rider_id(entry["slug"], entry["name"])
+        if not rid:
+            continue
+        pos = entry.get("position")
+        time_str = entry.get("time", "")
+        secs = parse_time_to_seconds(time_str) if time_str else None
+        row = {
+            "race_id":  race_id,
+            "stage_id": stage_id,
+            "rider_id": rid,
+            "position": pos,
+        }
+        if pos == 1:
+            row["time_seconds"] = secs
+            row["time_gap_seconds"] = 0
+        else:
+            row["time_gap_seconds"] = secs
+        rows.append(row)
+    if rows:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/results",
+            json=rows,
+            headers={**DB, "Prefer": "resolution=ignore-duplicates,return=minimal"},
+        )
+
+
 def upsert_classification(race_id: str, stage_number: int, classif_type: str, standings: list[dict]) -> None:
     """Gemmer klassement i classifications-tabellen (gc, points, mountains, youth)."""
     requests.delete(
@@ -373,6 +403,7 @@ def process(race_slug: str | None, stage_number: int | None) -> None:
                 print(f"  -> Top 3: " + " | ".join(
                     f"{r['position']}. {r['name'].split()[-1]}" for r in data["top10"][:3]
                 ))
+                upsert_stage_results(race_id, stage["id"], data["top10"])
             else:
                 print("  -> Ingen etaperesultat fundet (muligvis ikke koert endnu)")
 
