@@ -240,7 +240,7 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
           />
         )}
         {rider.training_region && (
-          <StatCell label="Træner i" value={rider.training_region} />
+          <StatCell label="Træner i" value={rider.training_region} sub="estimeret" />
         )}
         {rider.source_url && (
           <div className="bg-slate-900/60 px-5 py-4 border border-slate-800/60 rounded-xl flex flex-col justify-between">
