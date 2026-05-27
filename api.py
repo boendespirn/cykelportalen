@@ -408,6 +408,24 @@ def get_rider_races(slug: str):
     return data
 
 
+@app.get("/riders/{slug}/stage-wins")
+def get_rider_stage_wins(slug: str):
+    rider_url = f"{SUPABASE_URL}/rest/v1/riders?select=id&slug=eq.{slug}&limit=1"
+    rider_data = requests.get(rider_url, headers=get_headers()).json()
+    if not rider_data:
+        return []
+    rider_id = rider_data[0]["id"]
+    url = (
+        f"{SUPABASE_URL}/rest/v1/results"
+        f"?rider_id=eq.{rider_id}&position=eq.1&stage_id=not.is.null"
+        f"&select=stages(stage_number,finish_location,date,race_id,"
+        f"races(name,slug)),race_id"
+        f"&order=stages(date).desc"
+    )
+    data = requests.get(url, headers=get_headers()).json()
+    return data if isinstance(data, list) else []
+
+
 @app.get("/riders/{slug}")
 def get_rider_by_slug(slug: str):
     url = (
