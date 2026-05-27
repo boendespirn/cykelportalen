@@ -50,11 +50,11 @@ type Props = {
 
 // Gradient → farve (grøn <6%, gul 6-9%, rød >9%, lilla >13%)
 function gradientColor(g: number): string {
-  if (g < 4)  return "#10b981"; // emerald-500
-  if (g < 6)  return "#84cc16"; // lime-500
-  if (g < 9)  return "#eab308"; // yellow-500
-  if (g < 13) return "#f97316"; // orange-500
-  return "#ef4444";             // red-500
+  if (g < 4)  return "#10b981";
+  if (g < 6)  return "#84cc16";
+  if (g < 9)  return "#eab308";
+  if (g < 13) return "#f97316";
+  return "#ef4444";
 }
 
 function GradientLegend() {
@@ -93,14 +93,12 @@ function ClimbSvg({ climb }: { climb: Climb }) {
   const maxGrad = Math.max(...sections.map((s) => s.gradient), 1);
   const totalKm = sections.length > 0 ? sections[sections.length - 1].km + 0.5 : 1;
 
-  // Byg SVG path som area chart
-  const points = sections.map((s, i) => {
+  const points = sections.map((s) => {
     const x = PAD_LEFT + (s.km / totalKm) * innerW;
     const y = PAD_TOP + innerH - (s.gradient / (maxGrad * 1.1)) * innerH;
     return { x, y, g: s.gradient, km: s.km };
   });
 
-  // Area path
   const pathD = points.length > 0
     ? [
         `M ${points[0].x} ${PAD_TOP + innerH}`,
@@ -110,10 +108,7 @@ function ClimbSvg({ climb }: { climb: Climb }) {
       ].join(" ")
     : "";
 
-  // Bar chart (én bar per sektion, farvekodet)
   const barW = innerW / sections.length;
-
-  // Y-akse labels
   const yLabels = [0, Math.round(maxGrad * 0.5), Math.round(maxGrad)];
 
   return (
@@ -123,7 +118,6 @@ function ClimbSvg({ climb }: { climb: Climb }) {
         className="w-full"
         style={{ minWidth: "300px", maxHeight: "160px" }}
       >
-        {/* Grid lines */}
         {yLabels.map((val) => {
           const y = PAD_TOP + innerH - (val / (maxGrad * 1.1)) * innerH;
           return (
@@ -136,7 +130,6 @@ function ClimbSvg({ climb }: { climb: Climb }) {
           );
         })}
 
-        {/* Farvelagte bars */}
         {sections.map((s, i) => {
           const x = PAD_LEFT + (s.km / totalKm) * innerW;
           const barH = (s.gradient / (maxGrad * 1.1)) * innerH;
@@ -154,11 +147,9 @@ function ClimbSvg({ climb }: { climb: Climb }) {
           );
         })}
 
-        {/* X-akse */}
         <line x1={PAD_LEFT} y1={PAD_TOP + innerH} x2={W - PAD_RIGHT} y2={PAD_TOP + innerH}
           stroke="#475569" strokeWidth={1} />
 
-        {/* X labels (km) */}
         {sections
           .filter((_, i) => i % Math.max(1, Math.floor(sections.length / 6)) === 0)
           .map((s) => {
@@ -169,7 +160,6 @@ function ClimbSvg({ climb }: { climb: Climb }) {
             );
           })}
 
-        {/* Smooth 4 km-gennemsnit kurve */}
         {(() => {
           const buckets = avg4kmBuckets(sections);
           if (buckets.length < 2) return null;
@@ -196,16 +186,9 @@ function ClimbSvg({ climb }: { climb: Climb }) {
           );
         })()}
 
-        {/* Toppen — max gradient label */}
         {climb.max_gradient && (
-          <text
-            x={W - PAD_RIGHT}
-            y={PAD_TOP + 8}
-            textAnchor="end"
-            fontSize={9}
-            fill="#f97316"
-            fontWeight="bold"
-          >
+          <text x={W - PAD_RIGHT} y={PAD_TOP + 8} textAnchor="end"
+            fontSize={9} fill="#f97316" fontWeight="bold">
             max {climb.max_gradient}%
           </text>
         )}
@@ -214,117 +197,150 @@ function ClimbSvg({ climb }: { climb: Climb }) {
   );
 }
 
+// Simpel lightbox — viser billede i fullscreen overlay uden URL-navigation
+function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
+      onClick={onClose}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt=""
+        className="max-w-full max-h-full object-contain"
+        style={{ touchAction: "pinch-zoom" }}
+        onClick={(e) => e.stopPropagation()}
+      />
+      <button
+        className="absolute top-4 right-4 text-white/70 hover:text-white text-2xl leading-none"
+        onClick={onClose}
+        aria-label="Luk"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
 export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
-  const [activeIdx, setActiveIdx] = useState<number>(-1); // -1 = fuld profil
+  const [activeIdx, setActiveIdx] = useState<number>(-1);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   if (!elevationImageUrl && climbs.length === 0) return null;
 
   const activeClimb = activeIdx >= 0 ? climbs[activeIdx] ?? null : null;
 
   return (
-    <div className="mb-6 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
-      {/* Tab navigation */}
-      {climbs.length > 0 && (
-        <div className="flex flex-wrap gap-1 p-2 border-b border-slate-800 bg-slate-900/60">
-          {elevationImageUrl && (
-            <button
-              onClick={() => setActiveIdx(-1)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                activeIdx === -1
-                  ? "bg-emerald-500/20 text-emerald-400"
-                  : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
-              }`}
-            >
-              Fuld profil
-            </button>
-          )}
-          {climbs.map((c, i) => (
-            <button
-              key={i}
-              onClick={() => setActiveIdx(i)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                activeIdx === i
-                  ? "bg-emerald-500/20 text-emerald-400"
-                  : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
-              }`}
-            >
-              ⛰ {c.name}
-            </button>
-          ))}
-        </div>
-      )}
+    <>
+      {lightboxUrl && <Lightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
 
-      {/* Fuld profil — klik åbner native billedvisning (roterbar på iPhone) */}
-      {activeIdx === -1 && elevationImageUrl && (
-        <a href={elevationImageUrl} target="_blank" rel="noopener noreferrer" className="block">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={elevationImageUrl}
-            alt="Højdeprofil"
-            className="w-full"
-          />
-        </a>
-      )}
-
-      {/* Enkelt stigning */}
-      {activeIdx >= 0 && activeClimb && (
-        <div className="p-4">
-          {/* Klatre-navn */}
-          <p className="text-slate-200 font-semibold text-sm mb-3">{activeClimb.name}</p>
-          {/* Klatre-stats */}
-          <div className="flex flex-wrap gap-4 mb-4 text-sm">
-            {activeClimb.length_km != null && (
-              <div>
-                <p className="text-xs text-slate-500 mb-0.5">Længde</p>
-                <p className="text-slate-200 font-mono font-medium">{activeClimb.length_km} km</p>
-              </div>
+      <div className="mb-6 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
+        {/* Tab navigation */}
+        {climbs.length > 0 && (
+          <div className="flex flex-wrap gap-1 p-2 border-b border-slate-800 bg-slate-900/60">
+            {elevationImageUrl && (
+              <button
+                onClick={() => setActiveIdx(-1)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  activeIdx === -1
+                    ? "bg-emerald-500/20 text-emerald-400"
+                    : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                Fuld profil
+              </button>
             )}
-            {activeClimb.elevation_m != null && (
-              <div>
-                <p className="text-xs text-slate-500 mb-0.5">Højdemeter</p>
-                <p className="text-red-400 font-mono font-medium">+{activeClimb.elevation_m} m</p>
-              </div>
-            )}
-            {activeClimb.avg_gradient != null && (
-              <div>
-                <p className="text-xs text-slate-500 mb-0.5">Gns. stigning</p>
-                <p className="text-orange-400 font-mono font-medium">{activeClimb.avg_gradient}%</p>
-              </div>
-            )}
-            {activeClimb.max_gradient != null && (
-              <div>
-                <p className="text-xs text-slate-500 mb-0.5">Max stigning</p>
-                <p className="text-red-400 font-mono font-bold">{activeClimb.max_gradient}%</p>
-              </div>
-            )}
-            {activeClimb.km_from_start != null && (
-              <div>
-                <p className="text-xs text-slate-500 mb-0.5">Starter ved</p>
-                <p className="text-slate-400 font-mono">km {activeClimb.km_from_start}</p>
-              </div>
-            )}
+            {climbs.map((c, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveIdx(i)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  activeIdx === i
+                    ? "bg-emerald-500/20 text-emerald-400"
+                    : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                ⛰ {c.name}
+              </button>
+            ))}
           </div>
+        )}
 
-          {/* Gradient visualisering — ClimbFinder-billede foretrækkes */}
-          {activeClimb.profile_image_url ? (
-            <a href={activeClimb.profile_image_url} target="_blank" rel="noopener noreferrer" className="block">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={activeClimb.profile_image_url}
-                alt={activeClimb.name}
-                className="w-full rounded-lg"
-              />
-            </a>
-          ) : activeClimb.gradient_sections && activeClimb.gradient_sections.length > 0 ? (
-            <>
-              <ClimbSvg climb={activeClimb} />
-              <div className="mt-2">
-                <GradientLegend />
-              </div>
-            </>
-          ) : null}
-        </div>
-      )}
-    </div>
+        {/* Fuld profil — klik åbner lightbox (samme URL, ingen ny tab) */}
+        {activeIdx === -1 && elevationImageUrl && (
+          <button
+            className="block w-full text-left cursor-zoom-in"
+            onClick={() => setLightboxUrl(elevationImageUrl)}
+            aria-label="Åbn højdeprofil i fuld størrelse"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={elevationImageUrl} alt="Højdeprofil" className="w-full" />
+          </button>
+        )}
+
+        {/* Enkelt stigning */}
+        {activeIdx >= 0 && activeClimb && (
+          <div className="p-4">
+            <p className="text-slate-200 font-semibold text-sm mb-3">{activeClimb.name}</p>
+            <div className="flex flex-wrap gap-4 mb-4 text-sm">
+              {activeClimb.length_km != null && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-0.5">Længde</p>
+                  <p className="text-slate-200 font-mono font-medium">{activeClimb.length_km} km</p>
+                </div>
+              )}
+              {activeClimb.elevation_m != null && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-0.5">Højdemeter</p>
+                  <p className="text-red-400 font-mono font-medium">+{activeClimb.elevation_m} m</p>
+                </div>
+              )}
+              {activeClimb.avg_gradient != null && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-0.5">Gns. stigning</p>
+                  <p className="text-orange-400 font-mono font-medium">{activeClimb.avg_gradient}%</p>
+                </div>
+              )}
+              {activeClimb.max_gradient != null && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-0.5">Max stigning</p>
+                  <p className="text-red-400 font-mono font-bold">{activeClimb.max_gradient}%</p>
+                </div>
+              )}
+              {activeClimb.km_from_start != null && (
+                <div>
+                  <p className="text-xs text-slate-500 mb-0.5">Starter ved</p>
+                  <p className="text-slate-400 font-mono">km {activeClimb.km_from_start}</p>
+                </div>
+              )}
+            </div>
+
+            {/* ClimbFinder-billede foretrækkes — klik åbner lightbox */}
+            {activeClimb.profile_image_url ? (
+              <button
+                className="block w-full text-left cursor-zoom-in"
+                onClick={() => setLightboxUrl(activeClimb.profile_image_url!)}
+                aria-label={`Åbn profil for ${activeClimb.name}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={activeClimb.profile_image_url}
+                  alt={activeClimb.name}
+                  className="w-full rounded-lg"
+                />
+              </button>
+            ) : activeClimb.gradient_sections && activeClimb.gradient_sections.length > 0 ? (
+              <>
+                <ClimbSvg climb={activeClimb} />
+                <div className="mt-2">
+                  <GradientLegend />
+                </div>
+              </>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
