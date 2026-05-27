@@ -15,6 +15,9 @@ export const metadata: Metadata = {
   },
   description: "Klassementet er Danmarks bedste cykelportal med etapeinfo, favoritter, højdeprofiler og klassementer fra UCI WorldTour.",
   metadataBase: new URL("https://klassementet.dk"),
+  verification: {
+    google: "KS9dcw2BBbQ_zhT2_YPgVjXgZiWXeOv5E8_5OxIYbXs",
+  },
   openGraph: {
     siteName: "Klassementet",
     locale: "da_DK",
