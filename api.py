@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import date
+import ast
 import os
 import requests
 from dotenv import load_dotenv
@@ -30,6 +31,39 @@ def get_headers():
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
     }
+
+
+def normalize_fun_facts(raw) -> list | None:
+    """Convert fun_facts to a list regardless of how it was stored in the DB."""
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = raw.strip()
+    if text.startswith("["):
+        depth, end = 0, -1
+        for i, ch in enumerate(text):
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end >= 0:
+            try:
+                facts = ast.literal_eval(text[: end + 1])
+                if isinstance(facts, list):
+                    result = [str(f) for f in facts]
+                    rest = text[end + 1 :].strip()
+                    if rest:
+                        result.append(rest)
+                    return result
+            except Exception:
+                pass
+    return [text]
 
 
 @app.get("/")
@@ -175,7 +209,9 @@ def get_stage_detail(slug: str, stage_number: int):
     if not stage_data:
         return {"error": "Etape ikke fundet"}
 
-    return {"stage": stage_data[0], "race": race_data[0]}
+    stage = stage_data[0]
+    stage["fun_facts"] = normalize_fun_facts(stage.get("fun_facts"))
+    return {"stage": stage, "race": race_data[0]}
 
 
 @app.get("/races/{slug}/results")

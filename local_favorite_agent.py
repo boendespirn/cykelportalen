@@ -8,6 +8,7 @@ Kør: python local_favorite_agent.py --race giro-d-italia-2026
      python local_favorite_agent.py --race giro-d-italia-2026 --overwrite
 """
 
+import ast
 import os
 import re
 import sys
@@ -156,17 +157,52 @@ def generate_fact(stage: dict, region: str, climb: str, local_riders: list[dict]
         return None
 
 
-def update_fun_facts(stage_id: str, new_fact: str, existing: str | None, overwrite: bool) -> None:
-    if existing and LOCAL_FACT_MARKER in existing:
+def parse_existing_facts(raw) -> list[str]:
+    """Normalize existing fun_facts to a list regardless of storage format."""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(f) for f in raw]
+    if not isinstance(raw, str):
+        return []
+    text = raw.strip()
+    if text.startswith("["):
+        depth, end = 0, -1
+        for i, ch in enumerate(text):
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end >= 0:
+            try:
+                facts = ast.literal_eval(text[: end + 1])
+                if isinstance(facts, list):
+                    result = [str(f) for f in facts]
+                    rest = text[end + 1 :].strip()
+                    if rest:
+                        result.append(rest)
+                    return result
+            except Exception:
+                pass
+    return [text] if text else []
+
+
+def update_fun_facts(stage_id: str, new_fact: str, existing_raw, overwrite: bool) -> None:
+    facts = parse_existing_facts(existing_raw)
+
+    if any(LOCAL_FACT_MARKER in f for f in facts):
         if not overwrite:
             return
-        cleaned = re.sub(rf"{re.escape(LOCAL_FACT_MARKER)}.*", "", existing, flags=re.DOTALL).rstrip()
-        existing = cleaned if cleaned else None
+        facts = [f for f in facts if LOCAL_FACT_MARKER not in f]
 
-    combined = f"{existing}\n\n{new_fact}" if existing else new_fact
+    facts.append(new_fact)
+
     res = requests.patch(
         f"{SUPABASE_URL}/rest/v1/stages?id=eq.{stage_id}",
-        json={"fun_facts": combined},
+        json={"fun_facts": facts},
         headers=SB_HEADERS,
     )
     if not res.ok:
@@ -199,7 +235,8 @@ def run(race_slug: str, stage_number: int | None, overwrite: bool) -> None:
         finish = stage.get("finish_location", "")
         existing_facts = stage.get("fun_facts")
 
-        if existing_facts and LOCAL_FACT_MARKER in existing_facts and not overwrite:
+        facts_list = parse_existing_facts(existing_facts)
+        if any(LOCAL_FACT_MARKER in f for f in facts_list) and not overwrite:
             print(f"[E{n}] {finish} — allerede har lokal-fakta, springer over")
             continue
 
