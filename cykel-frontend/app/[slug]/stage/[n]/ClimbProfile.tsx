@@ -223,13 +223,19 @@ function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
   );
 }
 
+function hasVisualProfile(c: Climb): boolean {
+  return !!(c.profile_image_url || (c.gradient_sections && c.gradient_sections.length > 0));
+}
+
 export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
   const [activeIdx, setActiveIdx] = useState<number>(-1);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-  if (!elevationImageUrl && climbs.length === 0) return null;
+  const visibleClimbs = climbs.filter(hasVisualProfile);
 
-  const activeClimb = activeIdx >= 0 ? climbs[activeIdx] ?? null : null;
+  if (!elevationImageUrl && visibleClimbs.length === 0) return null;
+
+  const activeClimb = activeIdx >= 0 ? visibleClimbs[activeIdx] ?? null : null;
 
   return (
     <>
@@ -237,7 +243,7 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
 
       <div className="mb-6 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
         {/* Tab navigation */}
-        {climbs.length > 0 && (
+        {(elevationImageUrl || visibleClimbs.length > 0) && (
           <div className="flex flex-wrap gap-1 p-2 border-b border-slate-800 bg-slate-900/60">
             {elevationImageUrl && (
               <button
@@ -251,7 +257,7 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
                 Fuld profil
               </button>
             )}
-            {climbs.map((c, i) => (
+            {visibleClimbs.map((c, i) => (
               <button
                 key={i}
                 onClick={() => setActiveIdx(i)}
