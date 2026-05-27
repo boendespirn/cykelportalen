@@ -418,12 +418,13 @@ def get_rider_stage_wins(slug: str):
     url = (
         f"{SUPABASE_URL}/rest/v1/results"
         f"?rider_id=eq.{rider_id}&position=eq.1&stage_id=not.is.null"
-        f"&select=stages(stage_number,finish_location,date,race_id,"
-        f"races(name,slug)),race_id"
-        f"&order=stages(date).desc"
+        f"&select=stages(stage_number,finish_location,date,races(name,slug))"
     )
     data = requests.get(url, headers=get_headers()).json()
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+    data.sort(key=lambda x: (x.get("stages") or {}).get("date") or "", reverse=True)
+    return data
 
 
 @app.get("/riders/{slug}")
