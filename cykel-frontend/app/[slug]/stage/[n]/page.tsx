@@ -41,6 +41,8 @@ type StartlistEntry = {
     date_of_birth: string | null;
     uci_ranking: number | null;
     photo_url: string | null;
+    hometown_region: string | null;
+    training_region: string | null;
   } | null;
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
@@ -55,6 +57,7 @@ type Climb = {
   max_gradient: number | null;
   gradient_sections: { km: number; gradient: number }[] | null;
   profile_image_url: string | null;
+  region: string | null;
 };
 
 type Broadcast = {
@@ -229,38 +232,74 @@ const STAGE_SPECIALISTS: Record<string, string[]> = {
   itt:      ["Time trialist", "GC", "All-rounder"],
 };
 
+// Specialiteter der IKKE passer til en etapetype
+const INCOMPATIBLE: Record<string, string[]> = {
+  flat:     ["Climber", "GC"],
+  mountain: ["Sprinter"],
+  tt:       ["Sprinter", "Classics", "Puncheur"],
+  itt:      ["Sprinter", "Classics", "Puncheur"],
+};
+
+function isCompatibleWithStage(speciality: string | null, stageType: string | null): boolean {
+  if (!speciality || !stageType) return true;
+  return !(INCOMPATIBLE[stageType] ?? []).includes(speciality);
+}
+
 function getRidersForStage(
   startlist: StartlistEntry[],
-  stageType: string | null
-): StartlistEntry[] {
-  if (!stageType) return [];
+  stageType: string | null,
+  climbs: Climb[]
+): { riders: StartlistEntry[]; localSlugs: Set<string> } {
+  const active = startlist.filter((e) => e.status === "active");
 
-  // Prioritér specialitet-match hvis data er tilgængeligt
-  const target = STAGE_SPECIALISTS[stageType] ?? [];
-  const bySpeciality = startlist.filter(
-    (e) => e.status === "active" && e.riders?.speciality && target.includes(e.riders.speciality)
+  // Find unikke regioner fra etapens stigninger
+  const stageRegions = new Set(
+    climbs.map((c) => c.region?.toLowerCase().trim()).filter((r): r is string => !!r)
   );
 
+  // Lokale ryttere: region matcher + specialitet kompatibel med etapetypen
+  const localSlugs = new Set<string>();
+  if (stageRegions.size > 0) {
+    for (const e of active) {
+      const r = e.riders;
+      if (!r) continue;
+      const homeReg = (r.hometown_region ?? "").toLowerCase().trim();
+      const trainReg = (r.training_region ?? "").toLowerCase().trim();
+      const isLocal = (homeReg && stageRegions.has(homeReg)) || (trainReg && stageRegions.has(trainReg));
+      if (isLocal && isCompatibleWithStage(r.speciality, stageType)) {
+        localSlugs.add(r.slug);
+      }
+    }
+  }
+
   const sortFn = (a: StartlistEntry, b: StartlistEntry) => {
-    // 1. UCI-rangering (lavest = bedst)
+    // 1. Lokale favoritter øverst
+    const aLocal = localSlugs.has(a.riders?.slug ?? "") ? 0 : 1;
+    const bLocal = localSlugs.has(b.riders?.slug ?? "") ? 0 : 1;
+    if (aLocal !== bLocal) return aLocal - bLocal;
+    // 2. UCI-rangering (lavest = bedst)
     const rankA = a.riders?.uci_ranking ?? 9999;
     const rankB = b.riders?.uci_ranking ?? 9999;
     if (rankA !== rankB) return rankA - rankB;
-    // 2. Kaptajn-flag som tiebreaker
+    // 3. Kaptajn-flag som tiebreaker
     const capA = (stageType === "flat" ? a.is_sprint_captain : a.is_gc_captain) ? 0 : 1;
     const capB = (stageType === "flat" ? b.is_sprint_captain : b.is_gc_captain) ? 0 : 1;
     return capA - capB;
   };
 
-  if (bySpeciality.length >= 4) {
-    return bySpeciality.sort(sortFn).slice(0, 16);
-  }
+  // Kandidatpulje: lokale ryttere + specialister (eller alle hvis ikke nok specialister)
+  const target = STAGE_SPECIALISTS[stageType ?? ""] ?? [];
+  const specialists = active.filter(
+    (e) => e.riders?.speciality && target.includes(e.riders.speciality)
+  );
+  const localEntries = active.filter((e) => localSlugs.has(e.riders?.slug ?? ""));
+  const localSlugSet = localSlugs;
+  const nonLocal = (specialists.length >= 4 ? specialists : active).filter(
+    (e) => !localSlugSet.has(e.riders?.slug ?? "")
+  );
 
-  // Fallback: vis alle aktive ryttere sorteret efter UCI-rangering
-  return startlist
-    .filter((e) => e.status === "active")
-    .sort(sortFn)
-    .slice(0, 16);
+  const combined = [...localEntries, ...nonLocal].sort(sortFn).slice(0, 16);
+  return { riders: combined, localSlugs };
 }
 
 // ── Metadata ──────────────────────────────────────────────────────────────────
@@ -338,7 +377,7 @@ export default async function StagePage(props: {
   const typeConfig = stage.stage_type
     ? STAGE_TYPE_CONFIG[stage.stage_type]
     : null;
-  const recommendedRiders = getRidersForStage(startlist, stage.stage_type);
+  const { riders: recommendedRiders, localSlugs } = getRidersForStage(startlist, stage.stage_type, climbs);
   const danishRiders = startlist.filter(
     (e) => e.riders?.nationality === "DK"
   );
@@ -603,6 +642,7 @@ export default async function StagePage(props: {
               if (!rider) return null;
               const isDanish = rider.nationality === "DK";
               const isCaptain = entry.is_gc_captain || entry.is_sprint_captain;
+              const isLocal = localSlugs.has(rider.slug);
 
               return (
                 <Link
@@ -640,6 +680,11 @@ export default async function StagePage(props: {
                       <span className={`text-sm font-medium truncate ${isDanish ? "text-red-200" : "text-slate-100"}`}>
                         {rider.name}
                       </span>
+                      {isLocal && (
+                        <span className="text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded flex-shrink-0">
+                          🏠 Lokal
+                        </span>
+                      )}
                       {isDanish && (
                         <span className="text-xs bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded flex-shrink-0">
                           DK
@@ -665,11 +710,14 @@ export default async function StagePage(props: {
                       )}
                     </div>
                   </div>
-                  {rider.speciality && (
-                    <span className="text-xs text-slate-600 flex-shrink-0 hidden sm:block">
-                      {rider.speciality}
-                    </span>
-                  )}
+                  <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                    {rider.uci_ranking && (
+                      <span className="text-xs font-mono text-slate-400">#{rider.uci_ranking}</span>
+                    )}
+                    {rider.speciality && (
+                      <span className="text-[10px] text-slate-600 hidden sm:block">{rider.speciality}</span>
+                    )}
+                  </div>
                 </Link>
               );
             })}

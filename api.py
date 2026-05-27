@@ -303,7 +303,7 @@ def get_startlist_for_race(slug: str):
         f"{SUPABASE_URL}/rest/v1/startlists"
         f"?race_id=eq.{race_id}"
         f"&select=bib_number,is_gc_captain,is_sprint_captain,status,role,"
-        f"riders(name,slug,nationality,speciality,date_of_birth,uci_ranking,photo_url),"
+        f"riders(name,slug,nationality,speciality,date_of_birth,uci_ranking,photo_url,hometown_region,training_region),"
         f"teams(name,slug,country_code)"
         f"&status=eq.active"
         f"&order=bib_number.asc.nullslast"
@@ -420,7 +420,7 @@ def get_stage_climbs(slug: str, stage_number: int):
     url = (
         f"{SUPABASE_URL}/rest/v1/stage_climbs"
         f"?stage_id=eq.{stage_id}"
-        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,gradient_sections,profile_image_url"
+        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,gradient_sections,profile_image_url,region"
         f"&order=sort_order.asc"
     )
     return requests.get(url, headers=get_headers()).json()
