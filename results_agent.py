@@ -128,18 +128,14 @@ def upsert_stage_results(race_id: str, stage_id: str, top10: list[dict]) -> None
         pos = entry.get("position")
         time_str = entry.get("time", "")
         secs = parse_time_to_seconds(time_str) if time_str else None
-        row = {
-            "race_id":  race_id,
-            "stage_id": stage_id,
-            "rider_id": rid,
-            "position": pos,
-        }
-        if pos == 1:
-            row["time_seconds"] = secs
-            row["time_gap_seconds"] = 0
-        else:
-            row["time_gap_seconds"] = secs
-        rows.append(row)
+        rows.append({
+            "race_id":          race_id,
+            "stage_id":         stage_id,
+            "rider_id":         rid,
+            "position":         pos,
+            "time_seconds":     secs if pos == 1 else None,
+            "time_gap_seconds": 0 if pos == 1 else secs,
+        })
     if rows:
         requests.post(
             f"{SUPABASE_URL}/rest/v1/results",
