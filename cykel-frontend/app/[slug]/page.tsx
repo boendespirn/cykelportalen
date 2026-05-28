@@ -563,8 +563,18 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // STAGE RACE LAYOUT (unchanged)
+  // STAGE RACE LAYOUT
   // ══════════════════════════════════════════════════════════════════════
+
+  // Names stored as "LASTNAME Firstname" — convert to { first: "Firstname", last: "Lastname" }
+  function formatRiderName(raw: string): { first: string; last: string } {
+    const parts = raw.trim().split(/\s+/);
+    const first = parts[parts.length - 1];
+    const last = parts.slice(0, -1).map(w =>
+      w.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()).join('-')
+    ).join(' ');
+    return { first, last };
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
@@ -619,9 +629,10 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                       </span>
                     </div>
                     <div className="w-full">
-                      <p className="text-[11px] font-medium text-slate-200 leading-tight truncate">
-                        {r.name.split(" ").slice(-1)[0]}
-                      </p>
+                      {(() => { const n = formatRiderName(r.name); return (<>
+                        <p className="text-[11px] font-medium text-slate-200 leading-tight truncate">{n.first}</p>
+                        {n.last && <p className="text-[10px] text-slate-400 leading-tight truncate">{n.last}</p>}
+                      </>); })()}
                       {r.speciality && (
                         <p className="text-[9px] text-slate-600 truncate">{r.speciality}</p>
                       )}
@@ -703,6 +714,45 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         </Link>
       )}
 
+      {/* ── Danskere i løbet ── */}
+      {danishRiders.length > 0 && (() => {
+        const active = danishRiders.filter(e => e.riders);
+        if (active.length === 0) return null;
+        return (
+          <section className="mb-10">
+            <h2 className="text-xs uppercase tracking-[0.2em] text-red-400 mb-4">🇩🇰 Danskere i løbet</h2>
+            <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-10 gap-3">
+              {active.map((entry) => {
+                const r = entry.riders!;
+                const n = formatRiderName(r.name);
+                return (
+                  <Link key={r.slug} href={`/riders/${r.slug}`}
+                    className="group flex flex-col items-center gap-1.5 text-center">
+                    <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-red-900/40 group-hover:border-red-700/40 transition-colors">
+                      {r.photo_url ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={r.photo_url} alt={r.name} className="w-full h-full object-cover object-top" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-2xl">🇩🇰</div>
+                      )}
+                      {r.uci_ranking != null && (
+                        <span className="absolute top-1 left-1 text-[10px] font-mono font-bold text-white/90 bg-black/50 px-1 rounded leading-4">
+                          #{r.uci_ranking}
+                        </span>
+                      )}
+                    </div>
+                    <div className="w-full">
+                      <p className="text-[11px] font-medium text-slate-200 leading-tight truncate">{n.first}</p>
+                      {n.last && <p className="text-[10px] text-slate-400 leading-tight truncate">{n.last}</p>}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
+
       {/* ── TV / Streaming ── */}
       {broadcasts.length > 0 && (() => {
         const upcoming = broadcasts.filter((b) => b.broadcast_date >= today);
@@ -755,38 +805,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           mountainsStandings={mountainsData?.standings ?? []}
           youthStandings={youthData?.standings ?? []}
         />
-      )}
-
-      {/* ── Danskere i løbet ── */}
-      {danishRiders.length > 0 && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 mb-8">
-          <h2 className="text-xs uppercase tracking-[0.2em] text-red-400 mb-4">🇩🇰 Danskere i løbet</h2>
-          <div className="space-y-1">
-            {danishRiders.map((entry) => {
-              const r = entry.riders;
-              if (!r) return null;
-              const gcEntry = gcData?.standings.find(g => g.riders?.slug === r.slug);
-              return (
-                <Link key={r.slug} href={`/riders/${r.slug}`}
-                  className="flex items-center gap-3 hover:bg-slate-800/50 rounded-lg px-2 py-2 transition-colors -mx-2">
-                  <div className="relative flex-shrink-0 w-8 h-8">
-                    {r.photo_url ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={r.photo_url} alt={r.name} className="w-8 h-8 rounded-full object-cover bg-slate-800" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-red-950/60 flex items-center justify-center text-sm">🇩🇰</div>
-                    )}
-                    {r.photo_url && <span className="absolute -bottom-0.5 -right-0.5 text-[9px]">🇩🇰</span>}
-                  </div>
-                  <span className="flex-1 text-sm font-medium text-slate-200">{r.name}</span>
-                  {gcEntry?.position != null && <span className="text-xs font-mono text-pink-400">GC #{gcEntry.position}</span>}
-                  {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">GC</span>}
-                  {entry.is_sprint_captain && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Sprint</span>}
-                </Link>
-              );
-            })}
-          </div>
-        </section>
       )}
 
       {dnfs.length > 0 && <DnfSection entries={dnfs} />}
