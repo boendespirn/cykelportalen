@@ -12,7 +12,7 @@ import StageMapLoader from "./stage/[n]/StageMapLoader";
 type Race = {
   name: string; slug: string; start_date: string; end_date: string | null;
   country_code: string | null; category: string; pcs_url: string | null;
-  race_type: string;
+  race_type: string; cover_image_url: string | null;
 };
 
 type Stage = {
@@ -575,6 +575,17 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         </svg>
         Alle løb
       </Link>
+
+      {race.cover_image_url && (
+        <div className="mb-8 -mx-6 sm:mx-0 rounded-none sm:rounded-2xl overflow-hidden border-y sm:border border-slate-800">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={race.cover_image_url}
+            alt={`${race.name} rutekort`}
+            className="w-full object-cover"
+          />
+        </div>
+      )}
 
       {header}
 
