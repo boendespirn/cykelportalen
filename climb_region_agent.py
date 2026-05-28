@@ -34,13 +34,20 @@ SB_HEADERS = {
 }
 
 REGION_PROMPT = """You are given a list of cycling stage climbs and their stage finish locations from a professional race.
-For each climb, return the Italian administrative region it is located in.
+For each climb, return the region/area it is located in using these rules:
 
-Use standard Italian region names: Lombardia, Veneto, Toscana, Sicilia, Abruzzo, Piemonte,
+Italy: use the Italian administrative region name (Lombardia, Veneto, Toscana, Sicilia, Abruzzo, Piemonte,
 Campania, Emilia-Romagna, Lazio, Sardegna, Puglia, Calabria, Liguria, Friuli-Venezia Giulia,
-Trentino-Alto Adige, Valle d'Aosta, Umbria, Marche, Molise, Basilicata.
+Trentino-Alto Adige, Valle d'Aosta, Umbria, Marche, Molise, Basilicata).
 
-For climbs outside Italy (e.g. in Bulgaria, Switzerland, France), return the country name in English.
+France: use the French administrative region name (Auvergne-Rhône-Alpes, Provence-Alpes-Côte d'Azur,
+Occitanie, Nouvelle-Aquitaine, Bretagne, Normandie, Île-de-France, Grand Est, Bourgogne-Franche-Comté,
+Hauts-de-France, Pays de la Loire, Centre-Val de Loire, Corse).
+
+Switzerland: use the canton name in English (Valais, Graubünden, Bern, Vaud, Ticino, Zurich, etc.)
+or "Switzerland" if uncertain.
+
+Other countries: return the country name in English (Spain, Belgium, Netherlands, Colombia, etc.).
 If uncertain, return null.
 
 Return ONLY a valid JSON array matching input order:
@@ -104,32 +111,36 @@ def run(race_slug: str) -> None:
         return
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-    items = [{"climb": c["name"], "finish_location": c["finish"]} for c in climbs]
-    prompt = REGION_PROMPT + "\n" + json.dumps(items, ensure_ascii=False)
-
-    try:
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-        parsed = json.loads(raw)
-    except Exception as e:
-        print(f"Claude fejl: {e}")
-        return
-
     saved = 0
-    for entry, climb in zip(parsed, climbs):
-        region = entry.get("region")
-        if region:
-            patch_climb(climb["id"], region)
-            print(f"  {climb['name']} -> {region}")
-            saved += 1
-        else:
-            print(f"  {climb['name']} -> ukendt region")
+    batch_size = 30
+
+    for batch_start in range(0, len(climbs), batch_size):
+        batch = climbs[batch_start : batch_start + batch_size]
+        items = [{"climb": c["name"], "finish_location": c["finish"]} for c in batch]
+        prompt = REGION_PROMPT + "\n" + json.dumps(items, ensure_ascii=False)
+
+        try:
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2048,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = msg.content[0].text.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            parsed = json.loads(raw)
+        except Exception as e:
+            print(f"Claude fejl (batch {batch_start//batch_size + 1}): {e}")
+            continue
+
+        for entry, climb in zip(parsed, batch):
+            region = entry.get("region")
+            if region:
+                patch_climb(climb["id"], region)
+                print(f"  {climb['name']} -> {region}")
+                saved += 1
+            else:
+                print(f"  {climb['name']} -> ukendt region")
 
     print(f"\nFærdig: {saved}/{len(climbs)} stigninger opdateret")
 

@@ -143,8 +143,15 @@ async def scrape_hometown(browser, rider: dict) -> str | None:
 # ── Claude: by → region ───────────────────────────────────────────────────────
 
 REGION_PROMPT = """You are given a list of cyclist hometowns (city names, sometimes with country).
-For each, return the Italian region name if the city is in Italy (e.g. "Lombardia", "Veneto", "Toscana", "Sicilia", "Abruzzo", "Piemonte", "Campania", "Emilia-Romagna", "Lazio", "Sardegna", "Puglia", "Calabria", "Liguria", "Friuli-Venezia Giulia", "Trentino-Alto Adige", "Valle d'Aosta", "Umbria", "Marche", "Molise", "Basilicata").
-If NOT in Italy, return the country name in English (e.g. "Slovenia", "France", "Spain", "Colombia", "Belgium", "Australia").
+For each, return the region/area using these rules:
+
+Italy: return the Italian administrative region (e.g. "Lombardia", "Veneto", "Toscana", "Sicilia", "Abruzzo", "Piemonte", "Campania", "Emilia-Romagna", "Lazio", "Sardegna", "Puglia", "Calabria", "Liguria", "Friuli-Venezia Giulia", "Trentino-Alto Adige", "Valle d'Aosta", "Umbria", "Marche", "Molise", "Basilicata").
+
+France: return the French administrative region (e.g. "Auvergne-Rhône-Alpes", "Provence-Alpes-Côte d'Azur", "Occitanie", "Nouvelle-Aquitaine", "Bretagne", "Normandie", "Île-de-France", "Grand Est", "Bourgogne-Franche-Comté", "Hauts-de-France", "Pays de la Loire", "Centre-Val de Loire", "Corse").
+
+Switzerland: return the canton name in English (e.g. "Valais", "Graubünden", "Bern", "Vaud", "Ticino") or "Switzerland" if uncertain.
+
+Other countries: return the country name in English (e.g. "Slovenia", "Spain", "Colombia", "Belgium", "Australia").
 If unknown or uncertain, return null.
 
 Return ONLY a JSON array matching the input order:
