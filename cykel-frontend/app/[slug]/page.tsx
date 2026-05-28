@@ -599,52 +599,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
       {header}
 
-      {/* ── Fremhævede profiler ── */}
-      {(() => {
-        const featured = startlist
-          .filter((e) => e.status === "active" && e.riders?.uci_ranking != null)
-          .sort((a, b) => (a.riders!.uci_ranking ?? 9999) - (b.riders!.uci_ranking ?? 9999))
-          .slice(0, 20);
-        if (featured.length < 3) return null;
-        return (
-          <section className="mb-10">
-            <h2 className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-4">Fremhævede profiler</h2>
-            <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-10 gap-3">
-              {featured.map((entry) => {
-                const r = entry.riders!;
-                return (
-                  <Link key={r.slug} href={`/riders/${r.slug}`}
-                    className="group flex flex-col items-center gap-1.5 text-center">
-                    <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-slate-800 group-hover:border-slate-600 transition-colors">
-                      {r.photo_url ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={r.photo_url} alt={r.name} className="w-full h-full object-cover object-top" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-2xl">
-                          {flagEmoji(r.nationality)}
-                        </div>
-                      )}
-                      <span className="absolute top-1 left-1 text-[10px] font-mono font-bold text-white/90 bg-black/50 px-1 rounded leading-4">
-                        #{r.uci_ranking}
-                      </span>
-                    </div>
-                    <div className="w-full">
-                      {(() => { const n = formatRiderName(r.name); return (<>
-                        <p className="text-[11px] font-medium text-slate-200 leading-tight truncate">{n.first}</p>
-                        {n.last && <p className="text-[10px] text-slate-400 leading-tight truncate">{n.last}</p>}
-                      </>); })()}
-                      {r.speciality && (
-                        <p className="text-[9px] text-slate-600 truncate">{r.speciality}</p>
-                      )}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })()}
-
       {/* ── Live status strip ── */}
       {isOngoing && stages.length > 0 && (
         <div className="mb-8 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -713,6 +667,52 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           </div>
         </Link>
       )}
+
+      {/* ── Fremhævede profiler ── */}
+      {(() => {
+        const featured = startlist
+          .filter((e) => e.status === "active" && e.riders?.uci_ranking != null)
+          .sort((a, b) => (a.riders!.uci_ranking ?? 9999) - (b.riders!.uci_ranking ?? 9999))
+          .slice(0, 20);
+        if (featured.length < 3) return null;
+        return (
+          <section className="mb-10">
+            <h2 className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-4">Fremhævede profiler</h2>
+            <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-10 gap-3">
+              {featured.map((entry) => {
+                const r = entry.riders!;
+                return (
+                  <Link key={r.slug} href={`/riders/${r.slug}`}
+                    className="group flex flex-col items-center gap-1.5 text-center">
+                    <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-slate-800 group-hover:border-slate-600 transition-colors">
+                      {r.photo_url ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={r.photo_url} alt={r.name} className="w-full h-full object-cover object-top" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-2xl">
+                          {flagEmoji(r.nationality)}
+                        </div>
+                      )}
+                      <span className="absolute top-1 left-1 text-[10px] font-mono font-bold text-white/90 bg-black/50 px-1 rounded leading-4">
+                        #{r.uci_ranking}
+                      </span>
+                    </div>
+                    <div className="w-full">
+                      {(() => { const n = formatRiderName(r.name); return (<>
+                        <p className="text-[11px] font-medium text-slate-200 leading-tight truncate">{n.first}</p>
+                        {n.last && <p className="text-[10px] text-slate-400 leading-tight truncate">{n.last}</p>}
+                      </>); })()}
+                      {r.speciality && (
+                        <p className="text-[9px] text-slate-600 truncate">{r.speciality}</p>
+                      )}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* ── Danskere i løbet ── */}
       {danishRiders.length > 0 && (() => {
