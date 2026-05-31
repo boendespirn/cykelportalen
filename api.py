@@ -519,3 +519,36 @@ def get_news_article(slug: str):
     if not data:
         return {"error": "Artikel ikke fundet"}
     return data[0]
+
+
+# --- Search ---
+
+@app.get("/search")
+def search(q: str = ""):
+    if not q or len(q.strip()) < 2:
+        return {"riders": [], "races": [], "teams": [], "climbs": []}
+
+    term = q.strip()
+    h = get_headers()
+
+    def sb_ilike(table: str, select: str, field: str = "name", limit: int = 5) -> list:
+        try:
+            res = requests.get(
+                f"{SUPABASE_URL}/rest/v1/{table}",
+                params={"select": select, field: f"ilike.%{term}%", "limit": limit},
+                headers=h,
+            )
+            data = res.json()
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    return {
+        "riders": sb_ilike("riders", "name,slug,nationality,speciality"),
+        "races":  sb_ilike("races",  "name,slug,start_date,category"),
+        "teams":  sb_ilike("teams",  "name,slug,country_code"),
+        "climbs": sb_ilike(
+            "stage_climbs",
+            "name,stage_id,stages(stage_number,race_id,races(name,slug))",
+        ),
+    }

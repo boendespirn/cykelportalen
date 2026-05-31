@@ -117,6 +117,86 @@ EXCERPT_PROMPT = """Skriv en kort ingress (max 2 sætninger, 150 tegn) på dansk
 Output kun ingressen, intet andet."""
 
 
+# ── Billede-søgning ───────────────────────────────────────────────────────────
+
+WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
+FREE_LICENSES = {"cc-by", "cc-by-sa", "cc0", "public domain", "cc-by-2.0", "cc-by-sa-4.0", "cc-by-4.0"}
+
+def search_wikimedia(query: str) -> str | None:
+    """Søger Wikimedia Commons efter et CC-licenseret cykelbillede."""
+    try:
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": f"{query} cycling",
+            "srnamespace": "6",  # Kun filer
+            "srlimit": "5",
+            "format": "json",
+        }
+        res = requests.get(WIKIMEDIA_API, params=params, timeout=10)
+        if not res.ok:
+            return None
+        results = res.json().get("query", {}).get("search", [])
+        for r in results:
+            title = r.get("title", "")
+            if not title.startswith("File:"):
+                continue
+            # Hent billedinfo incl. licens
+            info_res = requests.get(WIKIMEDIA_API, params={
+                "action": "query",
+                "titles": title,
+                "prop": "imageinfo",
+                "iiprop": "url|extmetadata",
+                "format": "json",
+            }, timeout=10)
+            if not info_res.ok:
+                continue
+            pages = info_res.json().get("query", {}).get("pages", {})
+            for page in pages.values():
+                ii = page.get("imageinfo", [{}])[0]
+                license_str = ii.get("extmetadata", {}).get("LicenseShortName", {}).get("value", "").lower()
+                if any(lic in license_str for lic in FREE_LICENSES):
+                    url = ii.get("url", "")
+                    if url and any(url.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
+                        return url
+    except Exception:
+        pass
+    return None
+
+
+def find_article_image(title: str) -> tuple[str | None, str | None]:
+    """
+    Finder bedste billede til en artikel.
+    Prioritet: 1) Wikimedia CC-billede, 2) Rytters PCS-foto
+    Returnerer (image_url, rider_id).
+    """
+    # 1) Wikimedia-søgning på nøgleord fra titlen
+    words = [w for w in title.split() if len(w) > 4]
+    search_term = " ".join(words[:3])
+    wiki_url = search_wikimedia(search_term)
+    if wiki_url:
+        return wiki_url, None
+
+    # 2) Rider photo fallback — match rytternavne i titlen
+    try:
+        riders_res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/riders?select=id,name,photo_url&photo_url=not.is.null",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+            timeout=15,
+        )
+        if riders_res.ok:
+            title_lower = title.lower()
+            for rider in riders_res.json():
+                parts = rider["name"].lower().split()
+                for part in parts:
+                    if len(part) > 3 and part in title_lower:
+                        return rider["photo_url"], rider["id"]
+    except Exception:
+        pass
+
+    return None, None
+
+
 # ── Supabase helpers ──────────────────────────────────────────────────────────
 
 def sb_get(table: str, params: str) -> list:
@@ -229,6 +309,11 @@ def generate_article(
         rows = sb_get("races", f"slug=eq.{race_slug}&select=id&limit=1")
         race_id = rows[0]["id"] if rows else None
 
+    # Find billede — Wikimedia CC eller rytter-foto
+    image_url, rider_id = find_article_image(title)
+    if image_url:
+        print(f"  Billede: {image_url[:70]}...")
+
     slug_base = slugify(title)
     timestamp = datetime.now().strftime("%Y%m%d")
     article_slug = f"{slug_base}-{timestamp}"
@@ -242,6 +327,8 @@ def generate_article(
         "category":         article_type,
         "author":           author,
         "race_id":          race_id,
+        "rider_id":         rider_id,
+        "image_url":        image_url,
         "is_advertorial":   is_advertorial,
         "published_at":     datetime.utcnow().isoformat() + "Z",
     }

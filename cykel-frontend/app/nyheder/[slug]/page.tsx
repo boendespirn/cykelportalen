@@ -75,7 +75,14 @@ export async function generateMetadata(
       description: article.meta_description ?? article.excerpt ?? undefined,
       type: "article",
       publishedTime: article.published_at,
-      images: article.image_url ? [{ url: article.image_url }] : [],
+      images: [
+        {
+          url: `https://klassementet.dk/api/og?title=${encodeURIComponent(article.title)}&category=${article.category}${article.image_url ? `&photo=${encodeURIComponent(article.image_url)}` : ""}`,
+          width: 1200,
+          height: 630,
+          alt: article.title,
+        },
+      ],
     },
     twitter: { card: "summary_large_image" },
   };

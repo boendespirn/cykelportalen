@@ -30,6 +30,17 @@ type OngoingRace = Race & {
   today_stage: TodayStage | null;
 };
 
+type Article = {
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  category: string;
+  author: string;
+  image_url: string | null;
+  published_at: string;
+  races: { name: string; slug: string } | null;
+};
+
 async function getOngoingRaces(): Promise<OngoingRace[]> {
   try {
     const res = await fetch(`${API_BASE}/ongoing-races`, { cache: "no-store" });
@@ -43,6 +54,16 @@ async function getOngoingRaces(): Promise<OngoingRace[]> {
 async function getUpcomingRaces(): Promise<Race[]> {
   try {
     const res = await fetch(`${API_BASE}/upcoming-races`, { cache: "no-store" });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+async function getLatestArticles(): Promise<Article[]> {
+  try {
+    const res = await fetch(`${API_BASE}/news?advertorial=false&limit=4`, { cache: "no-store" });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -66,6 +87,10 @@ function formatDate(dateStr: string): string {
   });
 }
 
+function formatArticleDate(d: string): string {
+  return new Date(d).toLocaleDateString("da-DK", { day: "numeric", month: "short" });
+}
+
 function daysUntil(dateStr: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -75,19 +100,6 @@ function daysUntil(dateStr: string): number {
 
 function daysLeft(endDateStr: string): number {
   return daysUntil(endDateStr);
-}
-
-function groupByMonth(races: Race[]): [string, Race[]][] {
-  const map = new Map<string, Race[]>();
-  for (const race of races) {
-    const key = new Date(race.start_date + "T00:00:00").toLocaleDateString("da-DK", {
-      month: "long",
-      year: "numeric",
-    });
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(race);
-  }
-  return [...map.entries()];
 }
 
 const STAGE_TYPE_LABELS: Record<string, string> = {
@@ -106,27 +118,53 @@ const STAGE_TYPE_COLORS: Record<string, string> = {
   itt: "text-blue-400",
 };
 
+const CATEGORY_LABELS: Record<string, string> = {
+  resultater: "Resultater",
+  startliste: "Startliste",
+  transfer: "Transfer",
+  profil: "Profil",
+  analyse: "Analyse",
+  generelt: "Nyheder",
+  race_report: "Løbsrapport",
+  startlist: "Startliste",
+  general: "Nyheder",
+  interview: "Interview",
+  analysis: "Analyse",
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  resultater: "text-emerald-400",
+  startliste: "text-blue-400",
+  transfer: "text-yellow-400",
+  profil: "text-purple-400",
+  analyse: "text-orange-400",
+  race_report: "text-red-400",
+  interview: "text-cyan-400",
+};
+
 export default async function Home() {
-  const [ongoingRaces, upcomingRaces] = await Promise.all([
+  const [ongoingRaces, upcomingRaces, articles] = await Promise.all([
     getOngoingRaces(),
     getUpcomingRaces(),
+    getLatestArticles(),
   ]);
-  const months = groupByMonth(upcomingRaces);
+
+  const featuredRaces = upcomingRaces.slice(0, 6);
 
   return (
     <div className="px-6 py-12">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-4xl space-y-16">
 
         {/* ── Igangværende løb ───────────────────────────────────────────── */}
         {ongoingRaces.length > 0 && (
-          <section className="mb-16">
+          <section>
             <div className="flex items-center gap-3 mb-5">
               <span className="relative flex h-2.5 w-2.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
               </span>
               <h2 className="text-xs uppercase tracking-[0.25em] text-emerald-400 font-medium">
-                Igangværende løb
+                Live
               </h2>
             </div>
 
@@ -146,7 +184,6 @@ export default async function Home() {
                     href={`/${race.slug}`}
                     className="group block rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900 to-slate-900/60 p-6 hover:border-emerald-500/40 hover:from-slate-900/90 transition-all duration-200"
                   >
-                    {/* Top row */}
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center gap-3">
                         <span className="text-3xl leading-none">{flagEmoji(race.country_code)}</span>
@@ -164,12 +201,11 @@ export default async function Home() {
                       )}
                     </div>
 
-                    {/* Today's stage */}
                     {ts ? (
                       <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
-                        {/* Elevation profile thumbnail */}
                         {ts.elevation_image_url && (
                           <div className="relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={ts.elevation_image_url}
                               alt={`Højdeprofil etape ${ts.stage_number}`}
@@ -215,7 +251,6 @@ export default async function Home() {
                       </div>
                     )}
 
-                    {/* Progress */}
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
                         <div
@@ -234,111 +269,166 @@ export default async function Home() {
           </section>
         )}
 
-        {/* ── Hero ───────────────────────────────────────────────────────── */}
-        <header className="mb-14">
-          <p className="text-xs uppercase tracking-[0.25em] text-emerald-400 mb-4">
-            UCI WorldTour · Kalender 2026
-          </p>
-          <h1 className="font-display text-7xl sm:text-9xl tracking-wide leading-none text-white">
-            Kommende
-            <br />
-            <span className="text-emerald-400">Løb</span>
-          </h1>
-          <p className="mt-5 text-slate-400 text-sm max-w-sm leading-relaxed">
-            {upcomingRaces.length > 0
-              ? `${upcomingRaces.length} løb tilbage i 2026-sæsonen.`
-              : ongoingRaces.length > 0
-              ? "Alle kommende løb er vist ovenfor."
-              : "Opdateres løbende. Start backend-serveren for at se data."}
-          </p>
-        </header>
-
-        {/* ── Kommende løb ───────────────────────────────────────────────── */}
-        {upcomingRaces.length === 0 ? (
-          ongoingRaces.length === 0 && (
-            <div className="rounded-2xl border border-slate-800 p-16 text-center">
-              <p className="text-slate-600 text-sm">Ingen løb fundet.</p>
+        {/* ── Vigtige kommende løb ───────────────────────────────────────── */}
+        {featuredRaces.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-xs uppercase tracking-[0.25em] text-slate-400 font-medium">
+                Kommende løb
+              </h2>
+              <Link
+                href="/races"
+                className="text-xs text-slate-600 hover:text-emerald-400 transition-colors"
+              >
+                Fuld kalender →
+              </Link>
             </div>
-          )
-        ) : (
-          <div className="space-y-12">
-            {months.map(([month, monthRaces]) => (
-              <section key={month}>
-                <h2 className="font-display text-xl tracking-[0.2em] text-slate-600 uppercase mb-4">
-                  {month}
-                </h2>
-                <div className="space-y-1.5">
-                  {monthRaces.map((race) => {
-                    const days = daysUntil(race.start_date);
-                    const hasStartlist = race.startlist_count > 0;
-                    const hasStages = race.stage_count > 0;
-                    return (
-                      <Link
-                        key={race.slug}
-                        href={`/${race.slug}`}
-                        className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-slate-900 transition-all duration-150"
-                      >
-                        <span className="text-xl w-8 text-center flex-shrink-0 leading-none">
-                          {flagEmoji(race.country_code)}
+
+            <div className="space-y-1.5">
+              {featuredRaces.map((race) => {
+                const days = daysUntil(race.start_date);
+                const hasStartlist = race.startlist_count > 0;
+                const hasStages = race.stage_count > 0;
+                return (
+                  <Link
+                    key={race.slug}
+                    href={`/${race.slug}`}
+                    className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-slate-900 transition-all duration-150"
+                  >
+                    <span className="text-xl w-8 text-center flex-shrink-0 leading-none">
+                      {flagEmoji(race.country_code)}
+                    </span>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-100 group-hover:text-emerald-400 transition-colors truncate">
+                        {race.name}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span className="text-xs text-slate-500">
+                          {formatDate(race.start_date)}
                         </span>
+                        {hasStartlist && (
+                          <span className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                            {race.startlist_count} ryttere
+                          </span>
+                        )}
+                        {hasStages && (
+                          <span className="text-[10px] font-medium text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
+                            {race.stage_count} etaper
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-100 group-hover:text-emerald-400 transition-colors truncate">
-                            {race.name}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1 flex-wrap">
-                            <span className="text-xs text-slate-500">
-                              {formatDate(race.start_date)}
-                            </span>
-                            {hasStartlist && (
-                              <span className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                                {race.startlist_count} ryttere
-                              </span>
-                            )}
-                            {hasStages && (
-                              <span className="text-[10px] font-medium text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
-                                {race.stage_count} etaper
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {days >= 0 && (
+                        <span
+                          className={`text-xs px-2.5 py-1 rounded-full font-medium tabular-nums ${
+                            days === 0
+                              ? "bg-emerald-500/20 text-emerald-300"
+                              : days <= 14
+                              ? "bg-emerald-500/10 text-emerald-400"
+                              : "bg-slate-800 text-slate-500"
+                          }`}
+                        >
+                          {days === 0
+                            ? "i dag"
+                            : days === 1
+                            ? "i morgen"
+                            : `om ${days}d`}
+                        </span>
+                      )}
+                      <svg
+                        className="w-4 h-4 text-slate-700 group-hover:text-emerald-500 transition-colors"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          {days >= 0 && (
-                            <span
-                              className={`text-xs px-2.5 py-1 rounded-full font-medium tabular-nums ${
-                                days === 0
-                                  ? "bg-emerald-500/20 text-emerald-300"
-                                  : days <= 14
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : "bg-slate-800 text-slate-500"
-                              }`}
-                            >
-                              {days === 0
-                                ? "i dag"
-                                : days === 1
-                                ? "i morgen"
-                                : `om ${days}d`}
-                            </span>
+        {/* ── Seneste nyheder ─────────────────────────────────────────────── */}
+        {articles.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-xs uppercase tracking-[0.25em] text-slate-400 font-medium">
+                Seneste nyheder
+              </h2>
+              <Link
+                href="/nyheder"
+                className="text-xs text-slate-600 hover:text-emerald-400 transition-colors"
+              >
+                Alle nyheder →
+              </Link>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {articles.map((article, i) => {
+                const categoryColor = CATEGORY_COLORS[article.category] ?? "text-emerald-400";
+                const isLarge = i === 0;
+
+                return (
+                  <Link
+                    key={article.slug}
+                    href={`/nyheder/${article.slug}`}
+                    className={`group relative overflow-hidden rounded-2xl border border-slate-800/60 hover:border-emerald-500/30 transition-all duration-200 ${
+                      isLarge ? "sm:col-span-2" : ""
+                    }`}
+                  >
+                    <div className={`relative w-full overflow-hidden ${isLarge ? "h-64 sm:h-80" : "h-52"}`}>
+                      {article.image_url ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={article.image_url}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-slate-950/10" />
+                        </>
+                      ) : (
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900" />
+                      )}
+
+                      <div className="absolute inset-0 flex flex-col justify-end p-5">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className={`text-[10px] uppercase tracking-widest font-semibold ${categoryColor}`}>
+                            {CATEGORY_LABELS[article.category] ?? article.category}
+                          </span>
+                          {article.races && (
+                            <span className="text-[10px] text-slate-500">· {article.races.name}</span>
                           )}
-                          <svg
-                            className="w-4 h-4 text-slate-700 group-hover:text-emerald-500 transition-colors"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
                         </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                        <h3 className={`font-display tracking-wide leading-tight text-white group-hover:text-emerald-300 transition-colors ${
+                          isLarge ? "text-2xl sm:text-3xl" : "text-lg sm:text-xl"
+                        }`}>
+                          {article.title}
+                        </h3>
+                        <p className="text-[10px] text-slate-600 mt-2">{formatArticleDate(article.published_at)}</p>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Empty state — only when nothing to show */}
+        {ongoingRaces.length === 0 && featuredRaces.length === 0 && articles.length === 0 && (
+          <div className="rounded-2xl border border-slate-800 p-16 text-center">
+            <p className="text-slate-600 text-sm">Opdateres løbende — start backend-serveren for at se data.</p>
           </div>
         )}
+
       </div>
     </div>
   );

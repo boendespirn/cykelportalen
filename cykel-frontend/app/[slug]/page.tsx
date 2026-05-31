@@ -12,7 +12,7 @@ import StageMapLoader from "./stage/[n]/StageMapLoader";
 type Race = {
   name: string; slug: string; start_date: string; end_date: string | null;
   country_code: string | null; category: string; pcs_url: string | null;
-  race_type: string; cover_image_url: string | null;
+  race_type: string; cover_image_url: string | null; description: string | null;
 };
 
 type Stage = {
@@ -380,9 +380,14 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         {formatDate(race.start_date)}
         {race.end_date && race.end_date !== race.start_date && ` — ${formatDate(race.end_date)}`}
       </p>
+      {race.description && (
+        <p className="mt-4 text-slate-400 text-sm leading-relaxed max-w-2xl">
+          {race.description}
+        </p>
+      )}
       {race.pcs_url && (
         <a href={race.pcs_url} target="_blank" rel="noopener noreferrer"
-          className="mt-2 inline-block text-xs text-slate-600 hover:text-emerald-400 transition-colors">
+          className="mt-3 inline-block text-xs text-slate-600 hover:text-emerald-400 transition-colors">
           ProCyclingStats →
         </a>
       )}
