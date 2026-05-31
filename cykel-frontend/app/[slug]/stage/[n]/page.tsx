@@ -222,6 +222,12 @@ const STAGE_TYPE_CONFIG: Record<
     bg: "bg-blue-500/15 text-blue-300",
     desc: "Enkeltstart – kronometer-specialister",
   },
+  ttt: {
+    label: "Holdtidskørsel",
+    color: "text-blue-400",
+    bg: "bg-blue-500/15 text-blue-300",
+    desc: "Holdtidskørsel – holdene kører samlet mod uret",
+  },
 };
 
 // Ryttere der passer til etapetypen
@@ -231,6 +237,7 @@ const STAGE_SPECIALISTS: Record<string, string[]> = {
   mountain: ["Climber", "GC", "All-rounder"],
   tt:       ["Time trialist", "GC", "All-rounder"],
   itt:      ["Time trialist", "GC", "All-rounder"],
+  ttt:      ["All-rounder", "GC", "Climber"],
 };
 
 // Specialiteter der IKKE passer til en etapetype
@@ -239,6 +246,7 @@ const INCOMPATIBLE: Record<string, string[]> = {
   mountain: ["Sprinter"],
   tt:       ["Sprinter", "Classics", "Puncheur"],
   itt:      ["Sprinter", "Classics", "Puncheur"],
+  ttt:      ["Sprinter", "Classics", "Puncheur"],
 };
 
 function isCompatibleWithStage(speciality: string | null, stageType: string | null): boolean {
