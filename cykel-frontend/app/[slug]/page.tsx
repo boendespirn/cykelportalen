@@ -57,6 +57,16 @@ type Broadcast = {
   notes: string | null;
 };
 
+type HistoryEntry = {
+  year: number;
+  slug: string;
+  start_date: string;
+  winner: {
+    position: number;
+    riders: { name: string; slug: string; nationality: string | null } | null;
+  } | null;
+};
+
 // ── Fetchers ───────────────────────────────────────────────────────────────
 
 async function getRace(slug: string): Promise<Race | null> {
@@ -110,6 +120,15 @@ async function getDnfs(slug: string): Promise<DnfEntry[]> {
 async function getBroadcast(slug: string): Promise<Broadcast[]> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+async function getRaceHistory(slug: string): Promise<HistoryEntry[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/history`, { cache: "no-store" });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
@@ -294,7 +313,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const { slug } = await props.params;
   const today = getToday();
 
-  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, history] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -305,6 +324,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getClassification(slug, "youth"),
       getDnfs(slug),
       getBroadcast(slug),
+      getRaceHistory(slug),
     ]);
 
   if (!race) {
@@ -907,6 +927,48 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           )}
         </aside>
       </div>
+
+      {/* ── Historiske vindere ── */}
+      {history.length > 0 && (
+        <section className="mt-12 pt-10 border-t border-slate-800/60">
+          <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase mb-6">
+            Tidligere vindere
+          </h2>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {history.map((h) => {
+              const winner = h.winner?.riders;
+              const nat = winner?.nationality;
+              const flag = nat && nat.length === 2
+                ? nat.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
+                : "";
+              return (
+                <Link
+                  key={h.slug}
+                  href={`/${h.slug}`}
+                  className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
+                >
+                  <span className="font-mono text-slate-500 text-sm w-10 flex-shrink-0">{h.year}</span>
+                  {winner ? (
+                    <>
+                      <span className="text-base flex-shrink-0">{flag}</span>
+                      <Link
+                        href={`/riders/${winner.slug}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex-1 text-sm font-medium text-slate-200 hover:text-emerald-300 transition-colors truncate"
+                      >
+                        {winner.name.split(" ").slice(-1)[0].charAt(0) + winner.name.split(" ").slice(-1)[0].slice(1).toLowerCase()}{" "}
+                        {winner.name.split(" ").slice(0, -1).join(" ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}
+                      </Link>
+                    </>
+                  ) : (
+                    <span className="flex-1 text-sm text-slate-600 italic">Ingen data</span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

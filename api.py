@@ -230,6 +230,88 @@ def get_stage_detail(slug: str, stage_number: int):
     return {"stage": stage, "race": race_data[0]}
 
 
+@app.get("/races/{slug}/stages/{stage_number}/results")
+def get_stage_results(slug: str, stage_number: int, limit: int = 10):
+    """Top-N finishers på en enkelt etape (historiske + live løb)."""
+    race_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1",
+        headers=get_headers(),
+    )
+    race_data = race_res.json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+
+    stage_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages?race_id=eq.{race_id}&stage_number=eq.{stage_number}&select=id&limit=1",
+        headers=get_headers(),
+    )
+    stage_data = stage_res.json()
+    if not stage_data:
+        return []
+    stage_id = stage_data[0]["id"]
+
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/results"
+        f"?stage_id=eq.{stage_id}"
+        f"&select=position,time_seconds,time_gap_seconds,riders(name,slug,nationality,photo_url)"
+        f"&order=position.asc&limit={limit}",
+        headers=get_headers(),
+    )
+    return res.json() if res.ok and isinstance(res.json(), list) else []
+
+
+@app.get("/races/{slug}/history")
+def get_race_history(slug: str):
+    """
+    Tidligere udgaver af samme løb — GC-vinder (pos=1) per år.
+    Matcher på løbsnavn (case-insensitive) på tværs af alle år.
+    """
+    # Hent nuværende løb for at finde løbsnavnet
+    race_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?select=id,name&slug=eq.{slug}&limit=1",
+        headers=get_headers(),
+    )
+    race_data = race_res.json()
+    if not race_data:
+        return []
+    race_name = race_data[0]["name"]
+
+    # Find alle udgaver med samme navn
+    editions_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races"
+        f"?name=eq.{requests.utils.quote(race_name)}"
+        f"&select=id,slug,start_date"
+        f"&order=start_date.desc&limit=20",
+        headers=get_headers(),
+    )
+    editions = editions_res.json()
+    if not isinstance(editions, list):
+        return []
+
+    # For hver udgave: hent GC-vinder (position=1)
+    history = []
+    for ed in editions:
+        if ed["slug"] == slug:
+            continue  # spring den aktuelle udgave over
+        gc_res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/classifications"
+            f"?race_id=eq.{ed['id']}&classification_type=eq.gc&position=eq.1"
+            f"&select=position,time_gap_seconds,riders(name,slug,nationality,photo_url)"
+            f"&limit=1",
+            headers=get_headers(),
+        )
+        gc_data = gc_res.json()
+        winner = gc_data[0] if gc_res.ok and gc_data else None
+        history.append({
+            "year":     int(ed["start_date"][:4]),
+            "slug":     ed["slug"],
+            "start_date": ed["start_date"],
+            "winner":   winner,
+        })
+    return history
+
+
 @app.get("/races/{slug}/results")
 def get_results_for_race(slug: str):
     race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"
@@ -477,6 +559,45 @@ def get_rider_stage_wins(slug: str):
         return []
     data.sort(key=lambda x: (x.get("stages") or {}).get("date") or "", reverse=True)
     return data
+
+
+@app.get("/riders/{slug}/palmares")
+def get_rider_palmares(slug: str):
+    """
+    Rytterens karriereresultater: GC top-10 finishes + etapesejre på tværs af alle år.
+    Sorteret med nyeste først.
+    """
+    rider_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/riders?select=id&slug=eq.{slug}&limit=1",
+        headers=get_headers(),
+    )
+    rider_data = rider_res.json()
+    if not rider_data:
+        return {"gc_results": [], "stage_wins": []}
+    rider_id = rider_data[0]["id"]
+
+    # GC-klassementer top 10 (alle år)
+    gc_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?rider_id=eq.{rider_id}&classification_type=eq.gc&position=lte.10"
+        f"&select=position,time_gap_seconds,after_stage_number,"
+        f"races(name,slug,start_date,end_date,race_type)"
+        f"&order=races(start_date).desc&limit=100",
+        headers=get_headers(),
+    )
+    gc_results = gc_res.json() if gc_res.ok and isinstance(gc_res.json(), list) else []
+
+    # Etapesejre (position=1 med stage_id)
+    wins_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/results"
+        f"?rider_id=eq.{rider_id}&position=eq.1&stage_id=not.is.null"
+        f"&select=stages(stage_number,date,finish_location,races(name,slug,start_date))"
+        f"&order=stages(date).desc&limit=100",
+        headers=get_headers(),
+    )
+    stage_wins = wins_res.json() if wins_res.ok and isinstance(wins_res.json(), list) else []
+
+    return {"gc_results": gc_results, "stage_wins": stage_wins}
 
 
 @app.get("/riders/{slug}")

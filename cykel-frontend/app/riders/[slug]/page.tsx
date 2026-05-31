@@ -44,6 +44,23 @@ type StageWin = {
   } | null;
 };
 
+type GcResult = {
+  position: number;
+  time_gap_seconds: number | null;
+  after_stage_number: number;
+  races: {
+    name: string;
+    slug: string;
+    start_date: string;
+    race_type: string | null;
+  } | null;
+};
+
+type Palmares = {
+  gc_results: GcResult[];
+  stage_wins: StageWin[];
+};
+
 async function getRider(slug: string): Promise<Rider | null> {
   try {
     const res = await fetch(`${API_BASE}/riders/${slug}`, { cache: "no-store" });
@@ -64,6 +81,14 @@ async function getStageWins(slug: string): Promise<StageWin[]> {
     const res = await fetch(`${API_BASE}/riders/${slug}/stage-wins`, { cache: "no-store" });
     return res.ok ? res.json() : [];
   } catch { return []; }
+}
+
+async function getPalmares(slug: string): Promise<Palmares> {
+  try {
+    const res = await fetch(`${API_BASE}/riders/${slug}/palmares`, { cache: "no-store" });
+    if (!res.ok) return { gc_results: [], stage_wins: [] };
+    return res.json();
+  } catch { return { gc_results: [], stage_wins: [] }; }
 }
 
 function flagEmoji(code: string | null): string {
@@ -114,6 +139,21 @@ const SPECIALITY_ICONS: Record<string, string> = {
   Classics: "🏛",
 };
 
+function formatGap(secs: number | null): string {
+  if (!secs || secs === 0) return "";
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `+${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `+${m}:${String(s).padStart(2, "0")}`;
+}
+
+const PODIUM_STYLES: Record<number, string> = {
+  1: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40",
+  2: "bg-slate-400/20 text-slate-300 border-slate-400/40",
+  3: "bg-orange-700/20 text-orange-400 border-orange-600/40",
+};
+
 function StatCell({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
     <div className="bg-slate-900/60 px-5 py-4 border border-slate-800/60 rounded-xl">
@@ -126,10 +166,11 @@ function StatCell({ label, value, sub }: { label: string; value: React.ReactNode
 
 export default async function RiderPage(props: { params: Promise<{ slug: string }> }) {
   const { slug } = await props.params;
-  const [rider, riderRaces, stageWins] = await Promise.all([
+  const [rider, riderRaces, stageWins, palmares] = await Promise.all([
     getRider(slug),
     getRiderRaces(slug),
     getStageWins(slug),
+    getPalmares(slug),
   ]);
 
   if (!rider) {
@@ -257,39 +298,85 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
         )}
       </div>
 
-      {/* Stage wins */}
-      {stageWins.length > 0 && (
+      {/* Palmares — GC results */}
+      {palmares.gc_results.length > 0 && (
         <section className="mb-8">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">
-            Etapesejre (i vores database)
+            Palmares — samlet klassement
           </h2>
-          <div className="space-y-2">
-            {stageWins.map((win, i) => {
-              const s = win.stages;
-              if (!s || !s.races) return null;
+          <div className="space-y-1.5">
+            {palmares.gc_results.map((r, i) => {
+              if (!r.races) return null;
+              const year = r.races.start_date?.slice(0, 4);
+              const podiumStyle = PODIUM_STYLES[r.position] ?? "bg-slate-800/60 text-slate-400 border-slate-700";
+              const gap = formatGap(r.time_gap_seconds);
               return (
                 <Link
                   key={i}
-                  href={`/${s.races.slug}/stage/${s.stage_number}`}
+                  href={`/${r.races.slug}`}
                   className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
                 >
-                  <span className="text-emerald-400 font-mono font-bold text-sm w-8 flex-shrink-0">
-                    E{s.stage_number}
+                  <span className={`text-xs font-bold w-8 h-8 flex items-center justify-center rounded-lg border flex-shrink-0 ${podiumStyle}`}>
+                    {r.position}.
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-200 truncate">{s.races.name}</p>
-                    <p className="text-xs text-slate-500 truncate">Mål: {s.finish_location}</p>
+                    <p className="text-sm font-medium text-slate-200 truncate">{r.races.name}</p>
+                    {gap && <p className="text-xs text-slate-600 font-mono">{gap}</p>}
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-xs text-slate-500 font-mono">{formatShortDate(s.date)}</p>
-                    <p className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider mt-0.5">1. plads</p>
-                  </div>
+                  <span className="text-xs text-slate-500 font-mono flex-shrink-0">{year}</span>
                 </Link>
               );
             })}
           </div>
         </section>
       )}
+
+      {/* Etapesejre */}
+      {(stageWins.length > 0 || palmares.stage_wins.length > 0) && (() => {
+        // Flet 2026-sejre med historiske, undgå dubletter
+        const allWins = [...stageWins, ...palmares.stage_wins].filter((w) => w.stages?.races);
+        const seen = new Set<string>();
+        const unique = allWins.filter((w) => {
+          const key = `${w.stages?.races?.slug}-${w.stages?.stage_number}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        unique.sort((a, b) => (b.stages?.date ?? "").localeCompare(a.stages?.date ?? ""));
+        if (unique.length === 0) return null;
+        return (
+          <section className="mb-8">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">
+              Etapesejre
+            </h2>
+            <div className="space-y-2">
+              {unique.map((win, i) => {
+                const s = win.stages;
+                if (!s || !s.races) return null;
+                return (
+                  <Link
+                    key={i}
+                    href={`/${s.races.slug}/stage/${s.stage_number}`}
+                    className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
+                  >
+                    <span className="text-emerald-400 font-mono font-bold text-sm w-8 flex-shrink-0">
+                      E{s.stage_number}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-200 truncate">{s.races.name}</p>
+                      {s.finish_location && <p className="text-xs text-slate-500 truncate">Mål: {s.finish_location}</p>}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      {s.date && <p className="text-xs text-slate-500 font-mono">{formatShortDate(s.date)}</p>}
+                      <p className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider mt-0.5">1. plads</p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* Race calendar */}
       {riderRaces.length > 0 && (
