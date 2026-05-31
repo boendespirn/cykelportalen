@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -56,7 +56,13 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("draft");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Hent gemt nøgle fra localStorage
+  // Feedback panel state
+  const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
+  const [feedbackTexts, setFeedbackTexts] = useState<Record<string, string>>({});
+  const [editLoading, setEditLoading] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const feedbackRef = useRef<HTMLTextAreaElement>(null);
+
   useEffect(() => {
     const saved = localStorage.getItem("adminKey");
     if (saved) setAdminKey(saved);
@@ -85,6 +91,13 @@ export default function AdminPage() {
   useEffect(() => {
     if (adminKey) fetchArticles(adminKey, tab);
   }, [adminKey, tab, fetchArticles]);
+
+  // Focus textarea when feedback panel opens
+  useEffect(() => {
+    if (feedbackOpen && feedbackRef.current) {
+      feedbackRef.current.focus();
+    }
+  }, [feedbackOpen]);
 
   const handleLogin = async () => {
     setLoginError(false);
@@ -116,9 +129,34 @@ export default function AdminPage() {
       }
       if (res.ok) {
         setArticles((prev) => prev.filter((a) => a.id !== id));
+        setFeedbackOpen(null);
       }
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const doEdit = async (id: string) => {
+    const feedback = feedbackTexts[id]?.trim();
+    if (!feedback) return;
+    setEditLoading(id);
+    setEditError(null);
+    try {
+      const res = await fetch(`${API_BASE}/admin/articles/${id}/edit`, {
+        method: "PATCH",
+        headers: { "x-admin-key": adminKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback }),
+      });
+      if (res.ok) {
+        setArticles((prev) => prev.filter((a) => a.id !== id));
+        setFeedbackOpen(null);
+      } else {
+        setEditError("Fejl — prøv igen");
+      }
+    } catch {
+      setEditError("Netværksfejl");
+    } finally {
+      setEditLoading(null);
     }
   };
 
@@ -162,10 +200,10 @@ export default function AdminPage() {
   }
 
   // ── Dashboard ────────────────────────────────────────────────────────────────
-  const tabs: { id: Tab; label: string; desc: string }[] = [
-    { id: "draft",     label: "Kladder",    desc: "Afventer godkendelse" },
-    { id: "published", label: "Publicerede", desc: "Live på sitet" },
-    { id: "rejected",  label: "Afviste",    desc: "Ikke publiceret" },
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "draft",     label: "Kladder" },
+    { id: "published", label: "Publicerede" },
+    { id: "rejected",  label: "Afviste" },
   ];
 
   return (
@@ -221,118 +259,189 @@ export default function AdminPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {articles.map((article) => (
-            <div
-              key={article.id}
-              className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5 hover:border-slate-700 transition-colors"
-            >
-              <div className="flex items-start gap-4">
-                {/* Thumbnail */}
-                {article.image_url && (
-                  <div className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-slate-800">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={article.image_url} alt="" className="w-full h-full object-cover object-top" />
+          {articles.map((article) => {
+            const isFeedbackOpen = feedbackOpen === article.id;
+            const feedbackText = feedbackTexts[article.id] ?? "";
+            const isEditLoading = editLoading === article.id;
+
+            return (
+              <div
+                key={article.id}
+                className="rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:border-slate-700 transition-colors overflow-hidden"
+              >
+                <div className="p-5">
+                  <div className="flex items-start gap-4">
+                    {/* Thumbnail */}
+                    {article.image_url && (
+                      <div className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-slate-800">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={article.image_url} alt="" className="w-full h-full object-cover object-top" />
+                      </div>
+                    )}
+
+                    {/* Indhold */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${
+                          CATEGORY_COLORS[article.category] ?? "bg-slate-800 text-slate-400 border-slate-700"
+                        }`}>
+                          {CATEGORY_LABELS[article.category] ?? article.category}
+                        </span>
+                        <span className="text-[10px] text-slate-600">
+                          {article.author} · {formatDate(article.created_at ?? article.published_at)}
+                        </span>
+                      </div>
+
+                      <h2 className="text-sm font-semibold text-slate-100 leading-snug mb-1">
+                        {article.title}
+                      </h2>
+
+                      {article.excerpt && (
+                        <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
+                          {article.excerpt}
+                        </p>
+                      )}
+
+                      {article.source_url && (
+                        <a
+                          href={article.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-slate-700 hover:text-slate-500 transition-colors mt-1 inline-block"
+                        >
+                          Kilde →
+                        </a>
+                      )}
+                    </div>
                   </div>
-                )}
 
-                {/* Indhold */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${
-                      CATEGORY_COLORS[article.category] ?? "bg-slate-800 text-slate-400 border-slate-700"
-                    }`}>
-                      {CATEGORY_LABELS[article.category] ?? article.category}
-                    </span>
-                    <span className="text-[10px] text-slate-600">
-                      {article.author} · {formatDate(article.created_at ?? article.published_at)}
-                    </span>
-                  </div>
-
-                  <h2 className="text-sm font-semibold text-slate-100 leading-snug mb-1">
-                    {article.title}
-                  </h2>
-
-                  {article.excerpt && (
-                    <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
-                      {article.excerpt}
-                    </p>
-                  )}
-
-                  {article.source_url && (
-                    <a
-                      href={article.source_url}
+                  {/* Handlinger */}
+                  <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-800/60">
+                    <Link
+                      href={`/nyheder/${article.slug}`}
                       target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[10px] text-slate-700 hover:text-slate-500 transition-colors mt-1 inline-block"
+                      className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-3 py-1.5 border border-slate-800 rounded-lg"
                     >
-                      Kilde →
-                    </a>
-                  )}
+                      Forhåndsvis →
+                    </Link>
+
+                    {/* Feedback-knap — vises på alle tabs */}
+                    <button
+                      onClick={() => {
+                        setFeedbackOpen(isFeedbackOpen ? null : article.id);
+                        setEditError(null);
+                      }}
+                      disabled={actionLoading !== null || isEditLoading}
+                      className={`text-xs transition-colors px-3 py-1.5 border rounded-lg disabled:opacity-50 ${
+                        isFeedbackOpen
+                          ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
+                          : "text-slate-500 hover:text-amber-400 border-slate-800 hover:border-amber-500/30"
+                      }`}
+                    >
+                      Ret med feedback
+                    </button>
+
+                    <div className="flex-1" />
+
+                    {tab === "draft" && (
+                      <>
+                        <button
+                          onClick={() => doAction(article.id, "reject")}
+                          disabled={actionLoading !== null || isEditLoading}
+                          className="text-xs text-red-400 hover:text-red-300 transition-colors px-3 py-1.5 border border-red-500/20 hover:border-red-500/40 rounded-lg disabled:opacity-50"
+                        >
+                          {actionLoading === article.id + "reject" ? "..." : "Afvis"}
+                        </button>
+                        <button
+                          onClick={() => doAction(article.id, "approve")}
+                          disabled={actionLoading !== null || isEditLoading}
+                          className="text-xs text-emerald-400 hover:text-white bg-emerald-500/10 hover:bg-emerald-500 transition-all px-4 py-1.5 border border-emerald-500/30 rounded-lg font-medium disabled:opacity-50"
+                        >
+                          {actionLoading === article.id + "approve" ? "..." : "Godkend →"}
+                        </button>
+                      </>
+                    )}
+
+                    {tab === "published" && (
+                      <button
+                        onClick={() => doAction(article.id, "reject")}
+                        disabled={actionLoading !== null || isEditLoading}
+                        className="text-xs text-slate-500 hover:text-red-400 transition-colors px-3 py-1.5 border border-slate-800 rounded-lg disabled:opacity-50"
+                      >
+                        {actionLoading === article.id + "reject" ? "..." : "Afpublicér"}
+                      </button>
+                    )}
+
+                    {tab === "rejected" && (
+                      <>
+                        <button
+                          onClick={() => doAction(article.id, "delete")}
+                          disabled={actionLoading !== null || isEditLoading}
+                          className="text-xs text-red-400/60 hover:text-red-400 transition-colors px-3 py-1.5 border border-slate-800 rounded-lg disabled:opacity-50"
+                        >
+                          {actionLoading === article.id + "delete" ? "..." : "Slet permanent"}
+                        </button>
+                        <button
+                          onClick={() => doAction(article.id, "approve")}
+                          disabled={actionLoading !== null || isEditLoading}
+                          className="text-xs text-emerald-400 hover:text-white bg-emerald-500/10 hover:bg-emerald-500 transition-all px-4 py-1.5 border border-emerald-500/30 rounded-lg font-medium disabled:opacity-50"
+                        >
+                          {actionLoading === article.id + "approve" ? "..." : "Genaktivér →"}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Handlinger */}
-              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-800/60">
-                <Link
-                  href={`/nyheder/${article.slug}`}
-                  target="_blank"
-                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-3 py-1.5 border border-slate-800 rounded-lg"
-                >
-                  Forhåndsvis →
-                </Link>
-
-                <div className="flex-1" />
-
-                {tab === "draft" && (
-                  <>
-                    <button
-                      onClick={() => doAction(article.id, "reject")}
-                      disabled={actionLoading !== null}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors px-3 py-1.5 border border-red-500/20 hover:border-red-500/40 rounded-lg disabled:opacity-50"
-                    >
-                      {actionLoading === article.id + "reject" ? "..." : "Afvis"}
-                    </button>
-                    <button
-                      onClick={() => doAction(article.id, "approve")}
-                      disabled={actionLoading !== null}
-                      className="text-xs text-emerald-400 hover:text-white bg-emerald-500/10 hover:bg-emerald-500 transition-all px-4 py-1.5 border border-emerald-500/30 rounded-lg font-medium disabled:opacity-50"
-                    >
-                      {actionLoading === article.id + "approve" ? "..." : "Godkend →"}
-                    </button>
-                  </>
-                )}
-
-                {tab === "published" && (
-                  <button
-                    onClick={() => doAction(article.id, "reject")}
-                    disabled={actionLoading !== null}
-                    className="text-xs text-slate-500 hover:text-red-400 transition-colors px-3 py-1.5 border border-slate-800 rounded-lg disabled:opacity-50"
-                  >
-                    {actionLoading === article.id + "reject" ? "..." : "Afpublicér"}
-                  </button>
-                )}
-
-                {tab === "rejected" && (
-                  <>
-                    <button
-                      onClick={() => doAction(article.id, "delete")}
-                      disabled={actionLoading !== null}
-                      className="text-xs text-red-400/60 hover:text-red-400 transition-colors px-3 py-1.5 border border-slate-800 rounded-lg disabled:opacity-50"
-                    >
-                      {actionLoading === article.id + "delete" ? "..." : "Slet permanent"}
-                    </button>
-                    <button
-                      onClick={() => doAction(article.id, "approve")}
-                      disabled={actionLoading !== null}
-                      className="text-xs text-emerald-400 hover:text-white bg-emerald-500/10 hover:bg-emerald-500 transition-all px-4 py-1.5 border border-emerald-500/30 rounded-lg font-medium disabled:opacity-50"
-                    >
-                      {actionLoading === article.id + "approve" ? "..." : "Genaktivér →"}
-                    </button>
-                  </>
+                {/* Feedback-panel */}
+                {isFeedbackOpen && (
+                  <div className="border-t border-amber-500/20 bg-amber-950/20 px-5 py-4">
+                    <p className="text-[10px] text-amber-400/70 uppercase tracking-widest mb-2">
+                      Feedback til Claude — artiklen rettes og publiceres automatisk
+                    </p>
+                    <textarea
+                      ref={feedbackRef}
+                      value={feedbackText}
+                      onChange={(e) =>
+                        setFeedbackTexts((prev) => ({ ...prev, [article.id]: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) doEdit(article.id);
+                      }}
+                      placeholder="Fx: Skift 'dansk' til 'fransk', fjern overflødige links, tilføj afsnit om..."
+                      rows={3}
+                      className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 outline-none focus:border-amber-500/50 text-xs resize-none leading-relaxed"
+                    />
+                    <div className="flex items-center gap-2 mt-2">
+                      {editError && (
+                        <span className="text-xs text-red-400">{editError}</span>
+                      )}
+                      <div className="flex-1" />
+                      <span className="text-[10px] text-slate-600">⌘↵ for at sende</span>
+                      <button
+                        onClick={() => setFeedbackOpen(null)}
+                        className="text-xs text-slate-600 hover:text-slate-400 transition-colors px-3 py-1.5"
+                      >
+                        Annuller
+                      </button>
+                      <button
+                        onClick={() => doEdit(article.id)}
+                        disabled={!feedbackText.trim() || isEditLoading}
+                        className="text-xs text-amber-400 hover:text-white bg-amber-500/10 hover:bg-amber-500 transition-all px-4 py-1.5 border border-amber-500/30 rounded-lg font-medium disabled:opacity-40"
+                      >
+                        {isEditLoading ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-3 h-3 border border-amber-400/60 border-t-amber-400 rounded-full animate-spin" />
+                            Claude retter...
+                          </span>
+                        ) : "Send til Claude & Publicer →"}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

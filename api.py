@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from datetime import date
 import ast
 import os
@@ -18,7 +19,7 @@ ALLOWED_ORIGINS = os.getenv(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -576,6 +577,64 @@ def admin_delete_article(article_id: str, request: Request):
         headers={**get_headers(), "Prefer": "return=minimal"},
     )
     return {"ok": res.ok}
+
+
+class EditFeedbackRequest(BaseModel):
+    feedback: str
+
+
+@app.patch("/admin/articles/{article_id}/edit")
+def admin_edit_article(article_id: str, body: EditFeedbackRequest, request: Request):
+    _require_admin(request)
+    import json
+    import re
+    from datetime import datetime, timezone
+    from anthropic import Anthropic
+
+    # Hent eksisterende artikel
+    fetch = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}&select=title,content,category",
+        headers=get_headers(),
+    )
+    if not fetch.ok or not fetch.json():
+        raise HTTPException(status_code=404, detail="Article not found")
+    article = fetch.json()[0]
+
+    # Bed Claude om at rette artiklen
+    client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+    prompt = (
+        f"Ret følgende artikel baseret på denne feedback fra redaktøren:\n\n"
+        f"FEEDBACK: {body.feedback}\n\n"
+        f"ARTIKEL TITEL: {article['title']}\n\n"
+        f"ARTIKEL INDHOLD:\n{article['content']}\n\n"
+        "Returner KUN dette JSON (ingen markdown-blokke):\n"
+        '{"title": "...", "content": "..."}'
+    )
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = resp.content[0].text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    try:
+        result = json.loads(text)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Claude returnerede ugyldig JSON")
+
+    # Gem og publicer
+    patch = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
+        json={
+            "title": result.get("title", article["title"]),
+            "content": result.get("content", article["content"]),
+            "status": "published",
+            "published_at": datetime.now(timezone.utc).isoformat(),
+        },
+        headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
+    )
+    return {"ok": patch.ok}
 
 
 # --- Search ---
