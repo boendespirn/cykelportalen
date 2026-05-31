@@ -46,8 +46,9 @@ PROFILE_TYPE_MAP = {
     "p4": "mountain",
     "p5": "mountain",
     "p6": "mountain",
-    "tt": "tt",
-    "itt": "tt",
+    "tt":  "tt",
+    "itt": "itt",
+    "ttt": "ttt",
 }
 
 # Løb der skal opdateres — tilføj flere ved behov
