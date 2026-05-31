@@ -142,6 +142,34 @@ const CATEGORY_COLORS: Record<string, string> = {
   interview: "text-cyan-400",
 };
 
+const CATEGORY_BG: Record<string, string> = {
+  race_report: "from-red-950 to-slate-900",
+  resultater:  "from-red-950 to-slate-900",
+  startliste:  "from-blue-950 to-slate-900",
+  startlist:   "from-blue-950 to-slate-900",
+  analyse:     "from-orange-950 to-slate-900",
+  analysis:    "from-orange-950 to-slate-900",
+  transfer:    "from-yellow-950 to-slate-900",
+  profil:      "from-purple-950 to-slate-900",
+  interview:   "from-purple-950 to-slate-900",
+  generelt:    "from-emerald-950 to-slate-900",
+  general:     "from-emerald-950 to-slate-900",
+};
+
+const CATEGORY_ICON: Record<string, string> = {
+  race_report: "🏆",
+  resultater:  "🏆",
+  startliste:  "📋",
+  startlist:   "📋",
+  analyse:     "📊",
+  analysis:    "📊",
+  transfer:    "🔄",
+  profil:      "👤",
+  interview:   "🎙️",
+  generelt:    "🚴",
+  general:     "🚴",
+};
+
 export default async function Home() {
   const [ongoingRaces, upcomingRaces, articles] = await Promise.all([
     getOngoingRaces(),
@@ -395,7 +423,11 @@ export default async function Home() {
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-slate-950/10" />
                         </>
                       ) : (
-                        <div className="absolute inset-0 bg-gradient-to-br from-slate-800 to-slate-900" />
+                        <div className={`absolute inset-0 bg-gradient-to-br ${CATEGORY_BG[article.category] ?? "from-slate-800 to-slate-900"}`}>
+                          <span className="absolute bottom-0 right-0 text-[6rem] leading-none opacity-[0.07] select-none pointer-events-none pr-2 pb-0">
+                            {CATEGORY_ICON[article.category] ?? "🚴"}
+                          </span>
+                        </div>
                       )}
 
                       <div className="absolute inset-0 flex flex-col justify-end p-5">

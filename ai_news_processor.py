@@ -40,8 +40,7 @@ DB_HEADERS = {
 }
 
 MODEL            = "claude-haiku-4-5-20251001"  # hurtig og billig; skift til claude-sonnet-4-6 for højere kvalitet
-MIN_SCORE        = 8      # kun tophistorier publiceres (8-10)
-WEEKLY_LIMIT     = 4      # max 4 AI-artikler per uge
+MIN_SCORE        = 8      # kun tophistorier scores videre (8-10)
 MAX_ARTICLES     = 15     # max artikler der scores per kørsel
 DELAY            = 0.5    # sekunder mellem API-kald
 
@@ -96,21 +95,6 @@ def get_ongoing_startlists() -> str:
             lines.append("")
 
     return "\n".join(lines)
-
-
-def get_weekly_published_count() -> int:
-    """Returnerer antal AI-artikler publiceret denne uge (siden mandag 00:00)."""
-    from datetime import date, timedelta
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/news_articles"
-        f"?author=eq.Klassementet AI"
-        f"&published_at=gte.{monday.isoformat()}"
-        f"&select=id",
-        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
-    )
-    return len(res.json()) if res.ok else 0
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -261,21 +245,11 @@ def run(limit: int) -> None:
     races             = get_active_races()
     startlist_context = get_ongoing_startlists()
 
-    weekly_count = get_weekly_published_count()
-    slots_left   = max(0, WEEKLY_LIMIT - weekly_count)
-
     print(f"ai_news_processor.py — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Fandt {len(articles)} ubehandlede artikler | {len(races)} løb til interne links")
-    print(f"Denne uge: {weekly_count}/{WEEKLY_LIMIT} artikler publiceret ({slots_left} pladser tilbage)\n")
+    print(f"Artikler gemmes som kladder — godkend på klassementet.dk/admin\n")
 
-    if slots_left == 0:
-        print("Ugens kvote på 4 artikler er nået — springer over.")
-        # Marker alligevel alle som processed så de ikke hober sig op
-        for art in articles:
-            mark_processed(art["id"], 0.0)
-        return
-
-    published = skipped = failed = 0
+    drafted = skipped = failed = 0
 
     for i, art in enumerate(articles, 1):
         print(f"[{i}/{len(articles)}] {art['title'][:70]}")
@@ -291,14 +265,6 @@ def run(limit: int) -> None:
             time.sleep(DELAY)
             continue
 
-        if published >= slots_left:
-            print(" — ugens kvote opbrugt, stopper")
-            mark_processed(art["id"], score)
-            # Marker resten som processed
-            for remaining in articles[i:]:
-                mark_processed(remaining["id"], 0.0)
-            break
-
         print(" — omskriver...")
 
         # Trin 2: Omskrivning
@@ -310,7 +276,7 @@ def run(limit: int) -> None:
             time.sleep(DELAY)
             continue
 
-        # Trin 3: Gem i news_articles
+        # Trin 3: Gem i news_articles som kladde (kræver godkendelse i /admin)
         slug = slug_from_title(result["title"])
         saved = save_article({
             "slug":             slug,
@@ -322,20 +288,22 @@ def run(limit: int) -> None:
             "author":           "Klassementet AI",
             "source_url":       art["external_url"],
             "is_advertorial":   False,
-            "published_at":     datetime.now(timezone.utc).isoformat(),
+            "status":           "draft",
+            "published_at":     None,
         })
 
         mark_processed(art["id"], score)
 
         if saved:
-            print(f"  -> Publiceret: /nyheder/{slug}")
-            published += 1
+            print(f"  -> Kladde gemt: /nyheder/{slug}")
+            drafted += 1
         else:
             failed += 1
 
         time.sleep(DELAY)
 
-    print(f"\nFærdig: {published} publiceret, {skipped} sprunget over, {failed} fejl")
+    print(f"\nFærdig: {drafted} kladder gemt, {skipped} sprunget over, {failed} fejl")
+    print(f"Godkend på: klassementet.dk/admin")
 
 
 if __name__ == "__main__":

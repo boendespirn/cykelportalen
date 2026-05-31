@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import date
 import ast
@@ -501,6 +501,7 @@ def get_news(advertorial: bool = False, limit: int = 20, offset: int = 0):
     url = (
         f"{SUPABASE_URL}/rest/v1/news_articles"
         f"?is_advertorial=eq.{str(advertorial).lower()}"
+        f"&or=(status.eq.published,status.is.null)"
         f"&select=id,slug,title,excerpt,category,author,image_url,published_at,race_id,races(name,slug)"
         f"&order=published_at.desc"
         f"&limit={limit}&offset={offset}"
@@ -519,6 +520,62 @@ def get_news_article(slug: str):
     if not data:
         return {"error": "Artikel ikke fundet"}
     return data[0]
+
+
+# --- Admin ---
+
+ADMIN_KEY = os.getenv("ADMIN_KEY", "")
+
+
+def _require_admin(request: Request) -> None:
+    if not ADMIN_KEY or request.headers.get("x-admin-key") != ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.get("/admin/articles")
+def admin_get_articles(request: Request, status: str = "draft", limit: int = 50):
+    _require_admin(request)
+    url = (
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?status=eq.{status}"
+        f"&select=id,slug,title,excerpt,category,author,image_url,published_at,created_at,source_url"
+        f"&order=created_at.desc"
+        f"&limit={limit}"
+    )
+    return requests.get(url, headers=get_headers()).json()
+
+
+@app.patch("/admin/articles/{article_id}/approve")
+def admin_approve_article(article_id: str, request: Request):
+    _require_admin(request)
+    from datetime import datetime, timezone
+    res = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
+        json={"status": "published", "published_at": datetime.now(timezone.utc).isoformat()},
+        headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
+    )
+    return {"ok": res.ok}
+
+
+@app.patch("/admin/articles/{article_id}/reject")
+def admin_reject_article(article_id: str, request: Request):
+    _require_admin(request)
+    res = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
+        json={"status": "rejected"},
+        headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
+    )
+    return {"ok": res.ok}
+
+
+@app.delete("/admin/articles/{article_id}")
+def admin_delete_article(article_id: str, request: Request):
+    _require_admin(request)
+    res = requests.delete(
+        f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
+        headers={**get_headers(), "Prefer": "return=minimal"},
+    )
+    return {"ok": res.ok}
 
 
 # --- Search ---
