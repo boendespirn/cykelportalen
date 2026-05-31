@@ -216,7 +216,7 @@ def get_stage_detail(slug: str, stage_number: int):
         f"?race_id=eq.{race_id}&stage_number=eq.{stage_number}&limit=1"
         f"&select=stage_number,name,date,distance_km,stage_type,start_location,finish_location,"
         f"elevation_gain_m,profile_score,elevation_image_url,pcs_stage_url,"
-        f"description,finish_type,fun_facts,stage_start_time"
+        f"description,finish_type,fun_facts,stage_start_time,route_points"
     )
     stage_res = requests.get(stage_url, headers=get_headers())
     stage_data = stage_res.json()
