@@ -11,6 +11,7 @@ export default function StageMapLoader(props: {
   finish: LatLng;
   startName: string;
   finishName: string;
+  routePoints?: LatLng[] | null;
 }) {
   return <StageMap {...props} />;
 }

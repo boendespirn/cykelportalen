@@ -9,16 +9,16 @@ interface StageMapProps {
   finish: LatLng;
   startName: string;
   finishName: string;
+  routePoints?: LatLng[] | null;
 }
 
-export default function StageMap({ start, finish, startName, finishName }: StageMapProps) {
+export default function StageMap({ start, finish, startName, finishName, routePoints }: StageMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<unknown>(null);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    // Clear any stale Leaflet state from HMR/StrictMode double-render
     const container = containerRef.current as HTMLElement & { _leaflet_id?: number };
     if (container._leaflet_id) {
       delete container._leaflet_id;
@@ -26,7 +26,6 @@ export default function StageMap({ start, finish, startName, finishName }: Stage
     }
 
     import("leaflet").then(({ default: L }) => {
-      // Fix Leaflet default icon path issue in Next.js
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
@@ -38,24 +37,41 @@ export default function StageMap({ start, finish, startName, finishName }: Stage
       const map = L.map(containerRef.current!, { zoomControl: true, attributionControl: false });
       mapRef.current = map;
 
-      // OpenStreetMap standard tiles
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18,
         attribution: "© OpenStreetMap",
       }).addTo(map);
 
-      // Bounding box
-      const bounds = L.latLngBounds([start, finish]).pad(0.35);
-      map.fitBounds(bounds);
+      const hasRoute = routePoints && routePoints.length > 1;
 
-      // Custom start marker (green)
+      if (hasRoute) {
+        // Draw actual GPX route
+        const polyline = L.polyline(routePoints as LatLng[], {
+          color: "#10b981",
+          weight: 3,
+          opacity: 0.85,
+        }).addTo(map);
+        map.fitBounds(polyline.getBounds().pad(0.08));
+      } else {
+        // Fallback: dashed straight line
+        const bounds = L.latLngBounds([start, finish]).pad(0.35);
+        map.fitBounds(bounds);
+        L.polyline([start, finish], {
+          color: "#10b981",
+          weight: 2,
+          dashArray: "8 6",
+          opacity: 0.7,
+        }).addTo(map);
+      }
+
+      // Start marker (green)
       const startIcon = L.divIcon({
         html: `<div style="width:12px;height:12px;background:#10b981;border:2px solid white;border-radius:50%;box-shadow:0 0 6px rgba(16,185,129,0.6)"></div>`,
         className: "",
         iconAnchor: [6, 6],
       });
 
-      // Custom finish marker (red)
+      // Finish marker (red)
       const finishIcon = L.divIcon({
         html: `<div style="width:14px;height:14px;background:#ef4444;border:2px solid white;border-radius:50%;box-shadow:0 0 6px rgba(239,68,68,0.6)"></div>`,
         className: "",
@@ -69,14 +85,6 @@ export default function StageMap({ start, finish, startName, finishName }: Stage
       L.marker(finish, { icon: finishIcon })
         .addTo(map)
         .bindTooltip(finishName, { permanent: true, direction: "top", className: "leaflet-label" });
-
-      // Dashed route line
-      L.polyline([start, finish], {
-        color: "#10b981",
-        weight: 2,
-        dashArray: "8 6",
-        opacity: 0.7,
-      }).addTo(map);
     });
 
     return () => {
@@ -85,7 +93,7 @@ export default function StageMap({ start, finish, startName, finishName }: Stage
         mapRef.current = null;
       }
     };
-  }, [start, finish, startName, finishName]);
+  }, [start, finish, startName, finishName, routePoints]);
 
   return (
     <>

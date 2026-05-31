@@ -24,6 +24,7 @@ type Stage = {
   finish_type: string | null;
   fun_facts: string[] | null;
   stage_start_time: string | null;
+  route_points: [number, number][] | null;
 };
 
 type Race = { id: string; name: string; slug: string };
@@ -569,6 +570,7 @@ export default async function StagePage(props: {
               finish={finishCoords}
               startName={stage.start_location ?? "Start"}
               finishName={stage.finish_location ?? "Mål"}
+              routePoints={stage.route_points}
             />
           </div>
         ) : (
