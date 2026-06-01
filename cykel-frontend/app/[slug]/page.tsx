@@ -943,29 +943,30 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
               const flag = nat && nat.length === 2
                 ? nat.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
                 : "";
+              const winnerFirst = winner ? winner.name.split(" ").slice(-1)[0].charAt(0) + winner.name.split(" ").slice(-1)[0].slice(1).toLowerCase() : "";
+              const winnerLast = winner ? winner.name.split(" ").slice(0, -1).join(" ").toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase()) : "";
               return (
-                <Link
+                <div
                   key={h.slug}
-                  href={`/${h.slug}`}
                   className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
                 >
-                  <span className="font-mono text-slate-500 text-sm w-10 flex-shrink-0">{h.year}</span>
+                  <Link href={`/${h.slug}`} className="font-mono text-slate-500 text-sm w-10 flex-shrink-0 hover:text-emerald-400 transition-colors">
+                    {h.year}
+                  </Link>
                   {winner ? (
                     <>
                       <span className="text-base flex-shrink-0">{flag}</span>
                       <Link
                         href={`/riders/${winner.slug}`}
-                        onClick={(e) => e.stopPropagation()}
                         className="flex-1 text-sm font-medium text-slate-200 hover:text-emerald-300 transition-colors truncate"
                       >
-                        {winner.name.split(" ").slice(-1)[0].charAt(0) + winner.name.split(" ").slice(-1)[0].slice(1).toLowerCase()}{" "}
-                        {winner.name.split(" ").slice(0, -1).join(" ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}
+                        {winnerFirst} {winnerLast}
                       </Link>
                     </>
                   ) : (
                     <span className="flex-1 text-sm text-slate-600 italic">Ingen data</span>
                   )}
-                </Link>
+                </div>
               );
             })}
           </div>
