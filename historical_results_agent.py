@@ -182,13 +182,16 @@ def get_historical_races(year: int | None, race_slug: str | None) -> list:
 
 
 def has_gc(race_id: str) -> bool:
-    res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/classifications"
-        f"?race_id=eq.{race_id}&classification_type=eq.gc&limit=1",
-        headers=AUTH, timeout=15,
-    )
-    data = res.json()
-    return bool(res.ok and data)
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/classifications"
+            f"?race_id=eq.{race_id}&classification_type=eq.gc&limit=1",
+            headers=AUTH, timeout=15,
+        )
+        data = res.json()
+        return bool(res.ok and data)
+    except requests.exceptions.RequestException:
+        return False
 
 
 def get_or_create_stage(race_id: str, sn: int, date: str | None = None) -> str | None:
@@ -487,10 +490,15 @@ def run(race_slug: str | None, year: int | None, force: bool) -> None:
     seed_url = races[0]["pcs_url"].rstrip("/") + ("/gc" if races[0].get("race_type") != "one_day" else "/result")
     sess, seed_html = make_session(seed_url)
 
-    # Behandl første løb med den allerede hentede HTML
     for i, race in enumerate(races, 1):
         print(f"[{i}/{len(races)}] {race['name']} ({race['start_date'][:4]})")
-        res = process_race(race, sess, force)
+        try:
+            res = process_race(race, sess, force)
+        except requests.exceptions.RequestException as e:
+            print(f"  [NETFEJL] {e.__class__.__name__} — springer over")
+            total_skipped += 1
+            time.sleep(5)
+            continue
 
         if res["skipped"]:
             total_skipped += 1
