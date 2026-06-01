@@ -134,6 +134,22 @@ async function getBroadcast(slug: string): Promise<Broadcast[]> {
   } catch { return []; }
 }
 
+type StageResult = {
+  position: number;
+  time_seconds: number | null;
+  time_gap_seconds: number | null;
+  riders: { name: string; slug: string; nationality: string | null; photo_url: string | null } | null;
+};
+
+async function getStageResults(slug: string, n: string): Promise<StageResult[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/results?limit=3`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
 async function geocodeCity(
   cityName: string
 ): Promise<[number, number] | null> {
@@ -359,11 +375,12 @@ export default async function StagePage(props: {
 
   const { stage, race } = result;
 
-  const [startlist, climbs, broadcastAll, allStages] = await Promise.all([
+  const [startlist, climbs, broadcastAll, allStages, stageResults] = await Promise.all([
     getStartlist(slug),
     getClimbs(slug, n),
     getBroadcast(slug),
     getAllStages(slug),
+    getStageResults(slug, n),
   ]);
 
   const stageNum   = parseInt(n);
@@ -470,6 +487,50 @@ export default async function StagePage(props: {
           <p className="text-slate-600 text-xs mt-1">{typeConfig.desc}</p>
         )}
       </header>
+
+      {/* Etapevinder */}
+      {stageResults.length > 0 && (
+        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">Resultat</span>
+          </div>
+          <div className="divide-y divide-slate-800/60">
+            {stageResults.map((r) => {
+              const rider = r.riders;
+              if (!rider) return null;
+              const flag = rider.nationality?.length === 2
+                ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
+                : "";
+              const podiumColors: Record<number, string> = {
+                1: "text-yellow-400 font-bold",
+                2: "text-slate-300 font-semibold",
+                3: "text-amber-600 font-semibold",
+              };
+              const gap = r.time_gap_seconds && r.time_gap_seconds > 0
+                ? `+${Math.floor(r.time_gap_seconds / 60)}:${String(r.time_gap_seconds % 60).padStart(2, "0")}`
+                : null;
+              return (
+                <div key={r.position} className="flex items-center gap-4 px-5 py-3">
+                  <span className={`text-sm w-6 text-center flex-shrink-0 ${podiumColors[r.position] ?? "text-slate-500"}`}>
+                    {r.position}.
+                  </span>
+                  {rider.photo_url && (
+                    <img src={rider.photo_url} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0 opacity-90" />
+                  )}
+                  <span className="text-base flex-shrink-0">{flag}</span>
+                  <Link
+                    href={`/riders/${rider.slug}`}
+                    className="flex-1 text-sm font-medium text-slate-200 hover:text-emerald-300 transition-colors truncate"
+                  >
+                    {rider.name}
+                  </Link>
+                  {gap && <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Højdeprofil + individuelle stigninger */}
       <ClimbProfile

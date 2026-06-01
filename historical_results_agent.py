@@ -301,66 +301,165 @@ def parse_time_to_seconds(s: str) -> int | None:
     return None
 
 
+def _parse_time_gap(row) -> int:
+    """
+    Udtræk tidsgab i sekunder fra en tabelrække.
+    Prøver class="time" td først, derefter alle td-elementer.
+    Bruger ikke-forankret regex da PCS dublerer tekst via skjulte spans.
+    """
+    # Primær: class="time" td med font-element (PCS-format)
+    time_td = row.find("td", class_="time")
+    if time_td:
+        raw = (time_td.find("font") or time_td).get_text(strip=True).lstrip("+")
+        m = re.search(r"(\d+:\d{2}(?::\d{2})?)", raw)
+        if m:
+            parsed = parse_time_to_seconds(m.group(1)) or 0
+            if parsed > 0:
+                return parsed
+
+    # Fallback: scan alle td-elementer
+    for td in row.find_all("td", recursive=False):
+        raw = td.get_text(strip=True).lstrip("+")
+        m = re.search(r"(\d+:\d{2}(?::\d{2})?)", raw)
+        if m:
+            parsed = parse_time_to_seconds(m.group(1)) or 0
+            if parsed > 0:
+                return parsed
+    return 0
+
+
+def _is_active_tab(table) -> bool:
+    """
+    Returnerer True hvis tabellen er i det AKTIVE PCS-faneblad (class='resTab' uden 'hide').
+    På /gc-sider er kun GC-tabellen aktiv — alle andre (youth, points, kom) er skjulte.
+    """
+    node = table
+    for _ in range(6):
+        node = node.parent
+        if node is None or node.name == "body":
+            break
+        if "resTab" in (node.get("class") or []):
+            return "hide" not in (node.get("class") or [])
+    return False  # Ikke i et resTab-element → ukendt struktur
+
+
+def _table_heading(table) -> str:
+    """
+    Find overskriftsteksten tættest på tabellen (søg opad i DOM).
+    Returnerer lowercased tekst eller tom streng.
+    """
+    heading_tags = {"h1", "h2", "h3", "h4", "h5", "h6"}
+    node = table
+    for _ in range(8):
+        prev = node.find_previous_sibling()
+        if prev:
+            if prev.name in heading_tags:
+                return prev.get_text(separator=" ", strip=True).lower()
+            found = prev.find(heading_tags)
+            if found:
+                return found.get_text(separator=" ", strip=True).lower()
+        node = node.parent
+        if node is None or node.name == "body":
+            break
+    return ""
+
+
+def _parse_table_standings(table) -> tuple[int, list]:
+    """
+    Parse en enkelt tabel til (p2_gap_seconds, standings_list).
+    p2_gap_seconds bruges til at skelne GC-tabel (stor gap) fra sprint-tabel (gap=0).
+    """
+    rider_re = re.compile(r"^/?rider/")
+    rows = table.find_all("tr")
+    if len(rows) < 3:
+        return 0, []
+
+    start_idx = None
+    for idx, row in enumerate(rows[:6]):
+        tds = row.find_all("td", recursive=False)
+        try:
+            if int(tds[0].get_text(strip=True)) == 1:
+                start_idx = idx
+                break
+        except (ValueError, IndexError):
+            pass
+    if start_idx is None:
+        return 0, []
+
+    standings = []
+    p2_gap = 0
+    for row in rows[start_idx:start_idx + TOP_N]:
+        tds = row.find_all("td", recursive=False)
+        try:
+            pos = int(tds[0].get_text(strip=True))
+        except (ValueError, IndexError):
+            continue
+
+        rider_a = row.find("a", href=rider_re)
+        if not rider_a:
+            continue
+        pcs_slug = rider_a["href"].lstrip("/").replace("rider/", "").strip("/")
+        name = rider_a.get_text(separator=" ", strip=True).upper()
+
+        gap = _parse_time_gap(row) if pos > 1 else 0
+        if pos == 2:
+            p2_gap = gap
+
+        standings.append({
+            "position":         pos,
+            "pcs_slug":         pcs_slug,
+            "name":             name,
+            "time_gap_seconds": gap,
+        })
+
+    return p2_gap, standings
+
+
 def scrape_gc(html: str) -> list:
     """
     Parse GC-tabel fra PCS /gc eller /result side.
     Returnerer [{position, pcs_slug, name, time_gap_seconds}].
+
+    Strategi: indsaml ALLE kandidat-tabeller med position=1.
+    Sorter: størst P2-gap (GC) → senest i dokumentet (PCS viser altid stage-resultat
+    FØR selve GC-tabellen på /gc-sider, så sidst-vinder ved ens gap).
     """
     soup = BeautifulSoup(html, "html.parser")
-    standings = []
+    # candidates: (p2_gap, table_index, standings)
+    candidates: list[tuple[int, int, list]] = []
 
-    for table in soup.find_all("table"):
-        rows = table.find_all("tr")
-        if len(rows) < 3:
-            continue
-
-        # Find startrækken der har position=1 (kan være row 0 eller 1 afhængig af header)
-        start_idx = None
-        for idx, row in enumerate(rows[:6]):
-            tds = row.find_all("td", recursive=False)
-            try:
-                if int(tds[0].get_text(strip=True)) == 1:
-                    start_idx = idx
-                    break
-            except (ValueError, IndexError):
-                pass
-        if start_idx is None:
-            continue
-
-        for row in rows[start_idx:start_idx + TOP_N]:
-            tds = row.find_all("td", recursive=False)
-            try:
-                pos = int(tds[0].get_text(strip=True))
-            except (ValueError, IndexError):
-                continue
-
-            rider_a = row.find("a", href=re.compile(r"^/?rider/"))
-            if not rider_a:
-                continue
-            pcs_slug = rider_a["href"].lstrip("/").replace("rider/", "").strip("/")
-            name = rider_a.get_text(separator=" ", strip=True).upper()
-
-            # Tidsgab
-            time_td = row.find("td", class_="time")
-            gap = 0
-            if time_td:
-                raw = (time_td.find("font") or time_td).get_text(strip=True)
-                # PCS duplikerer tekst via skjult span: "1:561:56" → "1:56"
-                m = re.match(r"(\d+:\d+(?::\d+)?)", raw)
-                if m and pos > 1:
-                    gap = parse_time_to_seconds(m.group(1)) or 0
-
-            standings.append({
-                "position":         pos,
-                "pcs_slug":         pcs_slug,
-                "name":             name,
-                "time_gap_seconds": gap,
-            })
-
+    for table_idx, table in enumerate(soup.find_all("table")):
+        p2_gap, standings = _parse_table_standings(table)
         if standings:
-            break
+            heading = _table_heading(table)
+            active = _is_active_tab(table)
+            # Er dette sandsynligvis GC-tabellen? Aktiv fane på /gc-URL er altid GC
+            is_gc_heading = any(w in heading for w in ("general", "klassement général", "classifica generale"))
+            is_gc = active or is_gc_heading
+            # Intermediate classifications (sprint/KOM-checkpoints) har altid overskrift
+            is_intermediate = bool(heading) and not is_gc_heading
+            candidates.append((p2_gap, table_idx, is_gc, is_intermediate, len(standings), standings))
 
-    return standings
+    if not candidates:
+        return []
+
+    # Gap > 7200s (2 timer) er fejlparsning af akkumuleret tid — behandl som 0
+    MAX_REALISTIC_GAP = 7200
+
+    def sort_key(c):
+        p2_gap, table_idx, is_gc, is_intermediate, n_rows, standings = c
+        gap = p2_gap if p2_gap <= MAX_REALISTIC_GAP else 0
+        # Frasortér intermediate-tabeller (sprint/KOM checkpoints med specifik overskrift)
+        if is_intermediate:
+            return (-1, 0, 0, 0, 0)
+        # Prioritér: aktiv PCS-fane (=GC på /gc-URL) > størst realistisk gap > flest ryttere
+        return (int(is_gc), gap, n_rows, table_idx)
+
+    candidates.sort(key=sort_key, reverse=True)
+    valid = [c for c in candidates if not c[3]]
+    if not valid:
+        valid = candidates
+    return valid[0][5]
 
 
 def collect_stage_links(html: str, pcs_url_base: str, year: int) -> list[tuple[int, str]]:
