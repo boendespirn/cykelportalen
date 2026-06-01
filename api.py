@@ -298,7 +298,7 @@ def get_race_history(slug: str):
             f"{SUPABASE_URL}/rest/v1/classifications"
             f"?race_id=eq.{ed['id']}&classification_type=eq.gc&position=eq.1"
             f"&select=position,time_gap_seconds,riders(name,slug,nationality,photo_url)"
-            f"&limit=1",
+            f"&order=after_stage_number.desc&limit=1",
             headers=get_headers(),
         )
         gc_data = gc_res.json()
