@@ -576,16 +576,31 @@ def get_rider_palmares(slug: str):
         return {"gc_results": [], "stage_wins": []}
     rider_id = rider_data[0]["id"]
 
-    # GC-klassementer top 10 (alle år)
+    # GC-klassementer top 10 — hent alle og beholder kun seneste per løb
     gc_res = requests.get(
         f"{SUPABASE_URL}/rest/v1/classifications"
         f"?rider_id=eq.{rider_id}&classification_type=eq.gc&position=lte.10"
         f"&select=position,time_gap_seconds,after_stage_number,"
         f"races(name,slug,start_date,end_date,race_type)"
-        f"&order=races(start_date).desc&limit=100",
+        f"&order=after_stage_number.desc&limit=500",
         headers=get_headers(),
     )
-    gc_results = gc_res.json() if gc_res.ok and isinstance(gc_res.json(), list) else []
+    raw_gc = gc_res.json() if gc_res.ok and isinstance(gc_res.json(), list) else []
+
+    # Dedupliker: behold kun den post med højest after_stage_number per løb
+    best_per_race: dict = {}
+    for entry in raw_gc:
+        race = entry.get("races") or {}
+        slug = race.get("slug")
+        if not slug:
+            continue
+        if slug not in best_per_race:
+            best_per_race[slug] = entry
+    gc_results = sorted(
+        best_per_race.values(),
+        key=lambda e: (e.get("races") or {}).get("start_date", ""),
+        reverse=True,
+    )
 
     # Etapesejre (position=1 med stage_id)
     wins_res = requests.get(
