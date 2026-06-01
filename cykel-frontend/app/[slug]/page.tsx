@@ -581,6 +581,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
             pointsStandings={pointsData?.standings ?? []}
             mountainsStandings={mountainsData?.standings ?? []}
             youthStandings={youthData?.standings ?? []}
+            raceSlug={slug}
           />
         )}
       </div>
@@ -829,6 +830,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           pointsStandings={pointsData?.standings ?? []}
           mountainsStandings={mountainsData?.standings ?? []}
           youthStandings={youthData?.standings ?? []}
+          raceSlug={slug}
         />
       )}
 

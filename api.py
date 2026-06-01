@@ -266,8 +266,8 @@ def get_race_history(slug: str):
     """
     Tidligere udgaver af samme løb — GC-vinder (pos=1) per år.
     Matcher på løbsnavn (case-insensitive) på tværs af alle år.
+    Bruger én bulk-forespørgsel til alle vindere i stedet for N+1.
     """
-    # Hent nuværende løb for at finde løbsnavnet
     race_res = requests.get(
         f"{SUPABASE_URL}/rest/v1/races?select=id,name&slug=eq.{slug}&limit=1",
         headers=get_headers(),
@@ -277,7 +277,6 @@ def get_race_history(slug: str):
         return []
     race_name = race_data[0]["name"]
 
-    # Find alle udgaver med samme navn
     editions_res = requests.get(
         f"{SUPABASE_URL}/rest/v1/races"
         f"?name=eq.{requests.utils.quote(race_name)}"
@@ -289,25 +288,37 @@ def get_race_history(slug: str):
     if not isinstance(editions, list):
         return []
 
-    # For hver udgave: hent GC-vinder (position=1)
+    other_editions = [ed for ed in editions if ed["slug"] != slug]
+    if not other_editions:
+        return []
+
+    # Én bulk-forespørgsel til alle GC-vindere på tværs af udgaver
+    edition_ids = ",".join(ed["id"] for ed in other_editions)
+    gc_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=in.({edition_ids})&classification_type=eq.gc&position=eq.1"
+        f"&select=race_id,position,time_gap_seconds,after_stage_number,"
+        f"riders(name,slug,nationality,photo_url)"
+        f"&order=after_stage_number.desc",
+        headers=get_headers(),
+    )
+    _gc_body = gc_res.json() if gc_res.ok else []
+    gc_rows = _gc_body if isinstance(_gc_body, list) else []
+
+    # Behold kun den seneste entry per race_id (første match = højeste after_stage_number)
+    winners_by_race: dict = {}
+    for row in gc_rows:
+        rid = row.get("race_id")
+        if rid and rid not in winners_by_race:
+            winners_by_race[rid] = row
+
     history = []
-    for ed in editions:
-        if ed["slug"] == slug:
-            continue  # spring den aktuelle udgave over
-        gc_res = requests.get(
-            f"{SUPABASE_URL}/rest/v1/classifications"
-            f"?race_id=eq.{ed['id']}&classification_type=eq.gc&position=eq.1"
-            f"&select=position,time_gap_seconds,riders(name,slug,nationality,photo_url)"
-            f"&order=after_stage_number.desc&limit=1",
-            headers=get_headers(),
-        )
-        gc_data = gc_res.json()
-        winner = gc_data[0] if gc_res.ok and gc_data else None
+    for ed in other_editions:
         history.append({
-            "year":     int(ed["start_date"][:4]),
-            "slug":     ed["slug"],
+            "year":       int(ed["start_date"][:4]),
+            "slug":       ed["slug"],
             "start_date": ed["start_date"],
-            "winner":   winner,
+            "winner":     winners_by_race.get(ed["id"]),
         })
     return history
 

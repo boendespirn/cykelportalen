@@ -32,6 +32,7 @@ type Props = {
   pointsStandings: ClassifEntry[];
   mountainsStandings: ClassifEntry[];
   youthStandings: ClassifEntry[];
+  raceSlug?: string;
 };
 
 function flagEmoji(code: string | null): string {
@@ -54,48 +55,46 @@ function formatGap(secs: number | null): string {
   return `+${h}:${String(Math.floor(rem / 60)).padStart(2, "0")}:${String(rem % 60).padStart(2, "0")}`;
 }
 
-const JERSEY_CONFIG = [
-  {
-    key: "gc",
-    color: "text-pink-400 border-pink-500/30 bg-pink-500/10",
-    activeRing: "ring-pink-500/50",
-    label: "Maglia Rosa",
-    tableLabel: "Samlet klassement",
-    emoji: "🩷",
-    valueLabel: "Tid",
-    description: "Den lyserøde trøje gives til rytteren med den laveste samlede tid. Den er det ultimative symbol på sejr i Giro d'Italia.",
-  },
-  {
-    key: "points",
-    color: "text-purple-400 border-purple-500/30 bg-purple-500/10",
-    activeRing: "ring-purple-500/50",
-    label: "Ciclamino",
-    tableLabel: "Point-klassement",
-    emoji: "🟣",
-    valueLabel: "Point",
-    description: "Den blomsterfarvede trøje gives til rytteren med flest sprintpoints fra etapemål og mellemspurter.",
-  },
-  {
-    key: "mountains",
-    color: "text-blue-400 border-blue-500/30 bg-blue-500/10",
-    activeRing: "ring-blue-500/50",
-    label: "Maglia Azzurra",
-    tableLabel: "Bjerg-klassement",
-    emoji: "🔵",
-    valueLabel: "Point",
-    description: "Den blå bjergtrøje gives til rytteren med flest point fra kategoriserede stigninger i løbet.",
-  },
-  {
-    key: "youth",
-    color: "text-slate-200 border-slate-400/30 bg-slate-500/10",
-    activeRing: "ring-slate-400/50",
-    label: "Maglia Bianca",
-    tableLabel: "Ungdomsklassement",
-    emoji: "⬜",
-    valueLabel: "Tid",
-    description: "Den hvide trøje gives til den bedst placerede rytter under 26 år i det samlede klassement.",
-  },
-] as const;
+type JerseyConfig = {
+  key: string;
+  color: string;
+  activeRing: string;
+  label: string;
+  tableLabel: string;
+  emoji: string;
+  valueLabel: string;
+  description: string;
+};
+
+function getJerseyConfig(raceSlug?: string): readonly JerseyConfig[] {
+  const slug = raceSlug ?? "";
+
+  if (slug.includes("tour-de-france")) {
+    return [
+      { key: "gc",        color: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10", activeRing: "ring-yellow-500/50",  label: "Maillot Jaune",    tableLabel: "Samlet klassement", emoji: "🟡", valueLabel: "Tid",   description: "Den gule trøje gives til rytteren med den laveste samlede tid. Den bæres af den samlede leder i Tour de France." },
+      { key: "points",    color: "text-green-400 border-green-500/30 bg-green-500/10",     activeRing: "ring-green-500/50",   label: "Maillot Vert",     tableLabel: "Point-klassement",  emoji: "🟢", valueLabel: "Point", description: "Den grønne trøje gives til rytteren med flest sprintpoints fra etapemål og mellemspurter." },
+      { key: "mountains", color: "text-red-400 border-red-500/30 bg-red-500/10",           activeRing: "ring-red-500/50",     label: "Maillot à Pois",   tableLabel: "Bjerg-klassement",  emoji: "🔴", valueLabel: "Point", description: "Den prikkede trøje gives til Roi de la Montagne — rytteren med flest bjergpoint fra kategoriserede stigninger." },
+      { key: "youth",     color: "text-slate-200 border-slate-400/30 bg-slate-500/10",     activeRing: "ring-slate-400/50",   label: "Maillot Blanc",    tableLabel: "Ungdomsklassement", emoji: "⬜", valueLabel: "Tid",   description: "Den hvide trøje gives til den bedst placerede rytter under 26 år i det samlede klassement." },
+    ] as const;
+  }
+
+  if (slug.includes("vuelta") || slug.includes("espana")) {
+    return [
+      { key: "gc",        color: "text-red-400 border-red-500/30 bg-red-500/10",           activeRing: "ring-red-500/50",     label: "Maillot Rojo",     tableLabel: "Samlet klassement", emoji: "🔴", valueLabel: "Tid",   description: "Den røde trøje gives til rytteren med den laveste samlede tid i La Vuelta a España." },
+      { key: "points",    color: "text-green-400 border-green-500/30 bg-green-500/10",     activeRing: "ring-green-500/50",   label: "Maillot Verde",    tableLabel: "Point-klassement",  emoji: "🟢", valueLabel: "Point", description: "Den grønne trøje gives til rytteren med flest sprintpoints fra etapemål og mellemspurter." },
+      { key: "mountains", color: "text-blue-400 border-blue-500/30 bg-blue-500/10",        activeRing: "ring-blue-500/50",    label: "Montaña",          tableLabel: "Bjerg-klassement",  emoji: "🔵", valueLabel: "Point", description: "Bjergtrøjen gives til rytteren med flest point fra kategoriserede stigninger i Vuelta." },
+      { key: "youth",     color: "text-slate-200 border-slate-400/30 bg-slate-500/10",     activeRing: "ring-slate-400/50",   label: "Maillot Blanco",   tableLabel: "Ungdomsklassement", emoji: "⬜", valueLabel: "Tid",   description: "Den hvide trøje gives til den bedst placerede rytter under 26 år i det samlede klassement." },
+    ] as const;
+  }
+
+  // Giro d'Italia (default)
+  return [
+    { key: "gc",        color: "text-pink-400 border-pink-500/30 bg-pink-500/10",       activeRing: "ring-pink-500/50",    label: "Maglia Rosa",      tableLabel: "Samlet klassement", emoji: "🩷", valueLabel: "Tid",   description: "Den lyserøde trøje gives til rytteren med den laveste samlede tid. Den er det ultimative symbol på sejr i Giro d'Italia." },
+    { key: "points",    color: "text-purple-400 border-purple-500/30 bg-purple-500/10", activeRing: "ring-purple-500/50",  label: "Ciclamino",        tableLabel: "Point-klassement",  emoji: "🟣", valueLabel: "Point", description: "Den blomsterfarvede trøje gives til rytteren med flest sprintpoints fra etapemål og mellemspurter." },
+    { key: "mountains", color: "text-blue-400 border-blue-500/30 bg-blue-500/10",       activeRing: "ring-blue-500/50",    label: "Maglia Azzurra",   tableLabel: "Bjerg-klassement",  emoji: "🔵", valueLabel: "Point", description: "Den blå bjergtrøje gives til rytteren med flest point fra kategoriserede stigninger i løbet." },
+    { key: "youth",     color: "text-slate-200 border-slate-400/30 bg-slate-500/10",    activeRing: "ring-slate-400/50",   label: "Maglia Bianca",    tableLabel: "Ungdomsklassement", emoji: "⬜", valueLabel: "Tid",   description: "Den hvide trøje gives til den bedst placerede rytter under 26 år i det samlede klassement." },
+  ] as const;
+}
 
 export default function SpoilerSection({
   afterStage,
@@ -103,10 +102,13 @@ export default function SpoilerSection({
   pointsStandings,
   mountainsStandings,
   youthStandings,
+  raceSlug,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [tooltip, setTooltip] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string>("gc");
+
+  const JERSEY_CONFIG = getJerseyConfig(raceSlug);
 
   const standingsMap: Record<string, GCEntry[] | ClassifEntry[]> = {
     gc: gcStandings,
