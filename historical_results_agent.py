@@ -122,35 +122,35 @@ def fetch(sess: requests.Session, url: str, retries: int = 3) -> str:
 
 def get_rider_id(pcs_slug: str, name: str) -> str | None:
     """Slå rytter op i DB — prøv PCS-slug, derefter omvendt slug, derefter navn."""
-    # Direkte PCS slug
-    res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/riders?slug=eq.{pcs_slug}&select=id&limit=1",
-        headers=AUTH,
-    )
-    data = res.json()
-    if res.ok and data:
-        return data[0]["id"]
-
-    # PCS: firstname-lastname → DB: lastname-firstname
-    parts = pcs_slug.split("-")
-    if len(parts) >= 2:
-        db_slug = "-".join(parts[1:] + [parts[0]])
-        res2 = requests.get(
-            f"{SUPABASE_URL}/rest/v1/riders?slug=eq.{db_slug}&select=id&limit=1",
-            headers=AUTH,
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/riders?slug=eq.{pcs_slug}&select=id&limit=1",
+            headers=AUTH, timeout=15,
         )
-        data2 = res2.json()
-        if res2.ok and data2:
-            return data2[0]["id"]
+        data = res.json()
+        if res.ok and data:
+            return data[0]["id"]
 
-    # Navn-fallback
-    clean = requests.utils.quote(name.strip().upper())
-    res3 = requests.get(
-        f"{SUPABASE_URL}/rest/v1/riders?name=ilike.{clean}&select=id&limit=1",
-        headers=AUTH,
-    )
-    data3 = res3.json()
-    return data3[0]["id"] if res3.ok and data3 else None
+        parts = pcs_slug.split("-")
+        if len(parts) >= 2:
+            db_slug = "-".join(parts[1:] + [parts[0]])
+            res2 = requests.get(
+                f"{SUPABASE_URL}/rest/v1/riders?slug=eq.{db_slug}&select=id&limit=1",
+                headers=AUTH, timeout=15,
+            )
+            data2 = res2.json()
+            if res2.ok and data2:
+                return data2[0]["id"]
+
+        clean = requests.utils.quote(name.strip().upper())
+        res3 = requests.get(
+            f"{SUPABASE_URL}/rest/v1/riders?name=ilike.{clean}&select=id&limit=1",
+            headers=AUTH, timeout=15,
+        )
+        data3 = res3.json()
+        return data3[0]["id"] if res3.ok and data3 else None
+    except requests.exceptions.RequestException:
+        return None
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
@@ -177,7 +177,7 @@ def get_historical_races(year: int | None, race_slug: str | None) -> list:
             f"&select=id,name,slug,pcs_url,start_date,end_date,race_type"
             f"&order=start_date.asc&limit=1000"
         )
-    res = requests.get(url, headers=AUTH)
+    res = requests.get(url, headers=AUTH, timeout=15)
     return res.json() if res.ok and isinstance(res.json(), list) else []
 
 
@@ -185,7 +185,7 @@ def has_gc(race_id: str) -> bool:
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/classifications"
         f"?race_id=eq.{race_id}&classification_type=eq.gc&limit=1",
-        headers=AUTH,
+        headers=AUTH, timeout=15,
     )
     data = res.json()
     return bool(res.ok and data)
@@ -195,7 +195,7 @@ def get_or_create_stage(race_id: str, sn: int, date: str | None = None) -> str |
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}&stage_number=eq.{sn}&select=id&limit=1",
-        headers=AUTH,
+        headers=AUTH, timeout=15,
     )
     data = res.json()
     if res.ok and data:
@@ -214,6 +214,7 @@ def get_or_create_stage(race_id: str, sn: int, date: str | None = None) -> str |
         f"{SUPABASE_URL}/rest/v1/stages",
         json=payload,
         headers={**DB, "Prefer": "resolution=ignore-duplicates,return=representation"},
+        timeout=15,
     )
     if cr.ok and cr.text and cr.text not in ("[]", ""):
         rows = cr.json()
@@ -226,7 +227,7 @@ def get_max_stage(race_id: str) -> int:
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}&select=stage_number&order=stage_number.desc&limit=1",
-        headers=AUTH,
+        headers=AUTH, timeout=15,
     )
     data = res.json()
     return data[0]["stage_number"] if res.ok and data else 1
@@ -237,7 +238,7 @@ def save_gc(race_id: str, after_stage: int, standings: list) -> int:
     requests.delete(
         f"{SUPABASE_URL}/rest/v1/classifications"
         f"?race_id=eq.{race_id}&classification_type=eq.gc",
-        headers=DB,
+        headers=DB, timeout=15,
     )
     rows, matched = [], 0
     for e in standings:
@@ -258,6 +259,7 @@ def save_gc(race_id: str, after_stage: int, standings: list) -> int:
             f"{SUPABASE_URL}/rest/v1/classifications",
             json=rows,
             headers={**DB, "Prefer": "resolution=ignore-duplicates,return=minimal"},
+            timeout=15,
         )
     return matched
 
@@ -270,12 +272,13 @@ def save_stage_winner(race_id: str, stage_id: str, pcs_slug: str, name: str) -> 
     requests.delete(
         f"{SUPABASE_URL}/rest/v1/results"
         f"?race_id=eq.{race_id}&stage_id=eq.{stage_id}&position=eq.1",
-        headers=DB,
+        headers=DB, timeout=15,
     )
     r = requests.post(
         f"{SUPABASE_URL}/rest/v1/results",
         json=[{"race_id": race_id, "stage_id": stage_id, "rider_id": rid, "position": 1}],
         headers={**DB, "Prefer": "resolution=ignore-duplicates,return=minimal"},
+        timeout=15,
     )
     return r.ok
 
