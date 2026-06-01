@@ -33,13 +33,89 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 AUTH  = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
 DB    = {**AUTH, "Content-Type": "application/json", "Prefer": "return=minimal"}
 
-DELAY = 2.0   # sekunder mellem PCS-sideindlæsninger
-TOP_N = 20    # gem top N i GC-klassementet
+DELAY   = 2.5  # sekunder mellem PCS-sideindlæsninger
+TOP_N   = 20   # gem top N i GC-klassementet
+PCS_BASE = "https://www.procyclingstats.com"
 
 MONTHS_EN = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
+
+
+# ── Cloudflare-safe session ───────────────────────────────────────────────────
+
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
+
+
+def _playwright_get_cookies(url: str) -> dict:
+    """Brug Playwright én gang til at skaffe cf_clearance cookie."""
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(headless=True, channel="chrome")
+        except Exception:
+            browser = p.chromium.launch(headless=True)
+        ctx = browser.new_context(user_agent=UA, viewport={"width": 1280, "height": 800})
+        pw = ctx.new_page()
+        pw.goto(url, wait_until="domcontentloaded", timeout=45_000)
+        for _ in range(25):
+            title = pw.title().lower()
+            if "øjeblik" not in title and "moment" not in title and "cloudflare" not in title:
+                break
+            time.sleep(1.5)
+        time.sleep(DELAY)
+        html = pw.content()
+        cookies = {c["name"]: c["value"] for c in ctx.cookies("https://www.procyclingstats.com")}
+        ctx.close()
+        browser.close()
+    return cookies, html
+
+
+def make_session(seed_url: str) -> tuple:
+    """Opret requests.Session med gyldige Cloudflare-cookies. Returnerer (session, seed_html)."""
+    print(f"  [Playwright] Henter cookies fra {seed_url}")
+    cookies, html = _playwright_get_cookies(seed_url)
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": UA, "Referer": "https://www.procyclingstats.com/"})
+    for name, val in cookies.items():
+        sess.cookies.set(name, val, domain="www.procyclingstats.com")
+    return sess, html
+
+
+def fetch(sess: requests.Session, url: str, retries: int = 3) -> str:
+    """Hent en PCS-side med requests. Håndterer timeouts og Cloudflare."""
+    for attempt in range(retries + 1):
+        try:
+            r = sess.get(url, timeout=30)
+            html = r.text
+        except requests.exceptions.Timeout:
+            if attempt < retries:
+                wait = 5 * (attempt + 1)
+                print(f"  [timeout] {url} — venter {wait}s og prøver igen ...")
+                time.sleep(wait)
+                continue
+            print(f"  [timeout] Gav op efter {retries} forsøg: {url}")
+            return ""
+        except requests.exceptions.RequestException as e:
+            print(f"  [fejl] {e}")
+            return ""
+
+        soup = BeautifulSoup(html, "html.parser")
+        title = (soup.title.get_text() if soup.title else "").lower()
+        if "øjeblik" not in title and "moment" not in title and "cloudflare" not in title:
+            time.sleep(0.5)
+            return html
+        if attempt < retries:
+            print(f"  [CF] Cloudflare på {url} — fornyer session ...")
+            new_cookies, _ = _playwright_get_cookies(url)
+            for name, val in new_cookies.items():
+                sess.cookies.set(name, val, domain="www.procyclingstats.com")
+            time.sleep(DELAY)
+    print(f"  [CF] Cloudflare ikke løst for {url}")
+    return html
 
 
 # ── Rider lookup ──────────────────────────────────────────────────────────────
@@ -232,20 +308,20 @@ def scrape_gc(html: str) -> list:
         if len(rows) < 3:
             continue
 
-        # Tjek at første datarække har position 1
-        is_gc = False
-        for row in rows[1:5]:
+        # Find startrækken der har position=1 (kan være row 0 eller 1 afhængig af header)
+        start_idx = None
+        for idx, row in enumerate(rows[:6]):
             tds = row.find_all("td", recursive=False)
             try:
                 if int(tds[0].get_text(strip=True)) == 1:
-                    is_gc = True
+                    start_idx = idx
                     break
             except (ValueError, IndexError):
                 pass
-        if not is_gc:
+        if start_idx is None:
             continue
 
-        for row in rows[1:TOP_N + 1]:
+        for row in rows[start_idx:start_idx + TOP_N]:
             tds = row.find_all("td", recursive=False)
             try:
                 pos = int(tds[0].get_text(strip=True))
@@ -281,63 +357,50 @@ def scrape_gc(html: str) -> list:
     return standings
 
 
-def scrape_stage_winners(html: str, year: int) -> list:
+def collect_stage_links(html: str, pcs_url_base: str, year: int) -> list[tuple[int, str]]:
     """
-    Udtræk etapevindere fra PCS løb-oversigtsside.
-    Returnerer [{stage_number, pcs_slug, name, date}].
+    Udtræk etape-URLs fra løb-oversigtsside.
+    Returnerer [(stage_number, full_url)] sorteret stigende.
     """
     soup = BeautifulSoup(html, "html.parser")
-    seen, winners = set(), []
-
-    stage_re = re.compile(rf"/race/[^/]+/{year}/stage-(\d+)")
-
-    for row in soup.find_all("tr"):
-        # Find etape-link
-        a_stage = row.find("a", href=stage_re)
-        if not a_stage:
-            continue
-        m = stage_re.search(a_stage["href"])
-        if not m:
-            continue
-        sn = int(m.group(1))
-        if sn in seen:
-            continue
-
-        # Find vinder-link
-        a_rider = row.find("a", href=re.compile(r"^/?rider/"))
-        if not a_rider:
-            continue
-        pcs_slug = a_rider["href"].lstrip("/").replace("rider/", "").strip("/")
-        name = a_rider.get_text(separator=" ", strip=True).upper()
-
-        # Dato
-        date_str = None
-        row_text = row.get_text(" ")
-        dm = re.search(
-            r"(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-            r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-            r"Nov(?:ember)?|Dec(?:ember)?)",
-            row_text, re.IGNORECASE,
-        )
-        if dm:
-            day = int(dm.group(1))
-            mon_key = dm.group(2).lower()[:3]
-            mon = MONTHS_EN.get(mon_key, 0)
-            if mon:
-                date_str = f"{year}-{mon:02d}-{day:02d}"
-
-        seen.add(sn)
-        winners.append({
-            "stage_number": sn,
-            "pcs_slug":     pcs_slug,
-            "name":         name,
-            "date":         date_str,
-        })
-
-    return sorted(winners, key=lambda x: x["stage_number"])
+    stage_re = re.compile(rf"race/[^/]+/{year}/stage-(\d+)$")
+    seen = {}
+    for a in soup.find_all("a", href=True):
+        m = stage_re.search(a["href"].strip("/"))
+        if m:
+            sn = int(m.group(1))
+            if sn not in seen:
+                href = a["href"].strip()
+                full = href if href.startswith("http") else f"{PCS_BASE}/{href.lstrip('/')}"
+                seen[sn] = full
+    return sorted(seen.items())
 
 
-def process_race(race: dict, pw, force: bool) -> dict:
+def scrape_winner_from_stage_page(html: str) -> tuple[str, str] | None:
+    """
+    Udtræk position-1 rytter fra en enkelt etapeside.
+    Returnerer (pcs_slug, name) eller None.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    rider_re = re.compile(r"^/?rider/")
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        for row in rows[:6]:
+            tds = row.find_all("td", recursive=False)
+            try:
+                if int(tds[0].get_text(strip=True)) != 1:
+                    continue
+            except (ValueError, IndexError):
+                continue
+            a = row.find("a", href=rider_re)
+            if a:
+                slug = a["href"].lstrip("/").replace("rider/", "").strip("/")
+                name = a.get_text(separator=" ", strip=True).upper()
+                return slug, name
+    return None
+
+
+def process_race(race: dict, sess: requests.Session, force: bool) -> dict:
     """Behandl ét historisk løb: scraper GC + etapevindere fra PCS."""
     race_id = race["id"]
     pcs_url = (race.get("pcs_url") or "").rstrip("/")
@@ -355,22 +418,16 @@ def process_race(race: dict, pw, force: bool) -> dict:
     result = {"gc": 0, "wins": 0, "skipped": False}
 
     # ── GC ────────────────────────────────────────────────────────────────────
-    # Enkeltdagsløb bruger /result; etapeløb bruger /gc
     gc_url = f"{pcs_url}/result" if is_one_day else f"{pcs_url}/gc"
     print(f"  GC: {gc_url}")
 
-    pw.goto(gc_url, wait_until="networkidle", timeout=35_000)
-    time.sleep(DELAY)
-    gc_html = pw.content()
+    gc_html = fetch(sess, gc_url)
     standings = scrape_gc(gc_html)
 
     if not standings and not is_one_day:
-        # Fallback: prøv /result
         result_url = f"{pcs_url}/result"
         print(f"  GC tom — prøver {result_url}")
-        pw.goto(result_url, wait_until="networkidle", timeout=35_000)
-        time.sleep(DELAY)
-        standings = scrape_gc(pw.content())
+        standings = scrape_gc(fetch(sess, result_url))
 
     if standings:
         after_stage = get_max_stage(race_id) if not is_one_day else 1
@@ -386,19 +443,25 @@ def process_race(race: dict, pw, force: bool) -> dict:
     # ── Etapevindere (kun etapeløb) ───────────────────────────────────────────
     if not is_one_day:
         print(f"  Etapevindere: {pcs_url}")
-        pw.goto(pcs_url, wait_until="networkidle", timeout=35_000)
-        time.sleep(DELAY)
-        overview_html = pw.content()
-
-        winners = scrape_stage_winners(overview_html, year)
+        overview_html = fetch(sess, pcs_url)
+        stage_links = collect_stage_links(overview_html, pcs_url, year)
         stage_wins = 0
-        for w in winners:
-            sid = get_or_create_stage(race_id, w["stage_number"], w.get("date"))
-            if sid and save_stage_winner(race_id, sid, w["pcs_slug"], w["name"]):
+
+        for sn, stage_url in stage_links:
+            stage_html = fetch(sess, stage_url)
+            winner = scrape_winner_from_stage_page(stage_html)
+            if not winner:
+                continue
+            pcs_slug, name = winner
+            sid = get_or_create_stage(race_id, sn)
+            if sid and save_stage_winner(race_id, sid, pcs_slug, name):
                 stage_wins += 1
+
         result["wins"] = stage_wins
         if stage_wins:
             print(f"  -> {stage_wins} etapevindere gemt")
+        else:
+            print(f"  -> Ingen etapevindere ({len(stage_links)} etaper fundet)")
 
     return result
 
@@ -417,26 +480,20 @@ def run(race_slug: str | None, year: int | None, force: bool) -> None:
 
     total_gc = total_wins = total_skipped = 0
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        pw = browser.new_page()
-        pw.set_extra_http_headers({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
+    # Bootstrap: Playwright henter cf_clearance én gang, derefter bruges requests
+    seed_url = races[0]["pcs_url"].rstrip("/") + ("/gc" if races[0].get("race_type") != "one_day" else "/result")
+    sess, seed_html = make_session(seed_url)
 
-        for i, race in enumerate(races, 1):
-            print(f"[{i}/{len(races)}] {race['name']} ({race['start_date'][:4]})")
-            res = process_race(race, pw, force)
+    # Behandl første løb med den allerede hentede HTML
+    for i, race in enumerate(races, 1):
+        print(f"[{i}/{len(races)}] {race['name']} ({race['start_date'][:4]})")
+        res = process_race(race, sess, force)
 
-            if res["skipped"]:
-                total_skipped += 1
-            else:
-                total_gc   += res["gc"]
-                total_wins += res["wins"]
-
-            time.sleep(DELAY)
-
-        browser.close()
+        if res["skipped"]:
+            total_skipped += 1
+        else:
+            total_gc   += res["gc"]
+            total_wins += res["wins"]
 
     print(f"\nFærdig:")
     print(f"  GC-poster gemt:     {total_gc}")
