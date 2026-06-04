@@ -731,12 +731,16 @@ class EditFeedbackRequest(BaseModel):
 
 
 @app.patch("/admin/articles/{article_id}/edit")
-def admin_edit_article(article_id: str, body: EditFeedbackRequest, request: Request):
+async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request: Request):
     _require_admin(request)
     import json
     import re
     from datetime import datetime, timezone
-    from anthropic import Anthropic
+    from anthropic import AsyncAnthropic, APITimeoutError, AuthenticationError, APIError
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY ikke sat i Railway — tilføj den under Variables")
 
     # Hent eksisterende artikel
     fetch = requests.get(
@@ -747,8 +751,6 @@ def admin_edit_article(article_id: str, body: EditFeedbackRequest, request: Requ
         raise HTTPException(status_code=404, detail="Article not found")
     article = fetch.json()[0]
 
-    # Bed Claude om at rette artiklen
-    client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
     prompt = (
         f"Ret følgende artikel baseret på denne feedback fra redaktøren:\n\n"
         f"FEEDBACK: {body.feedback}\n\n"
@@ -757,11 +759,22 @@ def admin_edit_article(article_id: str, body: EditFeedbackRequest, request: Requ
         "Returner KUN dette JSON (ingen markdown-blokke):\n"
         '{"title": "...", "content": "..."}'
     )
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
+
+    try:
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=25.0,
+        )
+    except APITimeoutError:
+        raise HTTPException(status_code=504, detail="Claude API timeout (>25s) — prøv igen")
+    except AuthenticationError:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY er ugyldig")
+    except APIError as e:
+        raise HTTPException(status_code=503, detail=f"Claude API fejl: {e.message[:120]}")
+
     text = resp.content[0].text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)

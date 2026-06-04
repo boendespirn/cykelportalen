@@ -151,10 +151,15 @@ export default function AdminPage() {
         setArticles((prev) => prev.filter((a) => a.id !== id));
         setFeedbackOpen(null);
       } else {
-        setEditError("Fejl — prøv igen");
+        let msg = "Fejl — prøv igen";
+        try {
+          const err = await res.json();
+          if (err.detail) msg = err.detail;
+        } catch {}
+        setEditError(msg);
       }
     } catch {
-      setEditError("Netværksfejl");
+      setEditError("Netværksfejl — tjek at Railway kører");
     } finally {
       setEditLoading(null);
     }
