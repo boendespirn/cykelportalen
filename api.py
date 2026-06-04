@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import date
@@ -693,8 +693,37 @@ def admin_get_articles(request: Request, status: str = "draft", limit: int = 50)
     return requests.get(url, headers=get_headers()).json()
 
 
+def _get_article_for_fb(article_id: str) -> dict | None:
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?id=eq.{article_id}&select=slug,title,category,excerpt,image_url&limit=1",
+        headers=get_headers(),
+    )
+    data = res.json()
+    return data[0] if res.ok and data else None
+
+
+def _fb_task(article_id: str) -> None:
+    from fb_article_image import generate_and_post
+    art = _get_article_for_fb(article_id)
+    if not art:
+        return
+    generate_and_post(
+        article_id=article_id,
+        slug=art["slug"],
+        title=art["title"],
+        category=art.get("category", "generelt"),
+        excerpt=art.get("excerpt"),
+        existing_image_url=art.get("image_url"),
+        sb_url=SUPABASE_URL,
+        sb_key=SUPABASE_SERVICE_ROLE_KEY,
+        meta_token=os.getenv("META_PAGE_ACCESS_TOKEN", ""),
+        page_id=os.getenv("META_PAGE_ID", ""),
+    )
+
+
 @app.patch("/admin/articles/{article_id}/approve")
-def admin_approve_article(article_id: str, request: Request):
+def admin_approve_article(article_id: str, request: Request, background_tasks: BackgroundTasks):
     _require_admin(request)
     from datetime import datetime, timezone
     res = requests.patch(
@@ -702,6 +731,8 @@ def admin_approve_article(article_id: str, request: Request):
         json={"status": "published", "published_at": datetime.now(timezone.utc).isoformat()},
         headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
     )
+    if res.ok:
+        background_tasks.add_task(_fb_task, article_id)
     return {"ok": res.ok}
 
 
@@ -731,7 +762,7 @@ class EditFeedbackRequest(BaseModel):
 
 
 @app.patch("/admin/articles/{article_id}/edit")
-async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request: Request):
+async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request: Request, background_tasks: BackgroundTasks):
     _require_admin(request)
     import json
     import re
@@ -794,6 +825,8 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
         },
         headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
     )
+    if patch.ok:
+        background_tasks.add_task(_fb_task, article_id)
     return {"ok": patch.ok}
 
 
