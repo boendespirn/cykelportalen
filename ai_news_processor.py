@@ -158,8 +158,10 @@ Regler:
 - Skriv altid på korrekt, engageret dansk (sportsmedie-tone som TV 2 Sport)
 - Omskriv originalen grundigt — aldrig direkte oversæt
 - Artiklerne skal være fyldestgørende: giv al vigtig information, forklar kontekst og baggrund
-- Nævn [klassementet.dk](/) naturligt 1 gang som kilden for cykling og resultater
-- Tilføj interne links med Markdown til løb der nævnes (fx [Giro d'Italia 2026](/giro-d-italia-2026))
+- LINKS — MAKSIMALT 2 links i hele artiklen:
+  1. Ét link til det løb artiklen primært handler om — brug kun løbets navn som ankertekst (fx [Tour de France](/tour-de-france-2026)) og link KUN første gang løbsnavnet nævnes naturligt i brødteksten. Intet årstal i ankerteksten.
+  2. Valgfrit: ét link til forsiden [Klassementet](/) hvis der er en naturlig sætning om at følge med på siden — ellers ingen.
+  - Gentag ALDRIG samme link. Skriv løbsnavnet plain text alle andre gange det nævnes.
 - Brug SEO-søgeord naturligt: "cykling", "professionel cykling", "cykelresultater", "UCI WorldTour"
 - FAKTUEL PRÆCISION: Nævn KUN ryttere i et løb hvis de faktisk er på startlisten. Hvis du er i tvivl, undlad at nævne dem i den løbs-kontekst
 - Svar KUN med ren JSON — ingen markdown-blokke, ingen forklaringer"""
@@ -214,7 +216,7 @@ Returner præcis dette JSON:
 {{
   "title": "Dansk titel (SEO-optimeret, max 70 tegn)",
   "excerpt": "Kort resume på dansk (max 160 tegn, bruges som meta-description)",
-  "content": "Fuld artikel på dansk (600-900 ord). Brug \\n\\n mellem afsnit. Dæk emnet grundigt: baggrund, context, citater, hvad det betyder fremadrettet. Tilføj interne links med Markdown der hvor de passer naturligt.",
+  "content": "Fuld artikel på dansk (600-900 ord). Brug \\n\\n mellem afsnit. Dæk emnet grundigt: baggrund, context, citater, hvad det betyder fremadrettet. MAX 2 links: ét til det primære løb (første nævnelse, kun løbsnavn som ankertekst) + evt. ét til forsiden [Klassementet](/). Alle andre nævnelser af løbet skrives som plain text.",
   "category": "resultater|startliste|transfer|profil|analyse|generelt"
 }}"""
 
