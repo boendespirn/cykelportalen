@@ -18,13 +18,21 @@ export const metadata: Metadata = {
   verification: {
     google: "KS9dcw2BBbQ_zhT2_YPgVjXgZiWXeOv5E8_5OxIYbXs",
   },
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: "/favicon.svg",
+  },
   openGraph: {
     siteName: "Klassementet",
     locale: "da_DK",
     type: "website",
+    images: [{ url: "/social-cover.png", width: 1200, height: 630 }],
   },
   twitter: {
     card: "summary_large_image",
+    images: ["/social-cover.png"],
   },
   alternates: {
     types: {
@@ -39,11 +47,13 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="min-h-full flex flex-col bg-slate-950 text-slate-100 antialiased">
         <nav className="border-b border-slate-800/60 bg-slate-950/95 backdrop-blur-sm sticky top-0 z-20">
           <div className="mx-auto max-w-5xl px-6 h-14 flex items-center justify-between">
-            <Link
-              href="/"
-              className="font-display text-xl tracking-widest text-emerald-400 hover:text-emerald-300 transition-colors"
-            >
-              Klassementet
+            <Link href="/" className="flex items-center gap-3 group">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-icon.svg" alt="" width={28} height={28} className="opacity-80 group-hover:opacity-100 transition-opacity" />
+              <span className="font-display text-xl tracking-widest group-hover:text-emerald-300 transition-colors">
+                <span className="text-emerald-400">K</span>
+                <span className="text-white">lassementet</span>
+              </span>
             </Link>
             <NavLinks />
           </div>

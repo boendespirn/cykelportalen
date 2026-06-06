@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Outer tire ring -->
+  <circle cx="100" cy="100" r="84" fill="none" stroke="#34d399" stroke-width="9"/>
+  <!-- Inner rim ring -->
+  <circle cx="100" cy="100" r="56" fill="none" stroke="#34d399" stroke-width="2.5" opacity="0.35"/>
+  <!-- 12 spokes at 30° intervals -->
+  <g stroke="#34d399" stroke-width="2.5" opacity="0.55">
+    <line x1="100" y1="100" x2="184" y2="100"/>
+    <line x1="100" y1="100" x2="172.7" y2="142"/>
+    <line x1="100" y1="100" x2="142" y2="172.7"/>
+    <line x1="100" y1="100" x2="100" y2="184"/>
+    <line x1="100" y1="100" x2="58" y2="172.7"/>
+    <line x1="100" y1="100" x2="27.3" y2="142"/>
+    <line x1="100" y1="100" x2="16" y2="100"/>
+    <line x1="100" y1="100" x2="27.3" y2="58"/>
+    <line x1="100" y1="100" x2="58" y2="27.3"/>
+    <line x1="100" y1="100" x2="100" y2="16"/>
+    <line x1="100" y1="100" x2="142" y2="27.3"/>
+    <line x1="100" y1="100" x2="172.7" y2="58"/>
+  </g>
+  <!-- Hub -->
+  <circle cx="100" cy="100" r="12" fill="#34d399"/>
+</svg>

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 370 72">
+  <defs>
+    <style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&amp;display=swap');</style>
+  </defs>
+
+  <!-- Wheel icon centered at 36,36 -->
+  <circle cx="36" cy="36" r="31" fill="none" stroke="#34d399" stroke-width="4"/>
+  <circle cx="36" cy="36" r="20" fill="none" stroke="#34d399" stroke-width="1.5" opacity="0.35"/>
+  <g stroke="#34d399" stroke-width="1.2" opacity="0.55">
+    <line x1="36" y1="36" x2="67"  y2="36"/>
+    <line x1="36" y1="36" x2="62.8" y2="51.5"/>
+    <line x1="36" y1="36" x2="51.5" y2="62.8"/>
+    <line x1="36" y1="36" x2="36"  y2="67"/>
+    <line x1="36" y1="36" x2="20.5" y2="62.8"/>
+    <line x1="36" y1="36" x2="9.2"  y2="51.5"/>
+    <line x1="36" y1="36" x2="5"   y2="36"/>
+    <line x1="36" y1="36" x2="9.2"  y2="20.5"/>
+    <line x1="36" y1="36" x2="20.5" y2="9.2"/>
+    <line x1="36" y1="36" x2="36"  y2="5"/>
+    <line x1="36" y1="36" x2="51.5" y2="9.2"/>
+    <line x1="36" y1="36" x2="62.8" y2="20.5"/>
+  </g>
+  <circle cx="36" cy="36" r="4.5" fill="#34d399"/>
+
+  <!-- Wordmark: emerald K + white LASSEMENTET -->
+  <text x="84" y="46"
+    font-family="'Bebas Neue', Impact, 'Arial Narrow', sans-serif"
+    font-size="27" letter-spacing="4" fill="#34d399">K</text>
+  <text x="101" y="46"
+    font-family="'Bebas Neue', Impact, 'Arial Narrow', sans-serif"
+    font-size="27" letter-spacing="4" fill="white">LASSEMENTET</text>
+</svg>
