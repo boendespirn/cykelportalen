@@ -645,14 +645,26 @@ def get_rider_by_slug(slug: str):
 # --- News ---
 
 @app.get("/news")
-def get_news(advertorial: bool = False, limit: int = 20, offset: int = 0):
-    url = (
-        f"{SUPABASE_URL}/rest/v1/news_articles"
+def get_news(advertorial: bool = False, limit: int = 20, offset: int = 0, race_slug: str = None):
+    filters = (
         f"?is_advertorial=eq.{str(advertorial).lower()}"
         f"&or=(status.eq.published,status.is.null)"
-        f"&select=id,slug,title,excerpt,category,author,image_url,published_at,race_id,races(name,slug)"
-        f"&order=published_at.desc"
-        f"&limit={limit}&offset={offset}"
+    )
+    if race_slug:
+        # Join through races to filter by slug
+        filters += f"&races.slug=eq.{race_slug}"
+    url = (
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        + filters
+        + f"&select=id,slug,title,excerpt,category,author,image_url,published_at,race_id,races!inner(name,slug)"
+        + f"&order=published_at.desc"
+        + f"&limit={limit}&offset={offset}"
+    ) if race_slug else (
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        + filters
+        + f"&select=id,slug,title,excerpt,category,author,image_url,published_at,race_id,races(name,slug)"
+        + f"&order=published_at.desc"
+        + f"&limit={limit}&offset={offset}"
     )
     return requests.get(url, headers=get_headers()).json()
 

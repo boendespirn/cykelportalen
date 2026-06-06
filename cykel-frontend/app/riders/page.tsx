@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -14,7 +14,7 @@ type Rider = {
 
 async function getRiders(): Promise<Rider[]> {
   try {
-    const res = await fetch(`${API_BASE}/riders`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/riders`, { next: { revalidate: 3600 } });
     if (!res.ok) return [];
     return res.json();
   } catch {

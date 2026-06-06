@@ -26,6 +26,11 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
   },
+  alternates: {
+    types: {
+      "application/rss+xml": "https://klassementet.dk/api/rss",
+    },
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -47,7 +52,36 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <main className="flex-1">{children}</main>
 
         <footer className="border-t border-slate-800/60 py-8 text-center text-xs text-slate-600">
-          Klassementet · Data fra UCI, ProCyclingStats og VeloWire
+          <div className="flex items-center justify-center gap-5 mb-3">
+            <Link href="/om" className="hover:text-slate-400 transition-colors">Om os</Link>
+            <a
+              href="https://www.facebook.com/profile.php?id=61576574048561"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-slate-400 transition-colors"
+              aria-label="Facebook"
+            >
+              Facebook
+            </a>
+            <a
+              href="https://www.instagram.com/klassementet"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-slate-400 transition-colors"
+              aria-label="Instagram"
+            >
+              Instagram
+            </a>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href="/api/rss"
+              className="hover:text-slate-400 transition-colors"
+              aria-label="RSS feed"
+            >
+              RSS
+            </a>
+          </div>
+          <p>Klassementet · Data fra UCI, ProCyclingStats og VeloWire</p>
         </footer>
       </body>
     </html>

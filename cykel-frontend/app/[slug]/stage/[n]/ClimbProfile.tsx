@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 
 type GradientSection = { km: number; gradient: number };
@@ -280,8 +281,9 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
             onClick={() => setLightboxUrl(elevationImageUrl)}
             aria-label="Åbn højdeprofil i fuld størrelse"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={elevationImageUrl} alt="Højdeprofil" className="w-full" />
+            <div className="relative w-full h-32">
+              <Image src={elevationImageUrl} alt="Højdeprofil" fill sizes="(max-width: 896px) 100vw, 896px" className="object-cover object-bottom" />
+            </div>
           </button>
         )}
 
@@ -329,12 +331,15 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
                 onClick={() => setLightboxUrl(activeClimb.profile_image_url!)}
                 aria-label={`Åbn profil for ${activeClimb.name}`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={activeClimb.profile_image_url}
-                  alt={activeClimb.name}
-                  className="w-full rounded-lg"
-                />
+                <div className="relative w-full h-40">
+                  <Image
+                    src={activeClimb.profile_image_url}
+                    alt={activeClimb.name}
+                    fill
+                    sizes="(max-width: 896px) 100vw, 500px"
+                    className="object-contain rounded-lg"
+                  />
+                </div>
               </button>
             ) : activeClimb.gradient_sections && activeClimb.gradient_sections.length > 0 ? (
               <>

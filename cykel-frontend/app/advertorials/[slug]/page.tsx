@@ -1,5 +1,6 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
+import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -67,8 +68,9 @@ export default async function AdvertorialPage(props: { params: Promise<{ slug: s
       </div>
 
       {article.image_url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={article.image_url} alt="" className="w-full rounded-xl mb-8 border border-slate-800" />
+        <div className="relative w-full h-64 sm:h-96 rounded-xl mb-8 border border-slate-800 overflow-hidden">
+          <Image src={article.image_url} alt="" fill sizes="(max-width: 768px) 100vw, 768px" className="object-cover object-top" priority />
+        </div>
       )}
 
       {article.excerpt && (

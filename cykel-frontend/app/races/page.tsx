@@ -1,5 +1,6 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
+import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { API_BASE } from "@/lib/api";
@@ -38,7 +39,7 @@ type OngoingRace = Race & {
 
 async function getOngoingRaces(): Promise<OngoingRace[]> {
   try {
-    const res = await fetch(`${API_BASE}/ongoing-races`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/ongoing-races`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -48,7 +49,7 @@ async function getOngoingRaces(): Promise<OngoingRace[]> {
 
 async function getUpcomingRaces(): Promise<Race[]> {
   try {
-    const res = await fetch(`${API_BASE}/upcoming-races`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/upcoming-races`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -172,11 +173,13 @@ export default async function RacesPage() {
                     {ts ? (
                       <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
                         {ts.elevation_image_url && (
-                          <div className="relative">
-                            <img
+                          <div className="relative h-20">
+                            <Image
                               src={ts.elevation_image_url}
                               alt={`Højdeprofil etape ${ts.stage_number}`}
-                              className="w-full h-20 object-cover object-bottom"
+                              fill
+                              sizes="(max-width: 896px) 100vw, 896px"
+                              className="object-cover object-bottom"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent" />
                           </div>

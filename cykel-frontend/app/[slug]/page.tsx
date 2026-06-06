@@ -1,6 +1,7 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import SpoilerSection from "./SpoilerSection";
@@ -71,7 +72,7 @@ type HistoryEntry = {
 
 async function getRace(slug: string): Promise<Race | null> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}`, { next: { revalidate: 60 } });
     const data = await res.json();
     return data?.error ? null : data;
   } catch { return null; }
@@ -79,21 +80,21 @@ async function getRace(slug: string): Promise<Race | null> {
 
 async function getStages(slug: string): Promise<Stage[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/stages`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/stages`, { next: { revalidate: 60 } });
     return res.ok ? res.json() : [];
   } catch { return []; }
 }
 
 async function getStartlist(slug: string): Promise<StartlistEntry[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/startlist`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/startlist`, { next: { revalidate: 60 } });
     return res.ok ? res.json() : [];
   } catch { return []; }
 }
 
 async function getGC(slug: string): Promise<{ after_stage: number; standings: GCEntry[] } | null> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/gc`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/gc`, { next: { revalidate: 60 } });
     if (!res.ok) return null;
     const data = await res.json();
     return Array.isArray(data) && data.length === 0 ? null : data;
@@ -102,7 +103,7 @@ async function getGC(slug: string): Promise<{ after_stage: number; standings: GC
 
 async function getClassification(slug: string, type: string): Promise<{ after_stage: number; standings: ClassifEntry[] } | null> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/classifications/${type}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/classifications/${type}`, { next: { revalidate: 60 } });
     if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data) && data.length === 0) return null;
@@ -112,14 +113,14 @@ async function getClassification(slug: string, type: string): Promise<{ after_st
 
 async function getDnfs(slug: string): Promise<DnfEntry[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/dnfs`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/dnfs`, { next: { revalidate: 60 } });
     return res.ok ? res.json() : [];
   } catch { return []; }
 }
 
 async function getBroadcast(slug: string): Promise<Broadcast[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
@@ -128,7 +129,24 @@ async function getBroadcast(slug: string): Promise<Broadcast[]> {
 
 async function getRaceHistory(slug: string): Promise<HistoryEntry[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/history`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/history`, { next: { revalidate: 60 } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+type RaceArticle = {
+  slug: string;
+  title: string;
+  category: string;
+  published_at: string;
+  image_url: string | null;
+};
+
+async function getRaceNews(slug: string): Promise<RaceArticle[]> {
+  try {
+    const res = await fetch(`${API_BASE}/news?advertorial=false&race_slug=${slug}&limit=6`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
@@ -313,7 +331,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const { slug } = await props.params;
   const today = getToday();
 
-  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, history] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, history, raceNews] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -325,6 +343,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getDnfs(slug),
       getBroadcast(slug),
       getRaceHistory(slug),
+      getRaceNews(slug),
     ]);
 
   if (!race) {
@@ -482,12 +501,13 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
         {/* Elevation profile — full width, prominent */}
         {singleStage?.elevation_image_url && (
-          <div className="mb-8 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+          <div className="relative mb-8 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 h-40">
+            <Image
               src={singleStage.elevation_image_url}
               alt="Højdeprofil"
-              className="w-full"
+              fill
+              sizes="(max-width: 896px) 100vw, 896px"
+              className="object-cover object-bottom"
             />
           </div>
         )}
@@ -613,12 +633,14 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       </Link>
 
       {race.cover_image_url && (
-        <div className="mb-8 -mx-6 sm:mx-0 rounded-none sm:rounded-2xl overflow-hidden border-y sm:border border-slate-800">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+        <div className="relative mb-8 -mx-6 sm:mx-0 rounded-none sm:rounded-2xl overflow-hidden border-y sm:border border-slate-800 h-64 sm:h-96">
+          <Image
             src={race.cover_image_url}
             alt={`${race.name} rutekort`}
-            className="w-full object-cover"
+            fill
+            sizes="(max-width: 896px) 100vw, 896px"
+            className="object-cover"
+            priority
           />
         </div>
       )}
@@ -674,8 +696,15 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 <span className="text-xs font-mono text-slate-600 ml-auto">{heroStage.distance_km} km</span>
               )}
             </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={heroStage.elevation_image_url} alt={`Højdeprofil etape ${heroStage.stage_number}`} className="w-full" />
+            <div className="relative h-32 w-full">
+              <Image
+                src={heroStage.elevation_image_url}
+                alt={`Højdeprofil etape ${heroStage.stage_number}`}
+                fill
+                sizes="(max-width: 896px) 100vw, 896px"
+                className="object-cover object-bottom"
+              />
+            </div>
             {heroStage.start_location && heroStage.finish_location && (
               <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-800">
                 <span className="text-sm text-slate-400">{heroStage.start_location}</span>
@@ -712,8 +741,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                     className="group flex flex-col items-center gap-1.5 text-center">
                     <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-slate-800 group-hover:border-slate-600 transition-colors">
                       {r.photo_url ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={r.photo_url} alt={r.name} className="w-full h-full object-cover object-top" />
+                        <Image src={r.photo_url} alt={r.name} fill sizes="(max-width: 896px) 20vw, 140px" className="object-cover object-top" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-2xl">
                           {flagEmoji(r.nationality)}
@@ -756,8 +784,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                     className="group flex flex-col items-center gap-1.5 text-center">
                     <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-red-900/40 group-hover:border-red-700/40 transition-colors">
                       {r.photo_url ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={r.photo_url} alt={r.name} className="w-full h-full object-cover object-top" />
+                        <Image src={r.photo_url} alt={r.name} fill sizes="(max-width: 896px) 20vw, 140px" className="object-cover object-top" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-2xl">🇩🇰</div>
                       )}
@@ -882,9 +909,8 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                       :               "border-slate-800/80 bg-slate-900/40 hover:border-slate-700"
                     }`}>
                       {stage.elevation_image_url && (
-                        <div className={`w-full bg-slate-950 border-b border-slate-800/60 relative ${isCompleted ? "opacity-50" : ""}`}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={stage.elevation_image_url} alt="" className="w-full h-28 object-cover" />
+                        <div className={`relative w-full h-28 bg-slate-950 border-b border-slate-800/60 ${isCompleted ? "opacity-50" : ""}`}>
+                          <Image src={stage.elevation_image_url} alt="" fill sizes="(max-width: 640px) 100vw, 33vw" className="object-cover" />
                           {isCompleted && (
                             <div className="absolute inset-0 flex items-center justify-center">
                               <svg className="w-5 h-5 text-emerald-500 drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -969,6 +995,47 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 </div>
               );
             })}
+          </div>
+        </section>
+      )}
+
+      {/* ── Nyheder & analyser ─────────────────────────────────────────── */}
+      {raceNews.length > 0 && (
+        <section className="mt-12">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-xs uppercase tracking-[0.25em] text-slate-400 font-medium">
+              Nyheder & analyser
+            </h2>
+            <Link
+              href={`/nyheder`}
+              className="text-xs text-slate-600 hover:text-emerald-400 transition-colors"
+            >
+              Alle nyheder →
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {raceNews.map((article) => (
+              <Link
+                key={article.slug}
+                href={`/nyheder/${article.slug}`}
+                className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-3.5 hover:border-emerald-500/30 hover:bg-slate-900 transition-all duration-150"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-200 group-hover:text-emerald-400 transition-colors leading-snug truncate">
+                    {article.title}
+                  </p>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    {new Date(article.published_at).toLocaleDateString("da-DK", { day: "numeric", month: "short" })}
+                  </p>
+                </div>
+                <svg
+                  className="w-4 h-4 text-slate-700 group-hover:text-emerald-500 flex-shrink-0 transition-colors"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            ))}
           </div>
         </section>
       )}

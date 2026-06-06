@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -13,7 +13,7 @@ type Team = {
 
 async function getTeams(): Promise<Team[]> {
   try {
-    const res = await fetch(`${API_BASE}/teams`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/teams`, { next: { revalidate: 3600 } });
     if (!res.ok) return [];
     return res.json();
   } catch {

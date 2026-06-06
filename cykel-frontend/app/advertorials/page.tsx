@@ -1,5 +1,6 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
+import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -63,8 +64,9 @@ export default async function AdvertorialsPage() {
               className="group flex flex-col rounded-2xl border border-slate-800/80 bg-slate-900/40 overflow-hidden hover:border-slate-700 hover:bg-slate-900 transition-all duration-150"
             >
               {article.image_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={article.image_url} alt="" className="w-full h-44 object-cover" />
+                <div className="relative w-full h-44">
+                  <Image src={article.image_url} alt="" fill sizes="(max-width: 640px) 100vw, 50vw" className="object-cover" />
+                </div>
               ) : (
                 <div className="w-full h-44 bg-slate-800/60 flex items-center justify-center">
                   <span className="text-4xl opacity-20">📰</span>

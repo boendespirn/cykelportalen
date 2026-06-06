@@ -1,5 +1,7 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
+import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -26,7 +28,7 @@ type Rider = {
 
 async function getTeam(slug: string): Promise<Team | null> {
   try {
-    const res = await fetch(`${API_BASE}/teams/${slug}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/teams/${slug}`, { next: { revalidate: 3600 } });
     const data = await res.json();
     if (data?.error) return null;
     return data;
@@ -37,7 +39,7 @@ async function getTeam(slug: string): Promise<Team | null> {
 
 async function getRiders(slug: string): Promise<Rider[]> {
   try {
-    const res = await fetch(`${API_BASE}/teams/${slug}/riders`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/teams/${slug}/riders`, { next: { revalidate: 3600 } });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -74,6 +76,25 @@ const SPECIALITY_ICONS: Record<string, string> = {
   Classics: "🏛",
 };
 
+export async function generateMetadata(
+  props: { params: Promise<{ slug: string }> }
+): Promise<Metadata> {
+  const { slug } = await props.params;
+  const team = await getTeam(slug);
+  if (!team) return { title: "Hold ikke fundet" };
+  const description = team.description
+    ? team.description.slice(0, 155)
+    : `Alt om ${team.name} — ryttere, resultater og holdinfo fra UCI WorldTour.`;
+  return {
+    title: team.name,
+    description,
+    openGraph: {
+      title: `${team.name} | Hold | Klassementet`,
+      description,
+    },
+  };
+}
+
 export default async function TeamPage(props: { params: Promise<{ slug: string }> }) {
   const { slug } = await props.params;
   const [team, riders] = await Promise.all([getTeam(slug), getRiders(slug)]);
@@ -99,8 +120,22 @@ export default async function TeamPage(props: { params: Promise<{ slug: string }
     ...otherRiders.sort((a, b) => (a.uci_ranking ?? 9999) - (b.uci_ranking ?? 9999)),
   ];
 
+  const teamDescription = team.description
+    ? team.description.slice(0, 155)
+    : `Alt om ${team.name} — ryttere, resultater og holdinfo fra UCI WorldTour.`;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SportsOrganization",
+    name: team.name,
+    sport: "Cycling",
+    url: team.website ?? `https://klassementet.dk/teams/${slug}`,
+    foundingDate: team.founded_year?.toString(),
+    description: teamDescription,
+  };
+
   return (
     <div className="mx-auto max-w-5xl px-4 sm:px-6 py-10">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <Link href="/teams" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-10">
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -174,13 +209,14 @@ export default async function TeamPage(props: { params: Promise<{ slug: string }
                 className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-800/60 bg-slate-900/30 hover:border-slate-600 hover:bg-slate-900/60 transition-colors group"
               >
                 {/* Photo or flag */}
-                <div className="flex-shrink-0 w-12 h-12 rounded-full overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center">
+                <div className="relative flex-shrink-0 w-12 h-12 rounded-full overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center">
                   {rider.photo_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <Image
                       src={rider.photo_url}
                       alt={rider.name}
-                      className="w-full h-full object-cover object-top"
+                      fill
+                      sizes="48px"
+                      className="object-cover object-top"
                     />
                   ) : (
                     <span className="text-xl">{flagEmoji(rider.nationality)}</span>

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -73,8 +74,7 @@ function RiderRow({ entry, rank, isPoints }: { entry: Standing; rank: number; is
       {/* Foto eller flag */}
       <div className="relative flex-shrink-0 w-9 h-9">
         {r.photo_url ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={r.photo_url} alt={r.name} className="w-9 h-9 rounded-full object-cover bg-slate-800" />
+          <Image src={r.photo_url} alt={r.name} fill sizes="36px" className="rounded-full object-cover object-top" />
         ) : (
           <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-base">
             {flagEmoji(r.nationality)}

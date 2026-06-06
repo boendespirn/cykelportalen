@@ -1,5 +1,7 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
+import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -63,7 +65,7 @@ type Palmares = {
 
 async function getRider(slug: string): Promise<Rider | null> {
   try {
-    const res = await fetch(`${API_BASE}/riders/${slug}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/riders/${slug}`, { next: { revalidate: 3600 } });
     const data = await res.json();
     return data?.error ? null : data;
   } catch { return null; }
@@ -71,21 +73,21 @@ async function getRider(slug: string): Promise<Rider | null> {
 
 async function getRiderRaces(slug: string): Promise<RiderRace[]> {
   try {
-    const res = await fetch(`${API_BASE}/riders/${slug}/races`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/riders/${slug}/races`, { next: { revalidate: 3600 } });
     return res.ok ? res.json() : [];
   } catch { return []; }
 }
 
 async function getStageWins(slug: string): Promise<StageWin[]> {
   try {
-    const res = await fetch(`${API_BASE}/riders/${slug}/stage-wins`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/riders/${slug}/stage-wins`, { next: { revalidate: 3600 } });
     return res.ok ? res.json() : [];
   } catch { return []; }
 }
 
 async function getPalmares(slug: string): Promise<Palmares> {
   try {
-    const res = await fetch(`${API_BASE}/riders/${slug}/palmares`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/riders/${slug}/palmares`, { next: { revalidate: 3600 } });
     if (!res.ok) return { gc_results: [], stage_wins: [] };
     return res.json();
   } catch { return { gc_results: [], stage_wins: [] }; }
@@ -164,6 +166,28 @@ function StatCell({ label, value, sub }: { label: string; value: React.ReactNode
   );
 }
 
+export async function generateMetadata(
+  props: { params: Promise<{ slug: string }> }
+): Promise<Metadata> {
+  const { slug } = await props.params;
+  const rider = await getRider(slug);
+  if (!rider) return { title: "Rytter ikke fundet" };
+  const description = [
+    rider.speciality,
+    rider.teams?.name,
+    rider.nationality ? `Nationalitet: ${rider.nationality}` : null,
+  ].filter(Boolean).join(" · ");
+  return {
+    title: rider.name,
+    description,
+    openGraph: {
+      title: `${rider.name} | Klassementet`,
+      description,
+      images: rider.photo_url ? [{ url: rider.photo_url }] : [],
+    },
+  };
+}
+
 export default async function RiderPage(props: { params: Promise<{ slug: string }> }) {
   const { slug } = await props.params;
   const [rider, riderRaces, stageWins, palmares] = await Promise.all([
@@ -190,8 +214,20 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
 
   const today = new Date().toISOString().slice(0, 10);
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    name: rider.name,
+    jobTitle: rider.speciality ?? "Professionel cykelrytter",
+    memberOf: rider.teams ? { "@type": "SportsTeam", name: rider.teams.name } : undefined,
+    nationality: rider.nationality ?? undefined,
+    image: rider.photo_url ?? undefined,
+    url: `https://klassementet.dk/riders/${slug}`,
+  };
+
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 py-10">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <Link
         href="/riders"
         className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-8"
@@ -207,11 +243,13 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
         {/* Photo */}
         <div className="flex-shrink-0">
           {rider.photo_url ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
+            <Image
               src={rider.photo_url}
               alt={rider.name}
+              width={192}
+              height={192}
               className="w-40 h-40 sm:w-48 sm:h-48 object-cover object-top rounded-2xl border border-slate-800 bg-slate-900"
+              priority
             />
           ) : (
             <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-2xl border border-slate-800 bg-slate-900 flex items-center justify-center">

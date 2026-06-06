@@ -1,6 +1,7 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
 import ClimbProfile from "./ClimbProfile";
@@ -80,7 +81,7 @@ async function getAllStages(slug: string): Promise<StageNav[]> {
   try {
     const res = await fetch(
       `${API_BASE}/races/${slug}/stages`,
-      { cache: "no-store" }
+      { next: { revalidate: 300 } }
     );
     if (!res.ok) return [];
     return res.json();
@@ -94,7 +95,7 @@ async function getStageDetail(
   try {
     const res = await fetch(
       `${API_BASE}/races/${slug}/stages/${n}`,
-      { cache: "no-store" }
+      { next: { revalidate: 300 } }
     );
     const data = await res.json();
     if (data?.error) return null;
@@ -118,7 +119,7 @@ async function getStartlist(slug: string): Promise<StartlistEntry[]> {
 
 async function getClimbs(slug: string, n: string): Promise<Climb[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/climbs`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/climbs`, { next: { revalidate: 300 } });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
@@ -127,7 +128,7 @@ async function getClimbs(slug: string, n: string): Promise<Climb[]> {
 
 async function getBroadcast(slug: string): Promise<Broadcast[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { next: { revalidate: 300 } });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
@@ -143,7 +144,7 @@ type StageResult = {
 
 async function getStageResults(slug: string, n: string): Promise<StageResult[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/results?limit=3`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/results?limit=3`, { next: { revalidate: 300 } });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
@@ -515,7 +516,9 @@ export default async function StagePage(props: {
                     {r.position}.
                   </span>
                   {rider.photo_url && (
-                    <img src={rider.photo_url} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0 opacity-90" />
+                    <div className="relative w-8 h-8 flex-shrink-0 opacity-90">
+                      <Image src={rider.photo_url} alt="" fill sizes="32px" className="rounded-full object-cover object-top" />
+                    </div>
                   )}
                   <span className="text-base flex-shrink-0">{flag}</span>
                   <Link
@@ -730,10 +733,12 @@ export default async function StagePage(props: {
                   {/* Foto eller flag */}
                   <div className="relative flex-shrink-0 w-10 h-10">
                     {rider.photo_url ? (
-                      <img
+                      <Image
                         src={rider.photo_url}
                         alt={rider.name}
-                        className="w-10 h-10 rounded-full object-cover bg-slate-800"
+                        fill
+                        sizes="40px"
+                        className="rounded-full object-cover object-top bg-slate-800"
                       />
                     ) : (
                       <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-lg">
@@ -818,10 +823,12 @@ export default async function StagePage(props: {
                 >
                   <div className="relative flex-shrink-0 w-10 h-10">
                     {rider.photo_url ? (
-                      <img
+                      <Image
                         src={rider.photo_url}
                         alt={rider.name}
-                        className="w-10 h-10 rounded-full object-cover bg-slate-800"
+                        fill
+                        sizes="40px"
+                        className="rounded-full object-cover object-top bg-slate-800"
                       />
                     ) : (
                       <div className="w-10 h-10 rounded-full bg-red-950/60 flex items-center justify-center text-lg">

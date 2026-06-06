@@ -1,9 +1,11 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { marked } from "marked";
 import { API_BASE } from "@/lib/api";
+import ShareButtons from "./ShareButtons";
 
 type Article = {
   id: string;
@@ -34,7 +36,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 async function getArticle(slug: string): Promise<Article | null> {
   try {
-    const res = await fetch(`${API_BASE}/news/${slug}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/news/${slug}`, { next: { revalidate: 3600 } });
     const data = await res.json();
     return data?.error ? null : data;
   } catch { return null; }
@@ -49,7 +51,7 @@ function formatDate(d: string): string {
 function renderMarkdown(md: string): string {
   // Sanitér interne links: /giro-ditalia-2026 → absolute path (allerede OK)
   const renderer = new marked.Renderer();
-  renderer.link = ({ href, title, text }) => {
+  renderer.link = ({ href, text }) => {
     const isInternal = href?.startsWith("/");
     const attrs = isInternal
       ? `href="${href}"`
@@ -174,13 +176,16 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
 
       {/* Hero image */}
       {article.image_url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={article.image_url}
-          alt={article.title}
-          className="w-full rounded-xl mb-8 border border-slate-800 object-cover"
-          style={{ maxHeight: "400px" }}
-        />
+        <div className="relative w-full h-64 sm:h-96 rounded-xl mb-8 border border-slate-800 overflow-hidden">
+          <Image
+            src={article.image_url}
+            alt={article.title}
+            fill
+            sizes="(max-width: 768px) 100vw, 768px"
+            className="object-cover object-top"
+            priority
+          />
+        </div>
       )}
 
       {/* Excerpt */}
@@ -202,9 +207,11 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
         dangerouslySetInnerHTML={{ __html: contentHtml }}
       />
 
+      <ShareButtons slug={article.slug} title={article.title} />
+
       {/* Relateret løb */}
       {article.races && (
-        <div className="mt-10 pt-8 border-t border-slate-800">
+        <div className="mt-8 pt-6 border-t border-slate-800">
           <p className="text-xs text-slate-600 mb-3">Relateret løb</p>
           <Link
             href={`/${article.races.slug}`}

@@ -1,5 +1,6 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
+import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -43,7 +44,7 @@ type Article = {
 
 async function getOngoingRaces(): Promise<OngoingRace[]> {
   try {
-    const res = await fetch(`${API_BASE}/ongoing-races`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/ongoing-races`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -53,7 +54,7 @@ async function getOngoingRaces(): Promise<OngoingRace[]> {
 
 async function getUpcomingRaces(): Promise<Race[]> {
   try {
-    const res = await fetch(`${API_BASE}/upcoming-races`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/upcoming-races`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -63,7 +64,7 @@ async function getUpcomingRaces(): Promise<Race[]> {
 
 async function getLatestArticles(): Promise<Article[]> {
   try {
-    const res = await fetch(`${API_BASE}/news?advertorial=false&limit=4`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/news?advertorial=false&limit=4`, { next: { revalidate: 60 } });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -232,12 +233,13 @@ export default async function Home() {
                     {ts ? (
                       <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
                         {ts.elevation_image_url && (
-                          <div className="relative">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
+                          <div className="relative h-20">
+                            <Image
                               src={ts.elevation_image_url}
                               alt={`Højdeprofil etape ${ts.stage_number}`}
-                              className="w-full h-20 object-cover object-bottom"
+                              fill
+                              sizes="(max-width: 896px) 100vw, 896px"
+                              className="object-cover object-bottom"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent" />
                           </div>
@@ -414,11 +416,13 @@ export default async function Home() {
                     <div className={`relative w-full overflow-hidden ${isLarge ? "h-64 sm:h-80" : "h-52"}`}>
                       {article.image_url ? (
                         <>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                          <Image
                             src={article.image_url}
                             alt=""
-                            className="absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                            fill
+                            sizes="(max-width: 640px) 100vw, 50vw"
+                            className="object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                            priority={i === 0}
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-slate-950/10" />
                         </>

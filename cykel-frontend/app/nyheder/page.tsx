@@ -1,5 +1,6 @@
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
+import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -68,7 +69,7 @@ const CATEGORY_ICON: Record<string, string> = {
 
 async function getArticles(): Promise<Article[]> {
   try {
-    const res = await fetch(`${API_BASE}/news?advertorial=false&limit=40`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/news?advertorial=false&limit=40`, { next: { revalidate: 300 } });
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
@@ -116,11 +117,13 @@ export default async function NyhederPage() {
                 <div className={`relative w-full overflow-hidden ${isLarge ? "h-80 sm:h-96" : "h-56"}`}>
                   {article.image_url ? (
                     <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <Image
                         src={article.image_url}
                         alt=""
-                        className="absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                        fill
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                        className="object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                        priority={i === 0}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-slate-950/10" />
                     </>
