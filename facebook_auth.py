@@ -1,13 +1,24 @@
 """
 facebook_auth.py
-Åbner browser til Facebook OAuth med pages_manage_posts permission.
-Brug dette til at få en bruger-token, som derefter byttes til Page Access Token.
+Henter ny Facebook Page Access Token til Klassementet-siden.
 
-Kør: python facebook_auth.py
+Interaktiv brug (åbner browser):
+  python facebook_auth.py
+
+Med token fra URL (non-interaktiv):
+  python facebook_auth.py --token EAAG... --save
+
+Tokens holder ~60 dage. Kør scriptet igen når Railway poster fejler.
 """
-import webbrowser, urllib.parse
+import argparse, webbrowser, urllib.parse, requests, os, re, subprocess, sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+from dotenv import load_dotenv
 
-APP_ID = "991776093267542"
+load_dotenv()
+
+APP_ID       = "991776093267542"
+APP_SECRET   = os.getenv("META_APP_SECRET", "")
 REDIRECT_URI = "https://klassementet.dk"
 
 SCOPES = [
@@ -15,9 +26,11 @@ SCOPES = [
     "pages_read_engagement",
     "pages_manage_posts",
     "public_profile",
+    "instagram_basic",
+    "instagram_content_publish",
 ]
 
-url = (
+auth_url = (
     f"https://www.facebook.com/dialog/oauth"
     f"?client_id={APP_ID}"
     f"&redirect_uri={urllib.parse.quote(REDIRECT_URI)}"
@@ -25,38 +38,111 @@ url = (
     f"&response_type=token"
 )
 
-print("Åbner Facebook i browseren...")
-print()
-print("1. Log ind og godkend permissions")
-print("2. Du bliver sendt til klassementet.dk — URL'en vil indeholde #access_token=...")
-print("3. Kopier ALT det efter #access_token= og frem til &token_type")
-print("4. Det er din USER token — vi bytter den til en PAGE token herunder")
-print()
-webbrowser.open(url)
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument("--token", default="", help="User access token fra redirect-URL")
+parser.add_argument("--save",  action="store_true", help="Gem .env automatisk uden at spørge")
+args, _ = parser.parse_known_args()
 
-user_token = input("Indsæt din USER token her: ").strip()
+print("=" * 60)
+print("Facebook token-fornyelse — Klassementet")
+print("=" * 60)
+print()
 
-import requests
-# Byt user token til page access token
+if args.token:
+    user_token = args.token.strip()
+    print("Bruger token fra --token argument")
+else:
+    print("Trin 1: Chrome åbnes — log ind og godkend permissions")
+    print("Trin 2: Du landes på klassementet.dk")
+    print("        URL'en ser sådan ud:")
+    print("        https://klassementet.dk/#access_token=EAAG...&long_lived_token=EAAG...")
+    print("        Kopier værdien af long_lived_token= (eller access_token= hvis ingen long_lived)")
+    print()
+
+    # Åbn i Chrome (Windows)
+    chrome_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Users\\" + os.getenv("USERNAME", "") + r"\AppData\Local\Google\Chrome\Application\chrome.exe",
+    ]
+    opened = False
+    for chrome in chrome_paths:
+        if os.path.exists(chrome):
+            subprocess.Popen([chrome, auth_url])
+            opened = True
+            break
+    if not opened:
+        webbrowser.open(auth_url)
+
+    user_token = input("Indsæt din token her: ").strip()
+
+# Forsøg at udveksle til langtids-token hvis APP_SECRET kendes
+if APP_SECRET:
+    ex = requests.get(
+        "https://graph.facebook.com/oauth/access_token",
+        params={
+            "grant_type":        "fb_exchange_token",
+            "client_id":         APP_ID,
+            "client_secret":     APP_SECRET,
+            "fb_exchange_token": user_token,
+        },
+        timeout=10,
+    )
+    if ex.ok and "access_token" in ex.json():
+        user_token = ex.json()["access_token"]
+        print("✓ Byttet til langtids-token (60 dage)")
+    else:
+        print(f"[!] Langtids-udveksling fejlede: {ex.json()} — bruger token as-is")
+else:
+    print("[!] META_APP_SECRET ikke sat — bruger token direkte (kan udløbe hurtigere)")
+
+# Hent Page Access Token
 r = requests.get(
-    f"https://graph.facebook.com/me/accounts",
+    "https://graph.facebook.com/me/accounts",
     params={"access_token": user_token},
+    timeout=10,
 )
 data = r.json()
 if "data" not in data:
-    print("Fejl:", data)
-    exit(1)
+    print("\nFejl fra Facebook:", data)
+    sys.exit(1)
 
-for page in data["data"]:
-    if page.get("name") == "Klassementet":
-        print()
-        print(f"Fundet side: {page['name']} (ID: {page['id']})")
-        print()
-        print("Tilfoej dette til .env:")
-        print(f"META_PAGE_ACCESS_TOKEN={page['access_token']}")
-        print(f"META_PAGE_ID={page['id']}")
-        break
-else:
-    print("Klassementet-siden ikke fundet. Tilgaengelige sider:")
+page = next((p for p in data["data"] if p.get("name") == "Klassementet"), None)
+if not page:
+    print("\nKlassementet-siden ikke fundet. Tilgængelige sider:")
     for p in data["data"]:
         print(f"  {p['name']} — ID: {p['id']}")
+    sys.exit(1)
+
+page_token = page["access_token"]
+page_id    = page["id"]
+
+print()
+print("=" * 60)
+print(f"✓ Side fundet: {page['name']} (ID: {page_id})")
+print("=" * 60)
+
+if args.save:
+    save = True
+else:
+    svar = input("\nSkal jeg opdatere .env automatisk? (j/n): ").strip().lower()
+    save = svar == "j"
+
+if save:
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    with open(env_path, "r", encoding="utf-8") as f:
+        env_content = f.read()
+
+    env_content = re.sub(r"META_PAGE_ACCESS_TOKEN=.*", f"META_PAGE_ACCESS_TOKEN={page_token}", env_content)
+    env_content = re.sub(r"META_PAGE_ID=.*",          f"META_PAGE_ID={page_id}",          env_content)
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.write(env_content)
+
+    print("✓ .env opdateret")
+else:
+    print("\nOpdater .env manuelt med disse to linjer:")
+    print(f"  META_PAGE_ACCESS_TOKEN={page_token}")
+    print(f"  META_PAGE_ID={page_id}")
+
+print("\nHusk også at opdatere Railway Variables!")
