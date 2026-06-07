@@ -648,7 +648,7 @@ def get_rider_by_slug(slug: str):
 def get_news(advertorial: bool = False, limit: int = 20, offset: int = 0, race_slug: str = None):
     filters = (
         f"?is_advertorial=eq.{str(advertorial).lower()}"
-        f"&or=(status.eq.published,status.is.null)"
+        f"&status=eq.published"
     )
     if race_slug:
         # Join through races to filter by slug
@@ -726,7 +726,6 @@ def _fb_task(article_id: str) -> None:
         title=art["title"],
         category=art.get("category", "generelt"),
         excerpt=art.get("excerpt"),
-        existing_image_url=art.get("image_url"),
         sb_url=SUPABASE_URL,
         sb_key=SUPABASE_SERVICE_ROLE_KEY,
         meta_token=os.getenv("META_PAGE_ACCESS_TOKEN", ""),
@@ -751,10 +750,9 @@ def admin_approve_article(article_id: str, request: Request, background_tasks: B
 @app.patch("/admin/articles/{article_id}/reject")
 def admin_reject_article(article_id: str, request: Request):
     _require_admin(request)
-    res = requests.patch(
+    res = requests.delete(
         f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
-        json={"status": "rejected"},
-        headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
+        headers={**get_headers(), "Prefer": "return=minimal"},
     )
     return {"ok": res.ok}
 

@@ -229,28 +229,44 @@ def _fb_post(article_id: str, slug: str, title: str, category: str,
              token: str, page_id: str, sb_url: str, sb_key: str) -> bool:
     emoji   = CATEGORY_EMOJI.get(category, "🚴")
     art_url = f"{SITE_URL}/nyheder/{slug}"
-    parts   = [f"{emoji} {title}"]
+
+    # Opslaget: titel + excerpt + "link i kommentar" — INGEN URL i selve opslaget
+    parts = [f"{emoji} {title}"]
     if excerpt:
         parts += ["", excerpt]
-    parts += ["", f"🔗 {art_url}"]
+    parts += ["", "🔗 Link i kommentar ↓"]
 
     res = requests.post(
         f"{GRAPH_URL}/{page_id}/photos",
         data={"url": image_url, "caption": "\n".join(parts), "access_token": token},
         timeout=20,
     )
-    if res.ok:
-        h = {
-            "apikey": sb_key, "Authorization": f"Bearer {sb_key}",
-            "Content-Type": "application/json", "Prefer": "return=minimal",
-        }
-        requests.patch(
-            f"{sb_url}/rest/v1/news_articles?id=eq.{article_id}",
-            json={"social_posted": True},
-            headers=h,
-            timeout=10,
+    if not res.ok:
+        return False
+
+    # Gem post_id og sæt social_posted
+    post_data = res.json()
+    post_id   = post_data.get("post_id") or post_data.get("id")
+
+    h = {
+        "apikey": sb_key, "Authorization": f"Bearer {sb_key}",
+        "Content-Type": "application/json", "Prefer": "return=minimal",
+    }
+    requests.patch(
+        f"{sb_url}/rest/v1/news_articles?id=eq.{article_id}",
+        json={"social_posted": True, "fb_post_id": post_id},
+        headers=h, timeout=10,
+    )
+
+    # Tilføj link som første kommentar
+    if post_id:
+        requests.post(
+            f"{GRAPH_URL}/{post_id}/comments",
+            data={"message": art_url, "access_token": token},
+            timeout=15,
         )
-    return res.ok
+
+    return True
 
 
 # ── Background-task entry point ───────────────────────────────────────────────
@@ -261,7 +277,6 @@ def generate_and_post(
     title: str,
     category: str,
     excerpt: str | None,
-    existing_image_url: str | None,
     sb_url: str,
     sb_key: str,
     meta_token: str,
@@ -271,35 +286,20 @@ def generate_and_post(
     if not meta_token or not page_id:
         return
 
-    if existing_image_url:
-        image_url = existing_image_url
-    else:
-        if not PILLOW_AVAILABLE:
-            print(f"[FB] Pillow ikke installeret — kan ikke generere billede til {slug}")
-            return
-        try:
-            img       = generate_fb_image(title, category, excerpt)
-            image_url = _upload(img, slug, sb_url, sb_key)
-        except Exception as e:
-            print(f"[FB] Billedgenerering fejl: {e}")
-            return
-
-    if not image_url:
-        print(f"[FB] Ingen image_url til {slug}")
+    # Generer altid det brandede Klassementet-billede til Facebook
+    if not PILLOW_AVAILABLE:
+        print(f"[FB] Pillow ikke installeret — kan ikke generere billede til {slug}")
+        return
+    try:
+        img       = generate_fb_image(title, category, excerpt)
+        image_url = _upload(img, slug, sb_url, sb_key)
+    except Exception as e:
+        print(f"[FB] Billedgenerering fejl: {e}")
         return
 
-    # Gem image_url på artiklen hvis den manglede
-    if not existing_image_url:
-        h = {
-            "apikey": sb_key, "Authorization": f"Bearer {sb_key}",
-            "Content-Type": "application/json", "Prefer": "return=minimal",
-        }
-        requests.patch(
-            f"{sb_url}/rest/v1/news_articles?id=eq.{article_id}",
-            json={"image_url": image_url},
-            headers=h,
-            timeout=10,
-        )
+    if not image_url:
+        print(f"[FB] Upload fejlede for {slug}")
+        return
 
     ok = _fb_post(article_id, slug, title, category, excerpt,
                   image_url, meta_token, page_id, sb_url, sb_key)
