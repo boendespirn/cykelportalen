@@ -733,6 +733,31 @@ def _fb_task(article_id: str) -> None:
     )
 
 
+def _ig_task(article_id: str) -> None:
+    ig_user_id = os.getenv("META_INSTAGRAM_USER_ID", "")
+    if not ig_user_id:
+        return
+    try:
+        from instagram_image import generate_and_post_ig
+        art = _get_article_for_fb(article_id)
+        if not art:
+            return
+        generate_and_post_ig(
+            article_id=article_id,
+            slug=art["slug"],
+            title=art["title"],
+            category=art.get("category", "generelt"),
+            excerpt=art.get("excerpt"),
+            existing_image_url=art.get("image_url"),
+            sb_url=SUPABASE_URL,
+            sb_key=SUPABASE_SERVICE_ROLE_KEY,
+            meta_token=os.getenv("META_PAGE_ACCESS_TOKEN", ""),
+            ig_user_id=ig_user_id,
+        )
+    except Exception:
+        pass
+
+
 @app.patch("/admin/articles/{article_id}/approve")
 def admin_approve_article(article_id: str, request: Request, background_tasks: BackgroundTasks):
     _require_admin(request)
@@ -744,6 +769,7 @@ def admin_approve_article(article_id: str, request: Request, background_tasks: B
     )
     if res.ok:
         background_tasks.add_task(_fb_task, article_id)
+        background_tasks.add_task(_ig_task, article_id)
     return {"ok": res.ok}
 
 
@@ -837,6 +863,7 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
     )
     if patch.ok:
         background_tasks.add_task(_fb_task, article_id)
+        background_tasks.add_task(_ig_task, article_id)
     return {"ok": patch.ok}
 
 
