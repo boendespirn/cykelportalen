@@ -124,6 +124,7 @@ def generate_ig_image(title: str, category: str, excerpt: str | None = None) -> 
 
 def _upload_ig(img: "Image.Image", slug: str, sb_url: str, sb_key: str) -> str | None:
     """Upload IG-billede til Supabase Storage, returnerer public URL."""
+    sb_url = sb_url.rstrip("/")
     h = {"apikey": sb_key, "Authorization": f"Bearer {sb_key}"}
     requests.post(
         f"{sb_url}/storage/v1/bucket",
