@@ -23,6 +23,7 @@ type TodayStage = {
   finish_location: string | null;
   distance_km: string | null;
   elevation_image_url: string | null;
+  stage_start_time: string | null;
 };
 
 type OngoingRace = Race & {
@@ -233,16 +234,12 @@ export default async function Home() {
                     {ts ? (
                       <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
                         {ts.elevation_image_url && (
-                          <div className="relative h-20">
-                            <Image
-                              src={ts.elevation_image_url}
-                              alt={`Højdeprofil etape ${ts.stage_number}`}
-                              fill
-                              sizes="(max-width: 896px) 100vw, 896px"
-                              className="object-cover object-bottom"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent" />
-                          </div>
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={ts.elevation_image_url}
+                            alt={`Højdeprofil etape ${ts.stage_number}`}
+                            className="w-full"
+                          />
                         )}
                         <div className="px-4 py-3">
                           <div className="flex items-center justify-between">
@@ -270,6 +267,11 @@ export default async function Home() {
                             {ts.distance_km && (
                               <span className="text-slate-500 ml-2 text-xs font-mono">
                                 {parseFloat(ts.distance_km).toFixed(0)} km
+                              </span>
+                            )}
+                            {ts.stage_start_time && (
+                              <span className="text-slate-500 ml-2 text-xs font-mono">
+                                · Start {ts.stage_start_time.slice(0, 5)}
                               </span>
                             )}
                           </p>

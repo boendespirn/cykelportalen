@@ -22,6 +22,7 @@ type Stage = {
   start_location: string | null; finish_location: string | null;
   elevation_gain_m: number | null; profile_score: number | null;
   elevation_image_url: string | null; pcs_stage_url: string | null;
+  stage_start_time: string | null;
 };
 
 type StartlistEntry = {
@@ -501,14 +502,9 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
         {/* Elevation profile — full width, prominent */}
         {singleStage?.elevation_image_url && (
-          <div className="relative mb-8 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 h-40">
-            <Image
-              src={singleStage.elevation_image_url}
-              alt="Højdeprofil"
-              fill
-              sizes="(max-width: 896px) 100vw, 896px"
-              className="object-cover object-bottom"
-            />
+          <div className="mb-8 rounded-2xl overflow-hidden border border-slate-800">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={singleStage.elevation_image_url} alt="Højdeprofil" className="w-full" />
           </div>
         )}
 
@@ -692,19 +688,23 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                   </span>
                 )}
               </span>
-              {heroStage.distance_km && (
-                <span className="text-xs font-mono text-slate-600 ml-auto">{heroStage.distance_km} km</span>
-              )}
+              <div className="ml-auto flex items-center gap-3">
+                {heroStage.stage_start_time && (
+                  <span className="text-xs font-mono text-emerald-400">
+                    Start {heroStage.stage_start_time.slice(0, 5)}
+                  </span>
+                )}
+                {heroStage.distance_km && (
+                  <span className="text-xs font-mono text-slate-600">{heroStage.distance_km} km</span>
+                )}
+              </div>
             </div>
-            <div className="relative h-32 w-full">
-              <Image
-                src={heroStage.elevation_image_url}
-                alt={`Højdeprofil etape ${heroStage.stage_number}`}
-                fill
-                sizes="(max-width: 896px) 100vw, 896px"
-                className="object-cover object-bottom"
-              />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={heroStage.elevation_image_url}
+              alt={`Højdeprofil etape ${heroStage.stage_number}`}
+              className="w-full"
+            />
             {heroStage.start_location && heroStage.finish_location && (
               <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-800">
                 <span className="text-sm text-slate-400">{heroStage.start_location}</span>
