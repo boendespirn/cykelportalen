@@ -179,8 +179,14 @@ export default function AdminPage() {
         body: JSON.stringify({ article_ids: Array.from(selectedIds) }),
       });
       const data = await res.json();
-      setIgResult(data);
-    } catch {
+      console.log("[IG] status:", res.status, "body:", data);
+      if (!data.ok && !data.error && data.detail) {
+        setIgResult({ ok: false, error: `HTTP ${res.status}: ${data.detail}` });
+      } else {
+        setIgResult(data);
+      }
+    } catch (e) {
+      console.error("[IG]", e);
       setIgResult({ ok: false, error: "Netværksfejl — tjek at Railway kører" });
     } finally {
       setIgPosting(false);
