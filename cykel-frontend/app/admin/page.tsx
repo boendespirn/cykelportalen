@@ -47,6 +47,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 type Tab = "draft" | "published" | "rejected";
 
+type TodayArticle = { id: string; title: string; category: string; slug: string };
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState<string>("");
   const [keyInput, setKeyInput] = useState("");
@@ -64,6 +66,9 @@ export default function AdminPage() {
   const feedbackRef = useRef<HTMLTextAreaElement>(null);
   const [igPosting, setIgPosting] = useState(false);
   const [igResult, setIgResult] = useState<{ ok: boolean; message?: string; error?: string; article_count?: number } | null>(null);
+  const [todayArticles, setTodayArticles] = useState<TodayArticle[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [todayLoading, setTodayLoading] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("adminKey");
@@ -93,6 +98,29 @@ export default function AdminPage() {
   useEffect(() => {
     if (adminKey) fetchArticles(adminKey, tab);
   }, [adminKey, tab, fetchArticles]);
+
+  const fetchTodayArticles = useCallback(async (key: string) => {
+    setTodayLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/instagram/today-articles`, {
+        headers: { "x-admin-key": key },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const arts: TodayArticle[] = Array.isArray(data) ? data : [];
+        setTodayArticles(arts);
+        setSelectedIds(new Set(arts.map((a) => a.id)));
+      }
+    } catch {
+      // ignore — brugeren ser tom liste
+    } finally {
+      setTodayLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (adminKey) fetchTodayArticles(adminKey);
+  }, [adminKey, fetchTodayArticles]);
 
   // Focus textarea when feedback panel opens
   useEffect(() => {
@@ -173,7 +201,8 @@ export default function AdminPage() {
     try {
       const res = await fetch(`${API_BASE}/admin/instagram/post-dagens-nyheder`, {
         method: "POST",
-        headers: { "x-admin-key": adminKey },
+        headers: { "x-admin-key": adminKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ article_ids: selectedIds.size > 0 ? Array.from(selectedIds) : null }),
       });
       const data = await res.json();
       setIgResult(data);
@@ -182,6 +211,18 @@ export default function AdminPage() {
     } finally {
       setIgPosting(false);
     }
+  };
+
+  const toggleArticle = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelectedIds(selectedIds.size === todayArticles.length ? new Set() : new Set(todayArticles.map((a) => a.id)));
   };
 
   const formatDate = (d: string | null) => {
@@ -473,40 +514,119 @@ export default function AdminPage() {
       <div className="mt-10 pt-8 border-t border-slate-800">
         <h2 className="text-sm font-semibold text-slate-300 mb-1">Social Media</h2>
         <p className="text-xs text-slate-600 mb-4">
-          Poster alle artikler publiceret i dag som ét Instagram-karrusel-opslag. Slides gemmes
+          Poster valgte artikler fra i dag som ét Instagram-karrusel-opslag. Slides gemmes
           også lokalt i <code className="text-slate-500">output/instagram/YYYY-MM-DD/</code> til TikTok.
         </p>
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-sm font-medium text-slate-200">Instagram · Dagens Nyheder</p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Karrusel med dagens overskrifter + CTA-slide
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 overflow-hidden">
+
+          {/* Artikel-selektion */}
+          <div className="p-5 border-b border-slate-800/60">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-medium text-slate-400">
+                Artikler i opslaget
+                {todayArticles.length > 0 && (
+                  <span className="ml-2 text-slate-600">
+                    {selectedIds.size}/{todayArticles.length} valgt
+                  </span>
+                )}
               </p>
-            </div>
-            <button
-              onClick={postDagensNyheder}
-              disabled={igPosting}
-              className="text-sm text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all px-5 py-2 rounded-xl font-medium disabled:opacity-50 flex items-center gap-2"
-            >
-              {igPosting ? (
-                <>
-                  <span className="w-3.5 h-3.5 border border-white/40 border-t-white rounded-full animate-spin" />
-                  Poster...
-                </>
-              ) : (
-                "Post dagens nyheder til Instagram"
+              {todayArticles.length > 0 && (
+                <button
+                  onClick={toggleAll}
+                  className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+                >
+                  {selectedIds.size === todayArticles.length ? "Fravælg alle" : "Vælg alle"}
+                </button>
               )}
-            </button>
-          </div>
-          {igResult && (
-            <div className={`mt-4 pt-4 border-t border-slate-800/60 text-xs ${igResult.ok ? "text-emerald-400" : "text-red-400"}`}>
-              {igResult.ok
-                ? <>&#x2713; {igResult.message}</>
-                : <>&#x2717; {igResult.error ?? "Ukendt fejl"}</>
-              }
             </div>
-          )}
+
+            {todayLoading ? (
+              <div className="flex items-center gap-2 py-3">
+                <span className="w-3 h-3 border border-slate-700 border-t-slate-400 rounded-full animate-spin" />
+                <span className="text-xs text-slate-600">Henter dagens artikler...</span>
+              </div>
+            ) : todayArticles.length === 0 ? (
+              <p className="text-xs text-slate-600 py-2">Ingen artikler publiceret i dag endnu.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {todayArticles.map((art) => {
+                  const on = selectedIds.has(art.id);
+                  return (
+                    <button
+                      key={art.id}
+                      onClick={() => toggleArticle(art.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl border text-left transition-all ${
+                        on
+                          ? "border-slate-700 bg-slate-800/60 text-slate-200"
+                          : "border-slate-800/40 bg-transparent text-slate-600"
+                      }`}
+                    >
+                      {/* Checkbox */}
+                      <span className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                        on ? "border-emerald-500 bg-emerald-500/20" : "border-slate-700"
+                      }`}>
+                        {on && <span className="text-[9px] text-emerald-400 font-bold leading-none">✓</span>}
+                      </span>
+                      {/* Titel */}
+                      <span className={`flex-1 text-xs truncate ${on ? "" : "line-through opacity-50"}`}>
+                        {art.title}
+                      </span>
+                      {/* Kategori-badge */}
+                      <span className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border ${
+                        CATEGORY_COLORS[art.category] ?? "bg-slate-800 text-slate-500 border-slate-700"
+                      }`}>
+                        {CATEGORY_LABELS[art.category] ?? art.category}
+                      </span>
+                      {/* Minus-ikon ved hover når valgt */}
+                      {on && (
+                        <span className="flex-shrink-0 text-[10px] text-slate-700 hover:text-red-400 transition-colors">
+                          ✕
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Post-knap */}
+          <div className="p-5">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-sm font-medium text-slate-200">Instagram · Dagens Nyheder</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {selectedIds.size === 0
+                    ? "Vælg mindst én artikel"
+                    : `${selectedIds.size} artikel${selectedIds.size !== 1 ? "r" : ""} + CTA-slide`}
+                </p>
+              </div>
+              <button
+                onClick={postDagensNyheder}
+                disabled={igPosting || selectedIds.size === 0}
+                className="text-sm text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all px-5 py-2 rounded-xl font-medium disabled:opacity-40 flex items-center gap-2"
+              >
+                {igPosting ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border border-white/40 border-t-white rounded-full animate-spin" />
+                    Poster...
+                  </>
+                ) : (
+                  "Post til Instagram →"
+                )}
+              </button>
+            </div>
+
+            {igResult && (
+              <div className={`mt-4 pt-4 border-t border-slate-800/60 text-xs ${igResult.ok ? "text-emerald-400" : "text-red-400"}`}>
+                {igResult.ok
+                  ? <>&#x2713; {igResult.message}</>
+                  : <>&#x2717; {igResult.error ?? "Ukendt fejl"}</>
+                }
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>

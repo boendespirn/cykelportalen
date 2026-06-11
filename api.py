@@ -865,20 +865,51 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
     return {"ok": patch.ok}
 
 
-@app.post("/admin/instagram/post-dagens-nyheder")
-def admin_post_dagens_nyheder(request: Request, background_tasks: BackgroundTasks):
-    """Henter alle artikler publiceret i dag og poster dem som Instagram-karrusel."""
-    _require_admin(request)
+def _today_start_iso() -> str:
     from datetime import datetime, timezone
+    return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
-    today_start = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ).isoformat()
+
+@app.get("/admin/instagram/today-articles")
+def admin_today_articles(request: Request):
+    """Returnerer alle artikler publiceret i dag — bruges til artikel-selektion i admin-panel."""
+    _require_admin(request)
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?status=eq.published"
+        f"&published_at=gte.{_today_start_iso()}"
+        f"&select=id,slug,title,category"
+        f"&order=published_at.asc"
+        f"&limit=50",
+        headers=get_headers(),
+    )
+    if not res.ok:
+        raise HTTPException(status_code=500, detail="Kunne ikke hente artikler fra Supabase")
+    data = res.json()
+    return data if isinstance(data, list) else []
+
+
+@app.post("/admin/instagram/post-dagens-nyheder")
+async def admin_post_dagens_nyheder(request: Request, background_tasks: BackgroundTasks):
+    """Henter artikler publiceret i dag og poster dem som Instagram-karrusel.
+    Accepterer optional JSON body: {"article_ids": ["uuid1", "uuid2", ...]}
+    Hvis article_ids er angivet, bruges kun de valgte artikler.
+    """
+    _require_admin(request)
+
+    # Læs optional body
+    article_ids: list[str] | None = None
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = await request.json()
+            article_ids = body.get("article_ids") or None
+        except Exception:
+            pass
 
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/news_articles"
         f"?status=eq.published"
-        f"&published_at=gte.{today_start}"
+        f"&published_at=gte.{_today_start_iso()}"
         f"&select=id,slug,title,category,excerpt,image_url"
         f"&order=published_at.asc"
         f"&limit=50",
@@ -894,6 +925,17 @@ def admin_post_dagens_nyheder(request: Request, background_tasks: BackgroundTask
             "saved_path": "", "error": "Ingen artikler publiceret i dag",
             "article_count": 0,
         }
+
+    # Filtrer til valgte artikler hvis angivet
+    if article_ids:
+        id_set = set(article_ids)
+        articles = [a for a in articles if a["id"] in id_set]
+        if not articles:
+            return {
+                "ok": False, "slides": 0, "ig_post_id": None,
+                "saved_path": "", "error": "Ingen af de valgte artikler findes blandt dagens publicerede",
+                "article_count": 0,
+            }
 
     def _carousel_task():
         from instagram_carousel import post_dagens_nyheder
