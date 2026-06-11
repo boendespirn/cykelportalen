@@ -867,7 +867,8 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
 
 def _today_start_iso() -> str:
     from datetime import datetime, timezone
-    return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @app.get("/admin/instagram/today-articles")
