@@ -526,7 +526,9 @@ export default function AdminPage() {
           </button>
           {igResult && (
             <span className={`text-xs ${igResult.ok ? "text-emerald-400" : "text-red-400"}`}>
-              {igResult.ok ? `✓ ${igResult.message}` : `✗ ${igResult.error}`}
+              {igResult.ok
+                ? `✓ ${igResult.message}`
+                : `✗ ${igResult.error ?? "Endpoint ikke fundet — Railway mangler deploy"}`}
             </span>
           )}
         </div>
