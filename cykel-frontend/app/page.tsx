@@ -350,12 +350,10 @@ export default async function Home() {
                   <Link
                     key={race.slug}
                     href={`/${race.slug}`}
-                    className="group flex items-center gap-4 px-5 py-3.5 transition-colors duration-150"
+                    className="group flex items-center gap-4 px-5 py-3.5 transition-colors duration-150 hover:bg-white/[0.03]"
                     style={{
                       borderBottom: isLast ? "none" : "1px solid var(--border)",
                     }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "var(--surface)"; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                   >
                     <span className="text-lg w-7 text-center flex-shrink-0 leading-none">
                       {flagEmoji(race.country_code)}
@@ -436,10 +434,7 @@ export default async function Home() {
                   <Link
                     key={article.slug}
                     href={`/nyheder/${article.slug}`}
-                    className={`group relative overflow-hidden rounded-2xl transition-all duration-200 ${isLarge ? "sm:col-span-2" : ""}`}
-                    style={{ border: "1px solid var(--border)" }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border-bright)"; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; }}
+                    className={`group relative overflow-hidden rounded-2xl transition-all duration-200 border border-white/[0.07] hover:border-white/[0.13] ${isLarge ? "sm:col-span-2" : ""}`}
                   >
                     <div className={`relative w-full overflow-hidden ${isLarge ? "h-64 sm:h-80" : "h-52"}`}>
                       {article.image_url ? (
