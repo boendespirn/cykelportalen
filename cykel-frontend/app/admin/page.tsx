@@ -62,6 +62,8 @@ export default function AdminPage() {
   const [editLoading, setEditLoading] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const feedbackRef = useRef<HTMLTextAreaElement>(null);
+  const [igPosting, setIgPosting] = useState(false);
+  const [igResult, setIgResult] = useState<{ ok: boolean; message?: string; error?: string; article_count?: number } | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("adminKey");
@@ -162,6 +164,23 @@ export default function AdminPage() {
       setEditError("Netværksfejl — tjek at Railway kører");
     } finally {
       setEditLoading(null);
+    }
+  };
+
+  const postDagensNyheder = async () => {
+    setIgPosting(true);
+    setIgResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/admin/instagram/post-dagens-nyheder`, {
+        method: "POST",
+        headers: { "x-admin-key": adminKey },
+      });
+      const data = await res.json();
+      setIgResult(data);
+    } catch {
+      setIgResult({ ok: false, error: "Netværksfejl — tjek at Railway kører" });
+    } finally {
+      setIgPosting(false);
     }
   };
 
@@ -449,6 +468,47 @@ export default function AdminPage() {
           })}
         </div>
       )}
+
+      {/* Social Media */}
+      <div className="mt-10 pt-8 border-t border-slate-800">
+        <h2 className="text-sm font-semibold text-slate-300 mb-1">Social Media</h2>
+        <p className="text-xs text-slate-600 mb-4">
+          Poster alle artikler publiceret i dag som ét Instagram-karrusel-opslag. Slides gemmes
+          også lokalt i <code className="text-slate-500">output/instagram/YYYY-MM-DD/</code> til TikTok.
+        </p>
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-5">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-medium text-slate-200">Instagram · Dagens Nyheder</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Karrusel med dagens overskrifter + CTA-slide
+              </p>
+            </div>
+            <button
+              onClick={postDagensNyheder}
+              disabled={igPosting}
+              className="text-sm text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all px-5 py-2 rounded-xl font-medium disabled:opacity-50 flex items-center gap-2"
+            >
+              {igPosting ? (
+                <>
+                  <span className="w-3.5 h-3.5 border border-white/40 border-t-white rounded-full animate-spin" />
+                  Poster...
+                </>
+              ) : (
+                "Post dagens nyheder til Instagram"
+              )}
+            </button>
+          </div>
+          {igResult && (
+            <div className={`mt-4 pt-4 border-t border-slate-800/60 text-xs ${igResult.ok ? "text-emerald-400" : "text-red-400"}`}>
+              {igResult.ok
+                ? <>&#x2713; {igResult.message}</>
+                : <>&#x2717; {igResult.error ?? "Ukendt fejl"}</>
+              }
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

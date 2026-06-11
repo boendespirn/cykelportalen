@@ -769,7 +769,6 @@ def admin_approve_article(article_id: str, request: Request, background_tasks: B
     )
     if res.ok:
         background_tasks.add_task(_fb_task, article_id)
-        background_tasks.add_task(_ig_task, article_id)
     return {"ok": res.ok}
 
 
@@ -863,8 +862,56 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
     )
     if patch.ok:
         background_tasks.add_task(_fb_task, article_id)
-        background_tasks.add_task(_ig_task, article_id)
     return {"ok": patch.ok}
+
+
+@app.post("/admin/instagram/post-dagens-nyheder")
+def admin_post_dagens_nyheder(request: Request, background_tasks: BackgroundTasks):
+    """Henter alle artikler publiceret i dag og poster dem som Instagram-karrusel."""
+    _require_admin(request)
+    from datetime import datetime, timezone
+
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).isoformat()
+
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles"
+        f"?status=eq.published"
+        f"&published_at=gte.{today_start}"
+        f"&select=id,slug,title,category,excerpt,image_url"
+        f"&order=published_at.asc"
+        f"&limit=50",
+        headers=get_headers(),
+    )
+    if not res.ok:
+        raise HTTPException(status_code=500, detail="Kunne ikke hente artikler fra Supabase")
+
+    articles = res.json()
+    if not isinstance(articles, list) or len(articles) == 0:
+        return {
+            "ok": False, "slides": 0, "ig_post_id": None,
+            "saved_path": "", "error": "Ingen artikler publiceret i dag",
+            "article_count": 0,
+        }
+
+    def _carousel_task():
+        from instagram_carousel import post_dagens_nyheder
+        result = post_dagens_nyheder(
+            articles=articles,
+            sb_url=SUPABASE_URL,
+            sb_key=SUPABASE_SERVICE_ROLE_KEY,
+            meta_token=os.getenv("META_PAGE_ACCESS_TOKEN", ""),
+            ig_user_id=os.getenv("META_INSTAGRAM_USER_ID", ""),
+        )
+        print(f"[Carousel] Resultat: {result}")
+
+    background_tasks.add_task(_carousel_task)
+    return {
+        "ok": True,
+        "article_count": len(articles),
+        "message": f"Karrusel med {len(articles)} artikler startet i baggrunden",
+    }
 
 
 # --- Search ---
