@@ -47,7 +47,6 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 type Tab = "draft" | "published" | "rejected";
 
-type TodayArticle = { id: string; title: string; category: string; slug: string };
 
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState<string>("");
@@ -65,10 +64,8 @@ export default function AdminPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const feedbackRef = useRef<HTMLTextAreaElement>(null);
   const [igPosting, setIgPosting] = useState(false);
-  const [igResult, setIgResult] = useState<{ ok: boolean; message?: string; error?: string; article_count?: number } | null>(null);
-  const [todayArticles, setTodayArticles] = useState<TodayArticle[]>([]);
+  const [igResult, setIgResult] = useState<{ ok: boolean; message?: string; error?: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [todayLoading, setTodayLoading] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("adminKey");
@@ -98,29 +95,6 @@ export default function AdminPage() {
   useEffect(() => {
     if (adminKey) fetchArticles(adminKey, tab);
   }, [adminKey, tab, fetchArticles]);
-
-  const fetchTodayArticles = useCallback(async (key: string) => {
-    setTodayLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/admin/instagram/today-articles`, {
-        headers: { "x-admin-key": key },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const arts: TodayArticle[] = Array.isArray(data) ? data : [];
-        setTodayArticles(arts);
-        setSelectedIds(new Set(arts.map((a) => a.id)));
-      }
-    } catch {
-      // ignore — brugeren ser tom liste
-    } finally {
-      setTodayLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (adminKey) fetchTodayArticles(adminKey);
-  }, [adminKey, fetchTodayArticles]);
 
   // Focus textarea when feedback panel opens
   useEffect(() => {
@@ -202,7 +176,7 @@ export default function AdminPage() {
       const res = await fetch(`${API_BASE}/admin/instagram/post-dagens-nyheder`, {
         method: "POST",
         headers: { "x-admin-key": adminKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ article_ids: selectedIds.size > 0 ? Array.from(selectedIds) : null }),
+        body: JSON.stringify({ article_ids: Array.from(selectedIds) }),
       });
       const data = await res.json();
       setIgResult(data);
@@ -219,10 +193,6 @@ export default function AdminPage() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  };
-
-  const toggleAll = () => {
-    setSelectedIds(selectedIds.size === todayArticles.length ? new Set() : new Set(todayArticles.map((a) => a.id)));
   };
 
   const formatDate = (d: string | null) => {
@@ -297,7 +267,7 @@ export default function AdminPage() {
         {tabs.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => { setTab(t.id); setSelectedIds(new Set()); setIgResult(null); }}
             className={`px-4 py-2.5 text-sm rounded-t-lg transition-colors -mb-px border-b-2 ${
               tab === t.id
                 ? "text-white font-medium border-emerald-500"
@@ -328,14 +298,32 @@ export default function AdminPage() {
             const isFeedbackOpen = feedbackOpen === article.id;
             const feedbackText = feedbackTexts[article.id] ?? "";
             const isEditLoading = editLoading === article.id;
+            const isSelected = tab === "published" && selectedIds.has(article.id);
 
             return (
               <div
                 key={article.id}
-                className="rounded-2xl border border-slate-800/80 bg-slate-900/40 hover:border-slate-700 transition-colors overflow-hidden"
+                className={`rounded-2xl border transition-colors overflow-hidden ${
+                  isSelected
+                    ? "border-purple-500/40 bg-purple-950/20"
+                    : "border-slate-800/80 bg-slate-900/40 hover:border-slate-700"
+                }`}
               >
                 <div className="p-5">
                   <div className="flex items-start gap-4">
+                    {/* Instagram-checkbox på published-tab */}
+                    {tab === "published" && (
+                      <button
+                        onClick={() => toggleArticle(article.id)}
+                        className={`flex-shrink-0 mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                          isSelected
+                            ? "border-purple-400 bg-purple-500/30 text-purple-300"
+                            : "border-slate-700 hover:border-purple-500/50"
+                        }`}
+                      >
+                        {isSelected && <span className="text-[10px] font-bold leading-none">✓</span>}
+                      </button>
+                    )}
                     {/* Thumbnail */}
                     {article.image_url && (
                       <div className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-slate-800">
@@ -510,125 +498,39 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Social Media */}
-      <div className="mt-10 pt-8 border-t border-slate-800">
-        <h2 className="text-sm font-semibold text-slate-300 mb-1">Social Media</h2>
-        <p className="text-xs text-slate-600 mb-4">
-          Poster valgte artikler fra i dag som ét Instagram-karrusel-opslag. Slides gemmes
-          også lokalt i <code className="text-slate-500">output/instagram/YYYY-MM-DD/</code> til TikTok.
-        </p>
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 overflow-hidden">
-
-          {/* Artikel-selektion */}
-          <div className="p-5 border-b border-slate-800/60">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-medium text-slate-400">
-                Artikler i opslaget
-                {todayArticles.length > 0 && (
-                  <span className="ml-2 text-slate-600">
-                    {selectedIds.size}/{todayArticles.length} valgt
-                  </span>
-                )}
-              </p>
-              {todayArticles.length > 0 && (
-                <button
-                  onClick={toggleAll}
-                  className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
-                >
-                  {selectedIds.size === todayArticles.length ? "Fravælg alle" : "Vælg alle"}
-                </button>
-              )}
-            </div>
-
-            {todayLoading ? (
-              <div className="flex items-center gap-2 py-3">
-                <span className="w-3 h-3 border border-slate-700 border-t-slate-400 rounded-full animate-spin" />
-                <span className="text-xs text-slate-600">Henter dagens artikler...</span>
-              </div>
-            ) : todayArticles.length === 0 ? (
-              <p className="text-xs text-slate-600 py-2">Ingen artikler publiceret i dag endnu.</p>
+      {/* Instagram sticky bar — vises kun når artikler er valgt på published-tab */}
+      {tab === "published" && selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-5 py-3 rounded-2xl border border-purple-500/30 bg-slate-950/95 backdrop-blur shadow-2xl shadow-purple-950/40">
+          <span className="text-xs text-slate-400">
+            <span className="text-white font-medium">{selectedIds.size}</span> artikel{selectedIds.size !== 1 ? "r" : ""} valgt
+          </span>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
+          >
+            Ryd
+          </button>
+          <button
+            onClick={postDagensNyheder}
+            disabled={igPosting}
+            className="text-sm text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all px-4 py-1.5 rounded-xl font-medium disabled:opacity-50 flex items-center gap-2"
+          >
+            {igPosting ? (
+              <>
+                <span className="w-3 h-3 border border-white/40 border-t-white rounded-full animate-spin" />
+                Genererer og poster...
+              </>
             ) : (
-              <div className="space-y-1.5">
-                {todayArticles.map((art) => {
-                  const on = selectedIds.has(art.id);
-                  return (
-                    <button
-                      key={art.id}
-                      onClick={() => toggleArticle(art.id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl border text-left transition-all ${
-                        on
-                          ? "border-slate-700 bg-slate-800/60 text-slate-200"
-                          : "border-slate-800/40 bg-transparent text-slate-600"
-                      }`}
-                    >
-                      {/* Checkbox */}
-                      <span className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                        on ? "border-emerald-500 bg-emerald-500/20" : "border-slate-700"
-                      }`}>
-                        {on && <span className="text-[9px] text-emerald-400 font-bold leading-none">✓</span>}
-                      </span>
-                      {/* Titel */}
-                      <span className={`flex-1 text-xs truncate ${on ? "" : "line-through opacity-50"}`}>
-                        {art.title}
-                      </span>
-                      {/* Kategori-badge */}
-                      <span className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border ${
-                        CATEGORY_COLORS[art.category] ?? "bg-slate-800 text-slate-500 border-slate-700"
-                      }`}>
-                        {CATEGORY_LABELS[art.category] ?? art.category}
-                      </span>
-                      {/* Minus-ikon ved hover når valgt */}
-                      {on && (
-                        <span className="flex-shrink-0 text-[10px] text-slate-700 hover:text-red-400 transition-colors">
-                          ✕
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              "Post til Instagram →"
             )}
-          </div>
-
-          {/* Post-knap */}
-          <div className="p-5">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div>
-                <p className="text-sm font-medium text-slate-200">Instagram · Dagens Nyheder</p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {selectedIds.size === 0
-                    ? "Vælg mindst én artikel"
-                    : `${selectedIds.size} artikel${selectedIds.size !== 1 ? "r" : ""} + CTA-slide`}
-                </p>
-              </div>
-              <button
-                onClick={postDagensNyheder}
-                disabled={igPosting || selectedIds.size === 0}
-                className="text-sm text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all px-5 py-2 rounded-xl font-medium disabled:opacity-40 flex items-center gap-2"
-              >
-                {igPosting ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border border-white/40 border-t-white rounded-full animate-spin" />
-                    Poster...
-                  </>
-                ) : (
-                  "Post til Instagram →"
-                )}
-              </button>
-            </div>
-
-            {igResult && (
-              <div className={`mt-4 pt-4 border-t border-slate-800/60 text-xs ${igResult.ok ? "text-emerald-400" : "text-red-400"}`}>
-                {igResult.ok
-                  ? <>&#x2713; {igResult.message}</>
-                  : <>&#x2717; {igResult.error ?? "Ukendt fejl"}</>
-                }
-              </div>
-            )}
-          </div>
-
+          </button>
+          {igResult && (
+            <span className={`text-xs ${igResult.ok ? "text-emerald-400" : "text-red-400"}`}>
+              {igResult.ok ? `✓ ${igResult.message}` : `✗ ${igResult.error}`}
+            </span>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
