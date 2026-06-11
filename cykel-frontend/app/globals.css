@@ -2,8 +2,37 @@
 @plugin "@tailwindcss/typography";
 
 :root {
-  --background: #020617;
-  --foreground: #f8fafc;
+  /* Base */
+  --background: #06091a;
+  --foreground: #f0f4fc;
+
+  /* Brand accent — Signal Red */
+  --accent: #e63946;
+  --accent-hover: #cf2f3c;
+  --accent-dim: rgba(230, 57, 70, 0.10);
+  --accent-border: rgba(230, 57, 70, 0.20);
+  --accent-glow: rgba(230, 57, 70, 0.06);
+
+  /* Gold — GC leader, podiums */
+  --gold: #f5a623;
+  --gold-dim: rgba(245, 166, 35, 0.12);
+
+  /* Surfaces */
+  --surface: #0c1220;
+  --surface-2: #111b2e;
+  --surface-3: #172238;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.07);
+  --border-bright: rgba(255, 255, 255, 0.12);
+
+  /* Text */
+  --text-2: #8596b2;
+  --text-3: #445069;
+
+  /* Live */
+  --live: #4ade80;
 }
 
 @theme inline {
@@ -17,4 +46,6 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
 }
