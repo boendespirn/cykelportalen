@@ -46,10 +46,10 @@ DELAY      = 2.0
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def get_unposted(limit: int) -> list[dict]:
-    """Henter artikler der ikke er postet til sociale medier endnu."""
+    """Henter publicerede artikler der ikke er postet til sociale medier endnu."""
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/news_articles"
-        f"?social_posted=eq.false&is_advertorial=eq.false"
+        f"?social_posted=eq.false&is_advertorial=eq.false&status=eq.published"
         f"&select=id,slug,title,excerpt,category,image_url,published_at,races(name,slug)"
         f"&order=published_at.desc&limit={limit}",
         headers=AUTH_HEADERS,
@@ -95,7 +95,7 @@ def build_caption(article: dict, platform: str) -> str:
             lines.append(exc)
         if race:
             lines.append(f"\n📌 {race['name']}")
-        lines.append(f"\n🔗 {url}")
+        lines.append(f"\n🔗 Link i kommentar ↓")
         return "\n".join(lines)
 
     elif platform == "instagram":
@@ -131,6 +131,13 @@ def post_facebook(article: dict, dry_run: bool) -> bool:
     if res.ok:
         post_id = res.json().get("id", "?")
         print(f"  [FB] Postet: {post_id}")
+        # Tilføj artikel-link som første kommentar
+        if post_id and post_id != "?":
+            requests.post(
+                f"{GRAPH_URL}/{post_id}/comments",
+                data={"message": article_url, "access_token": META_TOKEN},
+                timeout=15,
+            )
         return True
     else:
         print(f"  [FB FEJL] {res.status_code}: {res.text[:200]}")

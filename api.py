@@ -775,9 +775,10 @@ def admin_approve_article(article_id: str, request: Request, background_tasks: B
 @app.patch("/admin/articles/{article_id}/reject")
 def admin_reject_article(article_id: str, request: Request):
     _require_admin(request)
-    res = requests.delete(
+    res = requests.patch(
         f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
-        headers={**get_headers(), "Prefer": "return=minimal"},
+        json={"status": "rejected"},
+        headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
     )
     return {"ok": res.ok}
 
@@ -891,10 +892,11 @@ def admin_today_articles(request: Request):
 
 
 @app.post("/admin/instagram/post-dagens-nyheder")
-async def admin_post_dagens_nyheder(request: Request, background_tasks: BackgroundTasks):
+async def admin_post_dagens_nyheder(request: Request):
     """Henter artikler publiceret i dag og poster dem som Instagram-karrusel.
     Accepterer optional JSON body: {"article_ids": ["uuid1", "uuid2", ...]}
     Hvis article_ids er angivet, bruges kun de valgte artikler.
+    Kører synkront og returnerer det faktiske resultat (inkl. fejlbesked).
     """
     _require_admin(request)
 
@@ -938,23 +940,27 @@ async def admin_post_dagens_nyheder(request: Request, background_tasks: Backgrou
                 "article_count": 0,
             }
 
-    def _carousel_task():
-        from instagram_carousel import post_dagens_nyheder
-        result = post_dagens_nyheder(
+    # Kør synkront i thread pool så vi returnerer det faktiske resultat og fejlbeskeder
+    import asyncio
+    from instagram_carousel import post_dagens_nyheder
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: post_dagens_nyheder(
             articles=articles,
             sb_url=SUPABASE_URL,
             sb_key=SUPABASE_SERVICE_ROLE_KEY,
             meta_token=os.getenv("META_PAGE_ACCESS_TOKEN", ""),
             ig_user_id=os.getenv("META_INSTAGRAM_USER_ID", ""),
-        )
-        print(f"[Carousel] Resultat: {result}")
+        ),
+    )
 
-    background_tasks.add_task(_carousel_task)
-    return {
-        "ok": True,
-        "article_count": len(articles),
-        "message": f"Karrusel med {len(articles)} artikler startet i baggrunden",
-    }
+    if result.get("ok"):
+        result["message"] = f"Karrusel med {result.get('slides', 0)} slides postet"
+    result["article_count"] = len(articles)
+    print(f"[Carousel] Resultat: {result}")
+    return result
 
 
 # --- Search ---
