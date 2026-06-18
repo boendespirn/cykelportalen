@@ -399,6 +399,20 @@ def save_startlist(race_id: str, pcs_slug: str, entries: list[dict]) -> None:
         batch = records[i:i+50]
         sb_upsert("startlists", batch, conflict="race_id,rider_id")
 
+    # Sync: fjern aktive ryttere i DB der ikke længere er på PCS-startlisten.
+    # Sikkerhedstjek: kun sync hvis vi har mindst 80% af hvad der allerede er i DB.
+    existing = sb_get("startlists", f"race_id=eq.{race_id}&status=eq.active&select=id,rider_id&limit=500")
+    new_rider_ids = {r["rider_id"] for r in records if r.get("rider_id")}
+    if new_rider_ids and len(new_rider_ids) >= len(existing) * 0.8:
+        stale = [row for row in existing if row.get("rider_id") and row["rider_id"] not in new_rider_ids]
+        if stale:
+            for row in stale:
+                requests.delete(
+                    f"{SUPABASE_URL}/rest/v1/startlists?id=eq.{row['id']}",
+                    headers=SUPABASE_HEADERS,
+                )
+            print(f"  [Sync] Fjernet {len(stale)} udgåede ryttere fra startlisten")
+
     # Gem PCS URL på løbet
     sb_patch("races", race_id, {"pcs_url": f"{BASE_URL}/race/{pcs_slug}/{YEAR}"})
 

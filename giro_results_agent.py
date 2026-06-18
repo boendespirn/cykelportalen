@@ -529,6 +529,69 @@ def _parse_giro_text(lines: list[str], ctype: str) -> list[dict]:
     return rows
 
 
+async def scrape_pcs_classification(page, pcs_base: str, stage_num: int, ctype: str) -> list[dict]:
+    """Henter points/mountains/youth-klassement fra PCS for ikke-Giro løb."""
+    suffix_map = {
+        "points":    "points",
+        "mountains": "mountains",
+        "youth":     "gc-youth",
+    }
+    suffix = suffix_map.get(ctype)
+    if not suffix:
+        return []
+    url = f"{pcs_base}/stage-{stage_num}/{suffix}"
+    print(f"  → {url}")
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(2000)
+        rows = await page.evaluate(_EXTRACT_CLASSIF_JS, ctype)
+        return rows
+    except Exception as e:
+        print(f"  PCS {ctype} fejl: {e}")
+        return []
+
+
+def store_pcs_classification(
+    rows: list[dict],
+    race_id: str,
+    stage_num: int,
+    ctype: str,
+    slug_map: dict,
+    bib_map: dict,
+) -> int:
+    """Gemmer PCS-baserede klassementsdata via slug/bib-lookup."""
+    records = []
+    for row in rows:
+        if not row.get("pos"):
+            continue
+        rider_id = None
+        if row.get("pcs_slug"):
+            rider_id = slug_map.get(row["pcs_slug"])
+        if not rider_id and row.get("bib"):
+            rider_id = bib_map.get(row["bib"])
+        if not rider_id:
+            print(f"    ! Rytter ikke fundet: {row.get('rider_name', '?')}")
+            continue
+        pts = row.get("pnt", 0) or 0
+        time_gap = 0
+        if ctype in ("gc", "youth"):
+            gap_str = row.get("gap_str") or ""
+            time_gap = parse_gap(gap_str)
+        records.append({
+            "race_id"             : race_id,
+            "after_stage_number"  : stage_num,
+            "classification_type" : ctype,
+            "rider_id"            : rider_id,
+            "position"            : row["pos"],
+            "time_gap_seconds"    : time_gap,
+            "points"              : pts,
+            "dnf"                 : False,
+        })
+    if records:
+        sb_upsert("classifications", records, "race_id,after_stage_number,classification_type,rider_id")
+    return len(records)
+
+
 async def scrape_official_classification(page, param: str, ctype: str, year: int) -> list[dict]:
     url = f"https://www.giroditalia.it/en/classifiche/?classifica={param}"
     print(f"  → {url}")
@@ -717,24 +780,37 @@ async def main(stages_to_scrape: list[int], gc_only: bool, db_slug: str, pcs_slu
 
                 latest_stage_rows = rows
 
-        # Hent klassementer fra officiel Giro-side
+        # Hent klassementer — officielt for Giro, PCS for alle andre løb
         last_stage = max(targets) if targets else max(done_stages) if done_stages else None
         if last_stage:
-            print(f"\nHenter klassementer efter etape {last_stage} (giroditalia.it):")
-            for param, ctype in [
-                ("CLPUNGEN", "points"),
-                ("CLGPMGEN", "mountains"),
-                ("CLBIANC",  "youth"),
-            ]:
-                try:
-                    c_rows = await scrape_official_classification(page, param, ctype, year)
-                    if c_rows:
-                        n = store_official_classification(c_rows, race["id"], last_stage, ctype)
-                        print(f"  Gemt {n} {ctype}-poster")
-                    else:
-                        print(f"  Ingen data for {ctype}")
-                except Exception as e:
-                    print(f"  Fejl ved {ctype}: {e}")
+            if pcs_slug == "giro-d-italia":
+                print(f"\nHenter klassementer efter etape {last_stage} (giroditalia.it):")
+                for param, ctype in [
+                    ("CLPUNGEN", "points"),
+                    ("CLGPMGEN", "mountains"),
+                    ("CLBIANC",  "youth"),
+                ]:
+                    try:
+                        c_rows = await scrape_official_classification(page, param, ctype, year)
+                        if c_rows:
+                            n = store_official_classification(c_rows, race["id"], last_stage, ctype)
+                            print(f"  Gemt {n} {ctype}-poster")
+                        else:
+                            print(f"  Ingen data for {ctype}")
+                    except Exception as e:
+                        print(f"  Fejl ved {ctype}: {e}")
+            else:
+                print(f"\nHenter klassementer efter etape {last_stage} (PCS):")
+                for ctype in ["points", "mountains", "youth"]:
+                    try:
+                        c_rows = await scrape_pcs_classification(page, PCS_BASE, last_stage, ctype)
+                        if c_rows:
+                            n = store_pcs_classification(c_rows, race["id"], last_stage, ctype, slug_map, bib_map)
+                            print(f"  Gemt {n} {ctype}-poster")
+                        else:
+                            print(f"  Ingen data for {ctype}")
+                    except Exception as e:
+                        print(f"  Fejl ved {ctype}: {e}")
 
         await browser.close()
 
