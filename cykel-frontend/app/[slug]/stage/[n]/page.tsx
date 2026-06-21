@@ -142,13 +142,28 @@ type StageResult = {
   riders: { name: string; slug: string; nationality: string | null; photo_url: string | null } | null;
 };
 
+type GCEntry = {
+  position: number | null;
+  time_gap_seconds: number | null;
+  riders: { name: string; slug: string; nationality: string | null; photo_url: string | null; teams: { name: string; slug: string } | null } | null;
+};
+
 async function getStageResults(slug: string, n: string): Promise<StageResult[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/results?limit=3`, { next: { revalidate: 300 } });
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/results?limit=10`, { next: { revalidate: 300 } });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
   } catch { return []; }
+}
+
+async function getStageGC(slug: string, n: string): Promise<{ after_stage: number; standings: GCEntry[] } | null> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/gc`, { next: { revalidate: 300 } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.standings?.length ? data : null;
+  } catch { return null; }
 }
 
 async function geocodeCity(
@@ -334,13 +349,18 @@ export async function generateMetadata(
   props: { params: Promise<{ slug: string; n: string }> }
 ): Promise<Metadata> {
   const { slug, n } = await props.params;
-  const detail = await getStageDetail(slug, n);
+  const [detail, results] = await Promise.all([
+    getStageDetail(slug, n),
+    getStageResults(slug, n),
+  ]);
   if (!detail) return { title: "Etape ikke fundet" };
   const { stage, race } = detail;
   const finish = stage.finish_location ?? "";
   const start = stage.start_location ?? "";
-  const title = `Etape ${n}: ${start} — ${finish} | ${race.name}`;
-  const desc = `Alt om etape ${n} i ${race.name}: højdeprofil, favoritter, kort og etapeinfo. ${stage.distance_km ? `${stage.distance_km} km.` : ""}`;
+  const winner = results[0]?.riders;
+  const title = `Etape ${n}: ${start}${finish ? ` — ${finish}` : ""} | ${race.name}`;
+  const winnerText = winner ? ` Vinder: ${winner.name}.` : "";
+  const desc = `Etaperesultat og klassement for etape ${n} i ${race.name}: ${start}${finish ? ` — ${finish}` : ""}.${winnerText} ${stage.distance_km ? `${stage.distance_km} km.` : ""}`.trim();
   return {
     title,
     description: desc,
@@ -376,12 +396,13 @@ export default async function StagePage(props: {
 
   const { stage, race } = result;
 
-  const [startlist, climbs, broadcastAll, allStages, stageResults] = await Promise.all([
+  const [startlist, climbs, broadcastAll, allStages, stageResults, stageGC] = await Promise.all([
     getStartlist(slug),
     getClimbs(slug, n),
     getBroadcast(slug),
     getAllStages(slug),
     getStageResults(slug, n),
+    getStageGC(slug, n),
   ]);
 
   const stageNum   = parseInt(n);
@@ -411,8 +432,29 @@ export default async function StagePage(props: {
 
   const showMap = startCoords && finishCoords;
 
+  const winner = stageResults[0]?.riders;
+  const jsonLd = winner ? {
+    "@context": "https://schema.org",
+    "@type": "SportsEvent",
+    name: `${race.name} – Etape ${stage.stage_number}`,
+    sport: "Cycling",
+    startDate: stage.date,
+    location: {
+      "@type": "Place",
+      name: stage.finish_location ?? stage.start_location ?? "",
+    },
+    url: `https://klassementet.dk/${slug}/stage/${n}`,
+    winner: {
+      "@type": "Person",
+      name: winner.name,
+    },
+  } : null;
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
+      {jsonLd && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      )}
       {/* Navigationsbar: tilbage + forrige/næste etape */}
       <div className="flex items-center justify-between mb-8 gap-2">
         <Link
@@ -489,13 +531,14 @@ export default async function StagePage(props: {
         )}
       </header>
 
-      {/* Etapevinder */}
+      {/* Etaperesultat */}
       {stageResults.length > 0 && (
         <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
           <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
-            <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">Resultat</span>
+            <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">Etaperesultat</span>
+            <span className="text-xs text-slate-600">Top {stageResults.length}</span>
           </div>
-          <div className="divide-y divide-slate-800/60">
+          <div className="divide-y divide-slate-800/40">
             {stageResults.map((r) => {
               const rider = r.riders;
               if (!rider) return null;
@@ -507,27 +550,84 @@ export default async function StagePage(props: {
                 2: "text-slate-300 font-semibold",
                 3: "text-amber-600 font-semibold",
               };
-              const gap = r.time_gap_seconds && r.time_gap_seconds > 0
-                ? `+${Math.floor(r.time_gap_seconds / 60)}:${String(r.time_gap_seconds % 60).padStart(2, "0")}`
+              const gapSec = r.time_gap_seconds ?? 0;
+              const gap = gapSec > 0
+                ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
                 : null;
+              const isTop3 = r.position <= 3;
               return (
-                <div key={r.position} className="flex items-center gap-4 px-5 py-3">
-                  <span className={`text-sm w-6 text-center flex-shrink-0 ${podiumColors[r.position] ?? "text-slate-500"}`}>
+                <div key={r.position} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
+                  <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${podiumColors[r.position] ?? "text-slate-600"}`}>
                     {r.position}.
                   </span>
                   {rider.photo_url && (
-                    <div className="relative w-8 h-8 flex-shrink-0 opacity-90">
-                      <Image src={rider.photo_url} alt="" fill sizes="32px" className="rounded-full object-cover object-top" />
+                    <div className="relative w-7 h-7 flex-shrink-0">
+                      <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
                     </div>
                   )}
-                  <span className="text-base flex-shrink-0">{flag}</span>
+                  <span className="text-sm flex-shrink-0">{flag}</span>
                   <Link
                     href={`/riders/${rider.slug}`}
-                    className="flex-1 text-sm font-medium text-slate-200 hover:text-emerald-300 transition-colors truncate"
+                    className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
                   >
                     {rider.name}
                   </Link>
-                  {gap && <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>}
+                  {gap
+                    ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
+                    : r.position === 1 && r.time_seconds
+                      ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{Math.floor(r.time_seconds / 3600)}:{String(Math.floor((r.time_seconds % 3600) / 60)).padStart(2, "0")}:{String(r.time_seconds % 60).padStart(2, "0")}</span>
+                      : null
+                  }
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* GC-klassement efter etapen */}
+      {stageGC && stageGC.standings.length > 0 && (
+        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <span className="text-xs uppercase tracking-[0.2em] text-pink-400 font-medium">Klassement efter etape {stageGC.after_stage}</span>
+          </div>
+          <div className="divide-y divide-slate-800/40">
+            {stageGC.standings.map((entry) => {
+              const rider = entry.riders;
+              if (!rider) return null;
+              const flag = rider.nationality?.length === 2
+                ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
+                : "";
+              const gapSec = entry.time_gap_seconds ?? 0;
+              const gap = gapSec > 0
+                ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
+                : null;
+              const pos = entry.position ?? 0;
+              const isTop3 = pos <= 3;
+              return (
+                <div key={rider.slug} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
+                  <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${pos === 1 ? "text-pink-400 font-bold" : pos <= 3 ? "text-slate-300 font-semibold" : "text-slate-600"}`}>
+                    {pos}.
+                  </span>
+                  {rider.photo_url && (
+                    <div className="relative w-7 h-7 flex-shrink-0">
+                      <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
+                    </div>
+                  )}
+                  <span className="text-sm flex-shrink-0">{flag}</span>
+                  <Link
+                    href={`/riders/${rider.slug}`}
+                    className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
+                  >
+                    {rider.name}
+                  </Link>
+                  {rider.teams && (
+                    <span className="text-xs text-slate-600 truncate hidden sm:block max-w-[120px]">{rider.teams.name}</span>
+                  )}
+                  {gap
+                    ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
+                    : pos === 1 ? <span className="text-[10px] font-bold text-pink-500 flex-shrink-0">FØRER</span> : null
+                  }
                 </div>
               );
             })}

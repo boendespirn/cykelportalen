@@ -261,6 +261,30 @@ def get_stage_results(slug: str, stage_number: int, limit: int = 10):
     return res.json() if res.ok and isinstance(res.json(), list) else []
 
 
+@app.get("/races/{slug}/stages/{stage_number}/gc")
+def get_gc_after_stage(slug: str, stage_number: int):
+    """GC-klassement efter en bestemt etape."""
+    race_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1",
+        headers=get_headers(),
+    )
+    race_data = race_res.json()
+    if not race_data:
+        return []
+    race_id = race_data[0]["id"]
+
+    url = (
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=eq.{race_id}&classification_type=eq.gc&after_stage_number=eq.{stage_number}"
+        f"&select=position,time_gap_seconds,riders(name,slug,nationality,photo_url,teams(name,slug))"
+        f"&order=position.asc&limit=20"
+    )
+    data = requests.get(url, headers=get_headers()).json()
+    if not isinstance(data, list) or not data:
+        return []
+    return {"after_stage": stage_number, "standings": data}
+
+
 @app.get("/races/{slug}/history")
 def get_race_history(slug: str):
     """
