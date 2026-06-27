@@ -228,7 +228,7 @@ function hasVisualProfile(c: Climb): boolean {
 }
 
 export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
-  const [activeIdx, setActiveIdx] = useState<number>(-1);
+  const [activeIdx, setActiveIdx] = useState<number>(elevationImageUrl ? -1 : 0);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const visibleClimbs = climbs.filter(hasVisualProfile);
