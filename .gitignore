@@ -36,9 +36,13 @@ desktop.ini
 *.swp
 *.swo
 
-# Claude Code session data
-.claude/
+# Claude Code session data — spor kun agents/, ikke session-filer
+.claude/*
+!.claude/agents/
+!.claude/agents/**
 
 # Logs
 *.log
 logs/
+
+.vercel
