@@ -18,7 +18,7 @@ Direktøren udvider hvert issue med dato, forsøg og løsning, efterhånden som 
 | MKT-001 | LAV | HENLAGT | ejer | TikTok auto-post uden API for risikabelt (account-ban). Afventer officiel TikTok Content Posting API-adgang. |
 | SEO-003 | HØJ | LØST | seo-agent | Canonical URL (`alternates.canonical`) tilføjet 2026-07-03 til alle fem `generateMetadata`-funktioner (race, stage, rider, team, artikel), med bevaret RSS `alternates.types`. Build + typecheck verificeret grønt. |
 | SEO-004 | HØJ | LØST | seo-agent | `BreadcrumbList` JSON-LD tilføjet 2026-07-03 på etapesider (`/[slug]/stage/[n]/page.tsx`): Klassementet → løb → etape. Typecheck grønt. |
-| SEO-005 | MIDDEL | NY | seo-agent | Tilføj `Person` JSON-LD på rytterprofiler (`/riders/[slug]/page.tsx`). |
+| SEO-005 | MIDDEL | LØST | seo-agent | Verificeret 2026-07-03: `Person` JSON-LD var allerede implementeret på rytterprofiler (`/riders/[slug]/page.tsx`) i en tidligere kørsel — blot ikke markeret som løst. |
 | SEO-006 | HØJ | NY | seo-agent | Forbedrede, keyword-målrettede meta-beskrivelser på løbsider — start med Tour de France. |
 | SEO-007 | MIDDEL | LØST | seo-agent | IndexNow implementeret 2026-07-03: nøglefil i `cykel-frontend/public/`, `submit_indexnow()` i `api.py` kaldes som baggrundsopgave ved artikel-godkendelse (`/admin/articles/{id}/approve`). Nøglen er ikke hemmelig (IndexNow-protokollen kræver offentlig nøglefil). |
 | SEO-008 | MIDDEL | LØST | seo-agent | `agents/gsc_agent.py` bygget og testkørt 2026-07-03 med rigtige Railway-credentials (`GSC_SERVICE_ACCOUNT_JSON_B64` + `GSC_PROPERTY_URL=sc-domain:klassementet.dk`). Fandt reelle data: kun 10 sider med søgeeksponeringer sidste 28 dage, TDF-siden ranker pos. 25.7 med 0% CTR. |
