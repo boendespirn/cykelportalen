@@ -96,18 +96,28 @@ async def capture_sprint_profile(context, pcs_stage_url: str) -> tuple[str | Non
     Navigér til PCS /info/profiles-siden og opsnappr sprint-profilbilledet
     (det er elevationsprofilen med sprint-markeringer — det bedste vi kan få fra PCS).
     Returnerer (ny_url, bytes) eller (None, None).
+
+    Filnavns-mønstre alene ('profile', 'sprint' vs. 'map') er IKKE nok til at
+    skelne en ægte højdeprofil fra et rutekort — PCS bruger 'profile' i filnavnet
+    for begge typer billeder (bekræftet bug: TdF 2026 etape 5/9 fik et rutekort på
+    ~880-905 KB gemt som "elevation_image_url"). Ægte højdeprofil-billeder (simpel
+    linjegraf) er observeret at være 60-120 KB; rutekort (detaljeret terræn/veje)
+    er 300 KB+. Vi indsamler derfor ALLE filnavns-matchende kandidater og vælger
+    den mindste inden for et fornuftigt størrelsesinterval, i stedet for "første match".
     """
     profiles_url = pcs_stage_url.rstrip("/") + "/info/profiles"
-    captured: dict[str, tuple[str, bytes]] = {}
+    MIN_BYTES = 10_000
+    MAX_BYTES = 250_000  # ægte profiler er typisk <130 KB; rutekort er typisk 300 KB+
+    candidates: list[tuple[str, bytes]] = []
 
     page = await context.new_page()
 
     async def on_response(response):
         url = response.url
         fname = url.split("/")[-1]
-        # Tag elevationsprofil-billedet: enten '-sprint-' eller '-profile-'
-        # Spring '-map-', '-finish-', '-climb' over
-        is_elevation = (
+        # Tag elevationsprofil-billed-kandidater: enten '-sprint-' eller '-profile-'
+        # Spring '-map-', '-finish-', '-climb' over (filnavns-heuristik, ikke tilstrækkelig alene)
+        is_candidate = (
             "procyclingstats.com/images/profiles" in url
             and response.ok
             and ("sprint" in fname or ("profile" in fname and "climb" not in fname))
@@ -115,11 +125,11 @@ async def capture_sprint_profile(context, pcs_stage_url: str) -> tuple[str | Non
             and "finish" not in fname
             and "climb" not in fname
         )
-        if is_elevation and "elevation" not in captured:
+        if is_candidate:
             try:
                 data = await response.body()
-                if len(data) > 10000:
-                    captured["elevation"] = (url, data)
+                if MIN_BYTES < len(data) < MAX_BYTES:
+                    candidates.append((url, data))
             except Exception:
                 pass
 
@@ -133,8 +143,9 @@ async def capture_sprint_profile(context, pcs_stage_url: str) -> tuple[str | Non
     finally:
         await page.close()
 
-    if "elevation" in captured:
-        return captured["elevation"]
+    if candidates:
+        # Vælg mindste kandidat — ægte højdeprofiler er markant mindre end rutekort
+        return min(candidates, key=lambda c: len(c[1]))
     return None, None
 
 
