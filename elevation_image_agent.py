@@ -102,8 +102,17 @@ async def capture_sprint_profile(context, pcs_stage_url: str) -> tuple[str | Non
     for begge typer billeder (bekræftet bug: TdF 2026 etape 5/9 fik et rutekort på
     ~880-905 KB gemt som "elevation_image_url"). Ægte højdeprofil-billeder (simpel
     linjegraf) er observeret at være 60-120 KB; rutekort (detaljeret terræn/veje)
-    er 300 KB+. Vi indsamler derfor ALLE filnavns-matchende kandidater og vælger
-    den mindste inden for et fornuftigt størrelsesinterval, i stedet for "første match".
+    er 300 KB+. Vi indsamler derfor ALLE filnavns-matchende kandidater inden for et
+    fornuftigt størrelsesinterval, i stedet for "første match".
+
+    For etaper med en fremtrædende (typisk HC-) stigning leverer PCS UDOVER
+    hovedprofilen ('profile-n2') også en ekstra zoomet enkelt-stigning-variant
+    ('profile-n3' e.l.) — verificeret live på PCS for TdF 2026 etape 6: n2 var
+    Côte de Loucroups eget diagram (34 KB), n3 var den ægte fulde etapeprofil
+    med alle stigninger markeret (107 KB) — se STG-008. Den ægte fulde profil
+    er altid den STØRSTE af disse kandidater (mere terræn/data end en enkelt
+    zoomet stigning), så vi vælger den største i stedet for den mindste.
+    Rutekort er allerede udelukket på filnavn ('map') og på øvre grænse.
     """
     profiles_url = pcs_stage_url.rstrip("/") + "/info/profiles"
     MIN_BYTES = 10_000
@@ -144,8 +153,10 @@ async def capture_sprint_profile(context, pcs_stage_url: str) -> tuple[str | Non
         await page.close()
 
     if candidates:
-        # Vælg mindste kandidat — ægte højdeprofiler er markant mindre end rutekort
-        return min(candidates, key=lambda c: len(c[1]))
+        # Vælg største kandidat — den fulde etapeprofil har mere terræn/data
+        # end en evt. ekstra zoomet enkelt-stigning-variant (se STG-008).
+        # Rutekort er allerede udelukket via filnavn ('map') og MAX_BYTES.
+        return max(candidates, key=lambda c: len(c[1]))
     return None, None
 
 
