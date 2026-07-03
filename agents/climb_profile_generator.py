@@ -231,3 +231,72 @@ def within_tolerance(derived: dict, db_climb: dict) -> tuple[bool, str]:
         reasons.append(f"grad {derived['avg_gradient']:.1f}≈{db_grad}%")
 
     return True, " | ".join(reasons) if reasons else "ingen metrics at tjekke"
+
+
+# ── Sektionsberegning ───────────────────────────────────────────────────────
+
+def _interp_at(xy_pairs: list[tuple[float, float]], x: float) -> float:
+    """Lineær interpolation af y ved et givet x i en sorteret (x, y)-liste."""
+    xs = [p[0] for p in xy_pairs]
+    idx = bisect.bisect_left(xs, x)
+    if idx == 0:
+        return xy_pairs[0][1]
+    if idx >= len(xy_pairs):
+        return xy_pairs[-1][1]
+    x0, y0 = xy_pairs[idx - 1]
+    x1, y1 = xy_pairs[idx]
+    frac = (x - x0) / (x1 - x0) if x1 > x0 else 0.0
+    return y0 + frac * (y1 - y0)
+
+
+def resample_elevation_profile(
+    segment_points: list[tuple[float, float, float]], n: int = 200
+) -> list[tuple[float, float]]:
+    """
+    Resampler et GPX-segment til n jævnt fordelte punkter langs distancen
+    (lineær interpolation). Udjævner korte stigninger med få rå GPX-punkter,
+    så sektionsgrænser ikke bliver støjede.
+    """
+    local_cum = [0.0]
+    for i in range(1, len(segment_points)):
+        d = haversine_km(
+            segment_points[i - 1][0], segment_points[i - 1][1],
+            segment_points[i][0], segment_points[i][1],
+        )
+        local_cum.append(local_cum[-1] + d)
+
+    total = local_cum[-1]
+    if total <= 0:
+        raise ValueError("Segment har nul distance")
+
+    xy_pairs = list(zip(local_cum, [p[2] for p in segment_points]))
+
+    resampled = []
+    for i in range(n):
+        target = total * i / (n - 1)
+        resampled.append((target, _interp_at(xy_pairs, target)))
+    return resampled
+
+
+def compute_gradient_sections(
+    resampled: list[tuple[float, float]], n_sections: int = 10
+) -> list[dict]:
+    """Deler et resamplet højdeprofil i n_sections lige lange (efter distance) sektioner."""
+    total = resampled[-1][0]
+    section_len = total / n_sections
+
+    sections = []
+    for i in range(n_sections):
+        start_km = i * section_len
+        end_km = (i + 1) * section_len
+        start_elev = _interp_at(resampled, start_km)
+        end_elev = _interp_at(resampled, end_km)
+        gradient = (end_elev - start_elev) / (section_len * 1000) * 100 if section_len > 0 else 0.0
+        sections.append({
+            "start_km":     round(start_km, 3),
+            "end_km":       round(end_km, 3),
+            "start_elev":   round(start_elev, 1),
+            "end_elev":     round(end_elev, 1),
+            "avg_gradient": round(gradient, 1),
+        })
+    return sections

@@ -18,6 +18,8 @@ from climb_profile_generator import (
     locate_climb_segment,
     derive_climb_stats,
     within_tolerance,
+    resample_elevation_profile,
+    compute_gradient_sections,
 )
 
 
@@ -130,6 +132,31 @@ class TestWithinTolerance(unittest.TestCase):
         db_climb = {"elevation_m": None, "avg_gradient": None}
         ok, reason = within_tolerance(derived, db_climb)
         self.assertTrue(ok)
+
+
+class TestResampleElevationProfile(unittest.TestCase):
+    def test_linear_segment_resamples_correctly(self):
+        # 3 punkter langs en lineær stigning: 0km/100m, 1km/150m, 2km/200m
+        segment = [(45.0, 6.0, 100.0), (45.008993, 6.0, 150.0), (45.017986, 6.0, 200.0)]
+        resampled = resample_elevation_profile(segment, n=5)
+        self.assertEqual(len(resampled), 5)
+        self.assertAlmostEqual(resampled[0][0], 0.0, delta=0.01)
+        self.assertAlmostEqual(resampled[0][1], 100.0, delta=1.0)
+        self.assertAlmostEqual(resampled[2][1], 150.0, delta=2.0)
+        self.assertAlmostEqual(resampled[-1][1], 200.0, delta=1.0)
+
+
+class TestComputeGradientSections(unittest.TestCase):
+    def test_two_sections_on_constant_gradient_line(self):
+        # Fuldstændig lineær profil: 0km->0m, 1km->50m, 2km->100m (5% hele vejen)
+        resampled = [(0.0, 0.0), (1.0, 50.0), (2.0, 100.0)]
+        sections = compute_gradient_sections(resampled, n_sections=2)
+        self.assertEqual(len(sections), 2)
+        self.assertAlmostEqual(sections[0]["start_km"], 0.0)
+        self.assertAlmostEqual(sections[0]["end_km"], 1.0)
+        self.assertAlmostEqual(sections[0]["avg_gradient"], 5.0, delta=0.01)
+        self.assertAlmostEqual(sections[1]["avg_gradient"], 5.0, delta=0.01)
+        self.assertAlmostEqual(sections[1]["end_elev"], 100.0, delta=0.01)
 
 
 if __name__ == "__main__":
