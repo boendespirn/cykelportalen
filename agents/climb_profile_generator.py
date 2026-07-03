@@ -144,3 +144,40 @@ def cumulative_distances_km(points: list[tuple[float, float, float]]) -> list[fl
         d = haversine_km(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1])
         cum.append(cum[-1] + d)
     return cum
+
+
+# ── Segment-lokalisering ────────────────────────────────────────────────────
+
+def locate_climb_segment(
+    points: list[tuple[float, float, float]],
+    cum_dist: list[float],
+    stage_distance_km: float,
+    km_from_start: float,
+    length_km: float,
+) -> list[tuple[float, float, float]]:
+    """
+    Lokaliserer stigningens segment i GPX-sporet ved proportional position,
+    fordi GPX'ens egen kumulative distance sjældent matcher den officielle
+    etapedistance præcist (GPS-støj i sving inflaterer GPX-distancen).
+    """
+    if stage_distance_km <= 0:
+        raise ValueError("Ugyldig etapedistance")
+
+    gpx_total = cum_dist[-1]
+    start_target = (km_from_start / stage_distance_km) * gpx_total
+    end_target = ((km_from_start + length_km) / stage_distance_km) * gpx_total
+
+    start_idx = bisect.bisect_left(cum_dist, start_target)
+    end_idx = bisect.bisect_left(cum_dist, end_target)
+
+    start_idx = max(0, min(start_idx, len(points) - 1))
+    end_idx = max(0, min(end_idx, len(points) - 1))
+
+    if end_idx <= start_idx:
+        raise ValueError("Kunne ikke lokalisere et gyldigt GPX-segment for stigningen")
+
+    segment = points[start_idx:end_idx + 1]
+    if len(segment) < 2:
+        raise ValueError("For få GPX-punkter i det lokaliserede segment")
+
+    return segment

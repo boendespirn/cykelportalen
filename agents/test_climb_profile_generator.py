@@ -15,6 +15,7 @@ from climb_profile_generator import (
     parse_gpx_with_elevation,
     haversine_km,
     cumulative_distances_km,
+    locate_climb_segment,
 )
 
 
@@ -62,6 +63,34 @@ class TestGeometry(unittest.TestCase):
         self.assertAlmostEqual(cum[0], 0.0, delta=1e-9)
         self.assertAlmostEqual(cum[1], 1.11194, delta=0.001)
         self.assertAlmostEqual(cum[2], 2.22388, delta=0.002)
+
+
+class TestLocateClimbSegment(unittest.TestCase):
+    def setUp(self):
+        # 11 punkter jaevnt fordelt langs en meridian, ca. 1 km mellem hver
+        self.points = [(45.0 + i * 0.0089932, 6.0, float(i)) for i in range(11)]
+        self.cum = [round(i * 1.11194, 5) for i in range(11)]  # ~[0,1,2,...,10] km
+
+    def test_exact_boundaries_when_gpx_matches_official_distance(self):
+        segment = locate_climb_segment(self.points, self.cum, stage_distance_km=10.0,
+                                        km_from_start=3.0, length_km=4.0)
+        self.assertEqual(segment[0], self.points[3])
+        self.assertEqual(segment[-1], self.points[7])
+        self.assertEqual(len(segment), 5)
+
+    def test_proportional_scaling_when_gpx_distance_differs_from_official(self):
+        # Officiel distance 8 km, men GPX'ens egen sum er 10 km (GPS-stoej).
+        # Klatring ligger 30%-70% af den officielle distance -> samme 3-7 km
+        # vindue i GPX'ens eget distance-rum som ovenstaaende test.
+        segment = locate_climb_segment(self.points, self.cum, stage_distance_km=8.0,
+                                        km_from_start=2.4, length_km=3.2)
+        self.assertEqual(segment[0], self.points[3])
+        self.assertEqual(segment[-1], self.points[7])
+
+    def test_raises_on_invalid_stage_distance(self):
+        with self.assertRaises(ValueError):
+            locate_climb_segment(self.points, self.cum, stage_distance_km=0,
+                                  km_from_start=1.0, length_km=2.0)
 
 
 if __name__ == "__main__":
