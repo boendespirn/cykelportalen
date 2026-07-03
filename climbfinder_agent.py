@@ -176,37 +176,41 @@ def metrics_ok(cf: dict, db: dict) -> tuple[bool, str]:
     Sammenligner CF-metrics med vores DB-data.
     Returnerer (godkendt, forklaring).
     Springer over tjek hvis vi ikke har den pågældende DB-værdi.
+
+    Tolerancerne var tidligere alt for løse (længde 0.5-2.0x, højde ±300-450m,
+    hældning ±4%) — det tillod reelt forkerte bjerge at blive godkendt, hvis de
+    blot lignede lidt (bekræftet bug: TdF 2026 "Côte de Begues" (6.3 km, DB) blev
+    matchet til ClimbFinders "Côte de Benagues" (3.2 km) — en helt anden bakke i
+    Frankrig, ikke Barcelona — fordi ratio 0.51 lige akkurat lå inden for 0.5-2.0.
+    Strammet 2026-07-03 til realistiske toleranceer for at være samme bjerg.
     """
     reasons = []
 
-    # Længdetjek (vigtigst — afviger ikke mere end 50%)
+    # Længdetjek (vigtigst — afviger ikke mere end ±33%)
     db_len = db.get("length_km")
     cf_len = cf.get("length_km", 0)
     len_ratio = None
     if db_len and cf_len and cf_len > 0:
         len_ratio = cf_len / db_len
-        if len_ratio < 0.5 or len_ratio > 2.0:
+        if len_ratio < 0.75 or len_ratio > 1.33:
             return False, f"længde {cf_len:.1f} km vs DB {db_len:.1f} km (ratio {len_ratio:.2f})"
         reasons.append(f"len {cf_len:.1f}≈{db_len:.1f}km")
 
-    # Tophøjdetjek — skarpere tolerance når længden passer godt
+    # Tophøjdetjek (maks 100m forskel)
     db_elev = db.get("elevation_m")
     cf_elev = cf.get("finish_elevation")
     if db_elev and cf_elev:
         diff = abs(cf_elev - db_elev)
-        # Tillad maks 300m forskel — hvis CF måler en længere tilkørsel
-        # kan tophøjden stadig stemme; men store udsving indikerer forkert bjerg
-        max_elev_diff = 300 if (len_ratio and 0.7 <= len_ratio <= 1.4) else 450
-        if diff > max_elev_diff:
+        if diff > 100:
             return False, f"tophøjde {cf_elev}m vs DB {db_elev}m (diff {diff}m)"
         reasons.append(f"elev {cf_elev}≈{db_elev}m")
 
-    # Hældiningstjek (ikke mere end 4% forskel)
+    # Hældiningstjek (maks 1.5% forskel)
     db_grad = db.get("avg_gradient")
     cf_grad = cf.get("gradient_pct", 0)
     if db_grad and cf_grad:
         diff = abs(cf_grad - db_grad)
-        if diff > 4:
+        if diff > 1.5:
             return False, f"hældning {cf_grad:.1f}% vs DB {db_grad:.1f}% (diff {diff:.1f}%)"
         reasons.append(f"grad {cf_grad:.1f}≈{db_grad:.1f}%")
 
@@ -511,6 +515,13 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> i
 
             if not profile_url:
                 skipped += 1
+                # Ryd en tidligere (nu forkastet) match — ellers overlever et
+                # forkert billede stille og roligt, blot fordi ingen ny kandidat
+                # kunne verificeres denne kørsel (samme fejlmønster som den
+                # oprindelige stale-override-bug, men for det generelle tilfælde).
+                if climb.get("profile_image_url"):
+                    update_climb_profile(climb["id"], None)
+                    print("    → Ryddet tidligere match (bestod ikke verifikation nu)")
                 continue
 
             if update_climb_profile(climb["id"], profile_url):
