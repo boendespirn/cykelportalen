@@ -255,9 +255,21 @@ async def scrape_race_stages(pcs_slug: str) -> list[dict]:
                 const titleEl = document.querySelector('.titleCont, .page-title');
                 result.title = titleEl ? titleEl.innerText.trim() : '';
 
-                // Profil-billede URL — scan alle images
+                // Profil-billede URL — scan alle images under /profiles/, men vælg
+                // KUN dem, der faktisk er højdeprofilen. PCS-siderne indeholder også
+                // rutekort ('-map-') og mål-zoom ('-final-km-') under samme sti, og
+                // DOM-rækkefølgen varierer pr. etape, så et simpelt "første match"
+                // kan gribe det forkerte billede (bug: TdF 2026 etape 1/2/3/12 fik map/
+                // final-km i stedet for højdeprofilen).
                 const allImgs = [...document.querySelectorAll('img')];
-                const profileImg = allImgs.find(img => img.src && img.src.includes('/profiles/'));
+                const profileCandidates = allImgs.filter(img => img.src && img.src.includes('/profiles/'));
+                const isElevationProfile = (src) => {
+                    const fname = src.split('/').pop();
+                    return (fname.includes('profile') || fname.includes('sprint'))
+                        && !fname.includes('final-km')
+                        && !fname.includes('map');
+                };
+                const profileImg = profileCandidates.find(img => isElevationProfile(img.src));
                 result.elevation_image_url = profileImg ? profileImg.src : null;
 
                 // Stage type fra icon class (p1, p2, ... p6, tt)
@@ -394,8 +406,17 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
             const titleEl = document.querySelector('.titleCont, .page-title, h1');
             result.title = titleEl ? titleEl.innerText.trim() : '';
 
+            // Se kommentar i scrape_race_stages() — vælg kun ægte højdeprofil-billeder,
+            // ikke rutekort ('-map-') eller mål-zoom ('-final-km-').
             const allImgs = [...document.querySelectorAll('img')];
-            const profileImg = allImgs.find(img => img.src && img.src.includes('/profiles/'));
+            const profileCandidates = allImgs.filter(img => img.src && img.src.includes('/profiles/'));
+            const isElevationProfile = (src) => {
+                const fname = src.split('/').pop();
+                return (fname.includes('profile') || fname.includes('sprint'))
+                    && !fname.includes('final-km')
+                    && !fname.includes('map');
+            };
+            const profileImg = profileCandidates.find(img => isElevationProfile(img.src));
             result.elevation_image_url = profileImg ? profileImg.src : null;
 
             const iconEl = document.querySelector('span.icon.profile');

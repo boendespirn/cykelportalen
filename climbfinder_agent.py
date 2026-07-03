@@ -403,13 +403,38 @@ def get_climbs_for_stage(stage_id: str, only_missing: bool) -> list[dict]:
     return [r for r in rows if not r.get("profile_image_url")] if only_missing else rows
 
 
-def update_climb_profile(climb_id: str, profile_url: str) -> bool:
+def update_climb_profile(climb_id: str, profile_url: str | None) -> bool:
     res = requests.patch(
         f"{SUPABASE_URL}/rest/v1/stage_climbs?id=eq.{climb_id}",
         json={"profile_image_url": profile_url},
         headers=SB_HEADERS,
     )
     return res.status_code in (200, 204)
+
+
+def clear_stale_override_images(stage_id: str) -> int:
+    """
+    Rydder profile_image_url for stigninger, hvis navnet nu står i SEARCH_OVERRIDES
+    som None ("kan ikke verificeres"), men stadig har et billede liggende fra en
+    tidligere kørsel (fx før overriden blev tilføjet, eller før metrics-verifikation
+    fandtes). Uden dette bliver et kendt-forkert match aldrig rettet, fordi
+    get_climbs_for_stage(only_missing=True) springer klatringer med et sat
+    profile_image_url over — og --overwrite kræves normalt ikke for hver kørsel.
+    Kører derfor altid, uafhængigt af --overwrite.
+    """
+    climbs = get_climbs_for_stage(stage_id, only_missing=False)
+    cleared = 0
+    for climb in climbs:
+        name = (climb.get("name") or "").strip()
+        has_override_none = name in SEARCH_OVERRIDES and SEARCH_OVERRIDES[name] is None
+        if has_override_none and climb.get("profile_image_url"):
+            if update_climb_profile(climb["id"], None):
+                print(f"  ⚠ Ryddet forældet/uverificeret match: {name} "
+                      f"({climb.get('profile_image_url')})")
+                cleared += 1
+            else:
+                print(f"  ✗ Kunne ikke rydde {name} (DB-fejl)")
+    return cleared
 
 
 # ── Hovedpipeline ─────────────────────────────────────────────────────────────
@@ -423,6 +448,14 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> i
     stages = get_stages(race["id"], stage_number)
     print(f"\nclimbfinder_agent.py — {race['name']}")
     print(f"Fandt {len(stages)} etaper (med metrics-verifikation + GPS-fallback)")
+
+    # Ryd forældede/uverificerede matches FØR login — kræver ikke CF-session,
+    # og skal ske uanset om login lykkes eller om --overwrite er sat.
+    total_cleared = 0
+    for stage in stages:
+        total_cleared += clear_stale_override_images(stage["id"])
+    if total_cleared:
+        print(f"Ryddede {total_cleared} forældet(e)/uverificeret(e) match(es) (jf. SEARCH_OVERRIDES)\n")
 
     print("Logger ind på ClimbFinder...")
     session = cf_login()
