@@ -3,7 +3,7 @@ climb_profile_generator.py
 Genererer klassementet.dk's egne stigningsprofil-billeder direkte fra raa
 GPX-hoejdedata, som fallback naar ClimbFinder ikke har et verificeret match.
 
-Stil: terraensilhuet delt i 10 sektioner, farvet efter haeldning
+Stil: terraensilhuet delt i 20 sektioner, farvet efter haeldning
 (hvid 0% -> roed 10% -> moerkeroed ~13% -> sort 15%+), i to varianter
 ("full" med akser/labels, "minimal" uden).
 
@@ -330,7 +330,7 @@ def resample_elevation_profile(
 
 
 def compute_gradient_sections(
-    resampled: list[tuple[float, float]], n_sections: int = 10
+    resampled: list[tuple[float, float]], n_sections: int = 20
 ) -> list[dict]:
     """Deler et resamplet højdeprofil i n_sections lige lange (efter distance) sektioner."""
     total = resampled[-1][0]
