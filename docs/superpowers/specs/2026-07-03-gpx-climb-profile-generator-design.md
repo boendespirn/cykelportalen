@@ -11,7 +11,9 @@ Test-case: Tour de France 2026, etape 2 (Tarragona → Barcelona). 4 stigninger,
 
 ## Mål
 
-Generér vores egne stigningsprofil-billeder direkte fra GPX-højdedata, stilistisk inspireret af ClimbFinder (terrænsilhuet delt i 10 farvede sektioner efter hældning), som fallback når intet verificeret ClimbFinder-match findes.
+Generér vores egne stigningsprofil-billeder direkte fra GPX-højdedata, stilistisk inspireret af ClimbFinder (terrænsilhuet delt i farvede sektioner efter hældning), som fallback når intet verificeret ClimbFinder-match findes.
+
+**Opdatering 2026-07-03 (efter etape 2-test):** Ejeren valgte "fuld" stilart og bad om 20 sektioner i stedet for 10 for et mere præcist og visuelt smidigt terrænsilhuet — implementeret som ny default i `compute_gradient_sections()`. Sektionsantal er en fast andel af billedbredden, uafhængigt af klatringens absolutte længde, så flere sektioner giver ingen crowding af %-labels.
 
 ## Datagrundlag (verificeret under design)
 
