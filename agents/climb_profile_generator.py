@@ -300,3 +300,27 @@ def compute_gradient_sections(
             "avg_gradient": round(gradient, 1),
         })
     return sections
+
+
+# ── Farve ───────────────────────────────────────────────────────────────────
+
+COLOR_STOPS: list[tuple[float, tuple[int, int, int]]] = [
+    (0.0,  (255, 255, 255)),  # hvid
+    (4.0,  (253, 224, 166)),  # lys rav
+    (7.0,  (245, 148, 60)),   # orange
+    (10.0, (214, 40, 40)),    # rød
+    (13.0, (122, 12, 30)),    # mørkerød
+    (15.0, (10, 10, 10)),     # sort
+]
+
+
+def gradient_to_color(gradient_pct: float) -> tuple[int, int, int]:
+    """Kontinuerlig, stykkevis-lineær farveskala fra hvid (0%) til sort (15%+)."""
+    g = max(0.0, gradient_pct)
+    if g >= COLOR_STOPS[-1][0]:
+        return COLOR_STOPS[-1][1]
+    for (g0, c0), (g1, c1) in zip(COLOR_STOPS, COLOR_STOPS[1:]):
+        if g0 <= g <= g1:
+            frac = (g - g0) / (g1 - g0)
+            return tuple(int(round(c0[k] + frac * (c1[k] - c0[k]))) for k in range(3))
+    return COLOR_STOPS[-1][1]

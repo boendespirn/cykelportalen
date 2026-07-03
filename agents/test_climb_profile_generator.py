@@ -20,6 +20,7 @@ from climb_profile_generator import (
     within_tolerance,
     resample_elevation_profile,
     compute_gradient_sections,
+    gradient_to_color,
 )
 
 
@@ -157,6 +158,28 @@ class TestComputeGradientSections(unittest.TestCase):
         self.assertAlmostEqual(sections[0]["avg_gradient"], 5.0, delta=0.01)
         self.assertAlmostEqual(sections[1]["avg_gradient"], 5.0, delta=0.01)
         self.assertAlmostEqual(sections[1]["end_elev"], 100.0, delta=0.01)
+
+
+class TestGradientToColor(unittest.TestCase):
+    def test_exact_control_points(self):
+        self.assertEqual(gradient_to_color(0.0), (255, 255, 255))
+        self.assertEqual(gradient_to_color(4.0), (253, 224, 166))
+        self.assertEqual(gradient_to_color(7.0), (245, 148, 60))
+        self.assertEqual(gradient_to_color(10.0), (214, 40, 40))
+        self.assertEqual(gradient_to_color(13.0), (122, 12, 30))
+        self.assertEqual(gradient_to_color(15.0), (10, 10, 10))
+
+    def test_beyond_15_percent_clamps_to_black(self):
+        self.assertEqual(gradient_to_color(22.0), (10, 10, 10))
+
+    def test_negative_gradient_clamps_to_white(self):
+        self.assertEqual(gradient_to_color(-5.0), (255, 255, 255))
+
+    def test_midpoint_interpolates_between_stops(self):
+        c = gradient_to_color(2.0)  # halvvejs mellem 0% (hvid) og 4% (lys rav)
+        self.assertTrue(253 <= c[0] <= 255)
+        self.assertTrue(224 <= c[1] <= 255)
+        self.assertTrue(166 <= c[2] <= 255)
 
 
 if __name__ == "__main__":
