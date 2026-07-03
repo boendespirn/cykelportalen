@@ -73,30 +73,44 @@ class TestGeometry(unittest.TestCase):
 
 class TestLocateClimbSegment(unittest.TestCase):
     def setUp(self):
-        # 11 punkter jaevnt fordelt langs en meridian, ca. 1 km mellem hver
-        self.points = [(45.0 + i * 0.0089932, 6.0, float(i)) for i in range(11)]
-        self.cum = [round(i * 1.11194, 5) for i in range(11)]  # ~[0,1,2,...,10] km
+        # Rute: 201 punkter, 0.5 km imellem hver (cum_dist = 0.5*i), 100 km total.
+        # Fladt 0-50km (50m) -> lineaer klatring 50-74km (50m -> 450m) -> fladt 74-100km (450m).
+        self.cum = [round(0.5 * i, 3) for i in range(201)]
+        elevations = []
+        for i in range(201):
+            if i < 100:
+                elevations.append(50.0)
+            elif i <= 148:
+                elevations.append(50.0 + (i - 100) * (400.0 / 48))
+            else:
+                elevations.append(450.0)
+        self.points = [(0.0, 0.0, e) for e in elevations]
+        self.db_climb = {"elevation_m": 400, "avg_gradient": round(400 / 24000 * 100, 2)}
 
-    def test_exact_boundaries_when_gpx_matches_official_distance(self):
-        segment = locate_climb_segment(self.points, self.cum, stage_distance_km=10.0,
-                                        km_from_start=3.0, length_km=4.0)
-        self.assertEqual(segment[0], self.points[3])
-        self.assertEqual(segment[-1], self.points[7])
-        self.assertEqual(len(segment), 5)
+    def test_finds_climb_when_naive_estimate_is_accurate(self):
+        # Officiel distance = GPX-total (100 km), saa det proportionale gaet
+        # rammer klatringens rigtige start (50 km) praecist.
+        segment = locate_climb_segment(self.points, self.cum, stage_distance_km=100.0,
+                                        km_from_start=50.0, length_km=24.0, db_climb=self.db_climb)
+        derived = derive_climb_stats(segment)
+        self.assertAlmostEqual(derived["elevation_gain_m"], 400, delta=15)
 
-    def test_proportional_scaling_when_gpx_distance_differs_from_official(self):
-        # Officiel distance 8 km, men GPX'ens egen sum er 10 km (GPS-stoej).
-        # Klatring ligger 30%-70% af den officielle distance -> samme 3-7 km
-        # vindue i GPX'ens eget distance-rum som ovenstaaende test.
-        segment = locate_climb_segment(self.points, self.cum, stage_distance_km=8.0,
-                                        km_from_start=2.4, length_km=3.2)
-        self.assertEqual(segment[0], self.points[3])
-        self.assertEqual(segment[-1], self.points[7])
+    def test_recovers_when_naive_estimate_overshoots(self):
+        # Officiel distance (90 km) != GPX-total (100 km) -> det proportionale
+        # gaet rammer 70 km (inde i klatringen/paa vej ud i den flade
+        # efterfoelgende straekning), 20 km fra klatringens rigtige start (50 km) —
+        # samme slags overskud som blev fundet paa tour-de-france-2026 etape 2.
+        # Soegningen skal stadig finde den rigtige klatring inden for radius.
+        segment = locate_climb_segment(self.points, self.cum, stage_distance_km=90.0,
+                                        km_from_start=63.0, length_km=21.6, db_climb=self.db_climb)
+        derived = derive_climb_stats(segment)
+        self.assertAlmostEqual(derived["elevation_gain_m"], 400, delta=30)
+        self.assertGreater(derived["elevation_gain_m"], 300)  # ikke den flade decoy-straekning (~0-90m)
 
     def test_raises_on_invalid_stage_distance(self):
         with self.assertRaises(ValueError):
             locate_climb_segment(self.points, self.cum, stage_distance_km=0,
-                                  km_from_start=1.0, length_km=2.0)
+                                  km_from_start=1.0, length_km=2.0, db_climb=self.db_climb)
 
 
 class TestDeriveClimbStats(unittest.TestCase):

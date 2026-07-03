@@ -148,34 +148,85 @@ def cumulative_distances_km(points: list[tuple[float, float, float]]) -> list[fl
 
 # ── Segment-lokalisering ────────────────────────────────────────────────────
 
+SEARCH_RADIUS_KM = 25.0
+_WIDTH_FACTORS = [0.7, 0.85, 1.0, 1.15, 1.3, 1.5]
+_SEARCH_STEP_POINTS = 3
+
+
+def _candidate_score(elevation_gain_m: float, avg_gradient: float, db_climb: dict) -> float:
+    """Lavere er bedre. Relativ fejl mod DB'ens højdemeter/hældning, 0 hvis intet at sammenligne med."""
+    score = 0.0
+    db_elev = db_climb.get("elevation_m")
+    if db_elev:
+        score += abs(elevation_gain_m - db_elev) / max(db_elev, 1)
+    db_grad = db_climb.get("avg_gradient")
+    if db_grad:
+        score += abs(avg_gradient - db_grad) / max(db_grad, 1)
+    return score
+
+
 def locate_climb_segment(
     points: list[tuple[float, float, float]],
     cum_dist: list[float],
     stage_distance_km: float,
     km_from_start: float,
     length_km: float,
+    db_climb: dict,
 ) -> list[tuple[float, float, float]]:
     """
-    Lokaliserer stigningens segment i GPX-sporet ved proportional position,
-    fordi GPX'ens egen kumulative distance sjældent matcher den officielle
-    etapedistance præcist (GPS-støj i sving inflaterer GPX-distancen).
+    Lokaliserer stigningens segment i GPX-sporet.
+
+    GPX'ens egen kumulative distance matcher sjældent den officielle
+    etapedistance præcist — og afvigelsen er IKKE jævnt fordelt: GPS-støj
+    fra sving koncentreres i de bakkede/snoede klatre-afsnit selv, så en ren
+    proportional gætning systematisk overskyder (mere jo senere på ruten
+    stigningen ligger — bekræftet empirisk på Tour de France 2026 etape 2,
+    hvor overskuddet voksede fra ~3 km ved første stigning til ~14 km ved
+    fjerde). Det proportionale gæt bruges derfor kun som udgangspunkt for en
+    vinduessøgning: kandidatsegmenter omkring gættet scores mod DB'ens kendte
+    højdemeter/hældning, og det bedst matchende segment vælges.
     """
     if stage_distance_km <= 0:
         raise ValueError("Ugyldig etapedistance")
 
     gpx_total = cum_dist[-1]
-    start_target = (km_from_start / stage_distance_km) * gpx_total
-    end_target = ((km_from_start + length_km) / stage_distance_km) * gpx_total
+    scale = gpx_total / stage_distance_km
+    naive_start_km = km_from_start * scale
+    base_width_km = length_km * scale
 
-    start_idx = bisect.bisect_left(cum_dist, start_target)
-    end_idx = bisect.bisect_left(cum_dist, end_target)
+    search_lo = max(0.0, naive_start_km - SEARCH_RADIUS_KM)
+    search_hi = min(gpx_total, naive_start_km + SEARCH_RADIUS_KM)
+    lo_idx = bisect.bisect_left(cum_dist, search_lo)
+    hi_idx = max(bisect.bisect_left(cum_dist, search_hi), lo_idx + 1)
 
-    start_idx = max(0, min(start_idx, len(points) - 1))
-    end_idx = max(0, min(end_idx, len(points) - 1))
+    best_pair: tuple[int, int] | None = None
+    best_score: float | None = None
 
-    if end_idx <= start_idx:
+    for start_idx in range(lo_idx, hi_idx, _SEARCH_STEP_POINTS):
+        start_km = cum_dist[start_idx]
+        for factor in _WIDTH_FACTORS:
+            end_km = start_km + base_width_km * factor
+            if end_km > gpx_total:
+                continue
+            end_idx = min(bisect.bisect_left(cum_dist, end_km), len(points) - 1)
+            if end_idx - start_idx < 2:
+                continue
+
+            dist_km = cum_dist[end_idx] - cum_dist[start_idx]
+            if dist_km <= 0:
+                continue
+            elevation_gain_m = points[end_idx][2] - points[start_idx][2]
+            avg_gradient = (elevation_gain_m / (dist_km * 1000)) * 100
+
+            score = _candidate_score(elevation_gain_m, avg_gradient, db_climb)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_pair = (start_idx, end_idx)
+
+    if best_pair is None:
         raise ValueError("Kunne ikke lokalisere et gyldigt GPX-segment for stigningen")
 
+    start_idx, end_idx = best_pair
     segment = points[start_idx:end_idx + 1]
     if len(segment) < 2:
         raise ValueError("For få GPX-punkter i det lokaliserede segment")
@@ -520,7 +571,7 @@ def process_climb(
     try:
         segment = locate_climb_segment(
             gpx_points, cum_dist, stage["distance_km"],
-            float(km_from_start), float(length_km),
+            float(km_from_start), float(length_km), climb,
         )
     except ValueError as e:
         return f"  ✗ {climb['name']}: {e}"
