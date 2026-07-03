@@ -17,7 +17,7 @@ Direktøren udvider hvert issue med dato, forsøg og løsning, efterhånden som 
 | SEO-002 | MIDDEL | LØST | seo-agent | Sitemap indsendt til GSC (✓). Service account virker og henter rigtige data (testkørt 2026-07-03). |
 | MKT-001 | LAV | HENLAGT | ejer | TikTok auto-post uden API for risikabelt (account-ban). Afventer officiel TikTok Content Posting API-adgang. |
 | SEO-003 | HØJ | LØST | seo-agent | Canonical URL (`alternates.canonical`) tilføjet 2026-07-03 til alle fem `generateMetadata`-funktioner (race, stage, rider, team, artikel), med bevaret RSS `alternates.types`. Build + typecheck verificeret grønt. |
-| SEO-004 | HØJ | NY | seo-agent | Tilføj `BreadcrumbList` JSON-LD på etapesider (`/[slug]/stage/[n]/page.tsx`). |
+| SEO-004 | HØJ | LØST | seo-agent | `BreadcrumbList` JSON-LD tilføjet 2026-07-03 på etapesider (`/[slug]/stage/[n]/page.tsx`): Klassementet → løb → etape. Typecheck grønt. |
 | SEO-005 | MIDDEL | NY | seo-agent | Tilføj `Person` JSON-LD på rytterprofiler (`/riders/[slug]/page.tsx`). |
 | SEO-006 | HØJ | NY | seo-agent | Forbedrede, keyword-målrettede meta-beskrivelser på løbsider — start med Tour de France. |
 | SEO-007 | MIDDEL | LØST | seo-agent | IndexNow implementeret 2026-07-03: nøglefil i `cykel-frontend/public/`, `submit_indexnow()` i `api.py` kaldes som baggrundsopgave ved artikel-godkendelse (`/admin/articles/{id}/approve`). Nøglen er ikke hemmelig (IndexNow-protokollen kræver offentlig nøglefil). |

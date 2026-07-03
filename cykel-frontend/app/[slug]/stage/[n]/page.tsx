@@ -445,8 +445,19 @@ export default async function StagePage(props: {
     },
   } : null;
 
+  const breadcrumbLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Klassementet", item: "https://klassementet.dk" },
+      { "@type": "ListItem", position: 2, name: race.name, item: `https://klassementet.dk/${slug}` },
+      { "@type": "ListItem", position: 3, name: `Etape ${stage.stage_number}`, item: `https://klassementet.dk/${slug}/stage/${n}` },
+    ],
+  };
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }} />
       {jsonLd && (
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       )}
