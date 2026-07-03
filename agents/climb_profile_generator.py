@@ -124,3 +124,23 @@ def download_stage_gpx(race_slug: str, stage_number: int) -> list[tuple[float, f
     except ValueError as e:
         print(f"    [GPX parse-fejl: {e}]")
         return None
+
+
+# ── Geometri ────────────────────────────────────────────────────────────────
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6371
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = (math.sin(d_lat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def cumulative_distances_km(points: list[tuple[float, float, float]]) -> list[float]:
+    """Kumulativ distance i km langs punktrækken, samme længde som points. cum[0] = 0.0."""
+    cum = [0.0]
+    for i in range(1, len(points)):
+        d = haversine_km(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1])
+        cum.append(cum[-1] + d)
+    return cum

@@ -11,7 +11,11 @@ Kør: python agents/test_climb_profile_generator.py
 
 import unittest
 
-from climb_profile_generator import parse_gpx_with_elevation
+from climb_profile_generator import (
+    parse_gpx_with_elevation,
+    haversine_km,
+    cumulative_distances_km,
+)
 
 
 SAMPLE_GPX = """<?xml version="1.0" encoding="UTF-8"?>
@@ -40,6 +44,24 @@ class TestParseGpxWithElevation(unittest.TestCase):
     def test_raises_on_empty_gpx(self):
         with self.assertRaises(ValueError):
             parse_gpx_with_elevation("<gpx></gpx>")
+
+
+class TestGeometry(unittest.TestCase):
+    def test_haversine_one_degree_latitude(self):
+        # Ren nord-syd-bevægelse: sfærisk afstand = R * radianer(1°) ≈ 111.194 km
+        d = haversine_km(45.0, 6.0, 45.01, 6.0)
+        self.assertAlmostEqual(d, 1.11194, delta=0.001)
+
+    def test_haversine_zero_distance(self):
+        self.assertAlmostEqual(haversine_km(45.0, 6.0, 45.0, 6.0), 0.0, delta=1e-9)
+
+    def test_cumulative_distances_starts_at_zero_and_increases(self):
+        points = [(45.0, 6.0, 100.0), (45.01, 6.0, 110.0), (45.02, 6.0, 120.0)]
+        cum = cumulative_distances_km(points)
+        self.assertEqual(len(cum), 3)
+        self.assertAlmostEqual(cum[0], 0.0, delta=1e-9)
+        self.assertAlmostEqual(cum[1], 1.11194, delta=0.001)
+        self.assertAlmostEqual(cum[2], 2.22388, delta=0.002)
 
 
 if __name__ == "__main__":
