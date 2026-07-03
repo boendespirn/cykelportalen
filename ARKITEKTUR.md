@@ -15,7 +15,7 @@ Alle scripts ligger i `agents/`. Hemmeligheder hører hjemme i miljøvariabler �
 
 ## Orkestrering
 
-- **`race_prep_pipeline.py RACE-SLUG`** — gør et løb klar til publikation i 6 trin: 1) startliste, 2) etapedata + profilbilleder, 3) høj-kvalitets profiler, 4) rytterbilleder, 5) rytterstats, 6) stigningsprofiler (ClimbFinder).
+- **`race_prep_pipeline.py RACE-SLUG`** — gør et løb klar til publikation i 7 trin: 1) startliste, 2) etapedata + profilbilleder, 3) høj-kvalitets profiler, 4) rytterbilleder, 5) rytterstats, 6) stigningsprofiler (ClimbFinder), 7) stigningsprofiler-fallback (`climb_profile_generator.py`, for stigninger ClimbFinder ikke fandt/verificerede — se stignings-pipelinen nedenfor).
 - **`daily_update.py`** — dagligt: startlister (løb der starter inden for 90 dage), etaper (løb uden etapedata), re-sync af manglende billeder, og noterer hvilke resultat-agenter der bør køres for igangværende løb.
 - **`weekly_update.py`** — ugentligt: UCI-ranglister for alle ryttere.
 
@@ -29,8 +29,9 @@ Dataflow for korrekte stigningsprofiler:
 2. **`gpx_climb_agent.py --race SLUG [--stage N | --all]`** — henter klatreinfo fra PCS og genererer `gradient_sections` i `stage_climbs`.
 3. **`profile_reader_agent.py --race SLUG [--stage N | --all]`** — bruger **Claude vision** til at aflæse de rigtige klatredata fra højdeprofil-billedet (navn, km fra start, længde, gradient, kategori), erstatter syntetiske data, og kører ClimbFinder-søgning pr. klatrenavn.
 4. **`climbfinder_agent.py --race SLUG [--stage N] [--all] [--overwrite]`** — finder CF-profilbilledet og gemmer `profile_image_url`. **Verificerer** CF-metrics (længde, finishElevation, gradient) mod DB-data og afviser forkerte match automatisk. Fallback: beregner summit-koordinater fra route_points og reverse-geokoder (Nominatim) → nyt søgeterm. Indeholder `SEARCH_OVERRIDES` (manuelle navne-rettelser; `None` = spring over) og `CLIMB_PREFIXES`.
-5. **`climb_region_agent.py --race SLUG`** — klassificerer `stage_climbs.region` via ét Claude-kald.
-6. **`elevation_image_agent.py [--race SLUG]`** — downloader højdeprofil-billeder fra PCS (Playwright) og gemmer i Supabase Storage.
+5. **`climb_profile_generator.py --race SLUG (--stage N | --all) [--style full|minimal|both] [--write-db] [--overwrite]`** — **fast, automatisk fallback** for stigninger `climbfinder_agent.py` ikke fandt eller kunne verificere. Genererer klassementet.dk's egne profilbilleder direkte fra rå GPX-højdedata (cyclingstage.com), delt i 20 farvede sektioner efter hældning. Lokaliserer klimresegmentet i GPX-sporet via vinduessøgning mod DB'ens kendte højdemeter/hældning, og skriver **kun** til DB når `within_tolerance()` godkender det udledte segment mod DB-data — ellers logges stigningen som sprunget over, aldrig gættet på. Rører aldrig et eksisterende `profile_image_url` uden eksplicit `--overwrite`. GPX-kilden (`CYCLINGSTAGE_GPX_PAGES`) dækker p.t. kun et udvalg af løb (giro, tour de france, critérium du dauphiné, tour de suisse) — for øvrige løb springes etapen/løbet automatisk og ufarligt over.
+6. **`climb_region_agent.py --race SLUG`** — klassificerer `stage_climbs.region` via ét Claude-kald.
+7. **`elevation_image_agent.py [--race SLUG]`** — downloader højdeprofil-billeder fra PCS (Playwright) og gemmer i Supabase Storage.
 
 Relaterede: `gpx_agent.py`, `pcs_profile_image_agent.py`, `giro_profile_agent.py`.
 

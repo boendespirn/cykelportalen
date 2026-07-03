@@ -13,8 +13,12 @@ med hoejde bevaret og uden downsampling).
 Kør (test — genererer begge stilarter, uploader kun til test/-sti, ingen DB-skrivning):
      python agents/climb_profile_generator.py --race tour-de-france-2026 --stage 2
 
-Kør (produktion — skriver profile_image_url for stigninger uden billede):
+Kør (produktion, én etape — skriver profile_image_url for stigninger uden billede):
      python agents/climb_profile_generator.py --race tour-de-france-2026 --stage 2 \
+         --style full --write-db
+
+Kør (produktion, alle etaper i løbet):
+     python agents/climb_profile_generator.py --race tour-de-france-2026 --all \
          --style full --write-db
 """
 
@@ -527,6 +531,16 @@ def get_climbs_for_stage(stage_id: str) -> list[dict]:
     return res.json() if res.ok else []
 
 
+def get_stages_for_race(race_id: str) -> list[dict]:
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages"
+        f"?race_id=eq.{race_id}&select=id,stage_number,distance_km"
+        f"&order=stage_number.asc",
+        headers=SB_AUTH,
+    )
+    return res.json() if res.ok else []
+
+
 def upload_image(path: str, data: bytes) -> str | None:
     res = requests.post(
         f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}",
@@ -608,6 +622,45 @@ def process_climb(
     return f"  ✓ {climb['name']} — {reason} — {status}: " + " | ".join(urls)
 
 
+def process_one_stage(race_slug: str, stage: dict, style: str, write_db: bool, overwrite: bool) -> dict:
+    """
+    Kører hele climb-profile-flowet for én allerede-opslået etape.
+    Returnerer et resultat-sammendrag (bruges både af enkelt-etape- og --all-flowet).
+    """
+    stage_number = stage["stage_number"]
+    summary = {"stage": stage_number, "ok": 0, "skipped": 0, "failed": 0, "no_climbs": False, "no_gpx": False}
+
+    climbs = get_climbs_for_stage(stage["id"])
+    if not climbs:
+        print(f"  Etape {stage_number}: ingen stigninger, springer over")
+        summary["no_climbs"] = True
+        return summary
+
+    print(f"\n--- Etape {stage_number} ---")
+    print("Henter GPX...")
+    gpx_points = download_stage_gpx(race_slug, stage_number)
+    if not gpx_points:
+        print(f"  Etape {stage_number}: kunne ikke hente/parse GPX-fil, springer over")
+        summary["no_gpx"] = True
+        return summary
+
+    cum_dist = cumulative_distances_km(gpx_points)
+    print(f"GPX: {len(gpx_points)} punkter, {cum_dist[-1]:.1f} km "
+          f"(officiel distance: {stage['distance_km']} km)\n")
+
+    for climb in climbs:
+        result = process_climb(stage, climb, gpx_points, cum_dist, style, write_db, overwrite)
+        print(result)
+        if result.startswith("  ✓"):
+            summary["ok"] += 1
+        elif "springer over" in result:
+            summary["skipped"] += 1
+        else:
+            summary["failed"] += 1
+
+    return summary
+
+
 def process_stage(race_slug: str, stage_number: int, style: str, write_db: bool, overwrite: bool) -> None:
     if write_db and style == "both":
         print("Fejl: --write-db kræver ét enkelt --style (full eller minimal), ikke 'both'")
@@ -623,30 +676,57 @@ def process_stage(race_slug: str, stage_number: int, style: str, write_db: bool,
         print(f"Etape {stage_number} ikke fundet eller mangler distance_km")
         return
 
-    climbs = get_climbs_for_stage(stage["id"])
-    if not climbs:
-        print("Ingen stigninger fundet for denne etape")
-        return
-
     print(f"climb_profile_generator.py — {race_slug} etape {stage_number}")
-    print("Henter GPX...")
-    gpx_points = download_stage_gpx(race_slug, stage_number)
-    if not gpx_points:
-        print("Kunne ikke hente/parse GPX-fil for denne etape")
+    process_one_stage(race_slug, stage, style, write_db, overwrite)
+
+
+def process_race_all_stages(race_slug: str, style: str, write_db: bool, overwrite: bool) -> None:
+    if write_db and style == "both":
+        print("Fejl: --write-db kræver ét enkelt --style (full eller minimal), ikke 'both'")
         return
 
-    cum_dist = cumulative_distances_km(gpx_points)
-    print(f"GPX: {len(gpx_points)} punkter, {cum_dist[-1]:.1f} km "
-          f"(officiel distance: {stage['distance_km']} km)\n")
+    if race_slug not in CYCLINGSTAGE_GPX_PAGES:
+        print(f"Ingen GPX-kilde konfigureret for '{race_slug}' (se CYCLINGSTAGE_GPX_PAGES) — springer løbet over.")
+        return
 
-    for climb in climbs:
-        print(process_climb(stage, climb, gpx_points, cum_dist, style, write_db, overwrite))
+    race_id = get_race_id(race_slug)
+    if not race_id:
+        print(f"Løb ikke fundet: {race_slug}")
+        return
+
+    stages = [s for s in get_stages_for_race(race_id) if s.get("distance_km")]
+    if not stages:
+        print(f"Ingen etaper med distance_km fundet for {race_slug}")
+        return
+
+    print(f"climb_profile_generator.py — {race_slug}, alle {len(stages)} etaper")
+
+    summaries = [process_one_stage(race_slug, stage, style, write_db, overwrite) for stage in stages]
+
+    total_ok = sum(s["ok"] for s in summaries)
+    total_skipped = sum(s["skipped"] for s in summaries)
+    total_failed = sum(s["failed"] for s in summaries)
+    no_climb_stages = [s["stage"] for s in summaries if s["no_climbs"]]
+    no_gpx_stages = [s["stage"] for s in summaries if s["no_gpx"]]
+
+    print(f"\n{'=' * 60}")
+    print(f"Samlet resultat — {race_slug}")
+    print(f"  ✓ genereret/opdateret : {total_ok}")
+    print(f"  → sprunget over (havde allerede billede): {total_skipped}")
+    print(f"  ✗ fejlet (tolerance/lokalisering/upload) : {total_failed}")
+    if no_climb_stages:
+        print(f"  Etaper uden stigninger: {no_climb_stages}")
+    if no_gpx_stages:
+        print(f"  Etaper uden GPX-fil   : {no_gpx_stages}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--race", required=True, help="Løb-slug, fx tour-de-france-2026")
-    parser.add_argument("--stage", type=int, required=True, help="Etapenummer")
+    stage_group = parser.add_mutually_exclusive_group(required=True)
+    stage_group.add_argument("--stage", type=int, help="Etapenummer")
+    stage_group.add_argument("--all", action="store_true", help="Kør for alle etaper i løbet")
     parser.add_argument("--style", choices=["full", "minimal", "both"], default="both",
                          help="Hvilken stilart der skal genereres (default: begge, kun ved test)")
     parser.add_argument("--write-db", action="store_true",
@@ -655,4 +735,7 @@ if __name__ == "__main__":
                          help="Ved --write-db: overskriv stigninger der allerede har et profilbillede")
     args = parser.parse_args()
 
-    process_stage(args.race, args.stage, args.style, args.write_db, args.overwrite)
+    if args.all:
+        process_race_all_stages(args.race, args.style, args.write_db, args.overwrite)
+    else:
+        process_stage(args.race, args.stage, args.style, args.write_db, args.overwrite)

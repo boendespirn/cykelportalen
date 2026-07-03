@@ -14,6 +14,7 @@ Kør:
   python climbfinder_agent.py --race tour-de-france-2026 --stage 15
   python climbfinder_agent.py --all          # alle løb med manglende profiler
   python climbfinder_agent.py --race giro-d-italia-2026 --overwrite
+  python climbfinder_agent.py --all --overwrite   # kontroltjek: re-verificér ALT
 """
 
 import os
@@ -386,6 +387,21 @@ def get_all_races_with_missing() -> list[dict]:
     return sb_get("races", f"?id=in.({rid_list})&select=id,slug,name")
 
 
+def get_all_races_with_climbs() -> list[dict]:
+    """Alle løb med mindst én stage_climbs-række — bruges til fuld re-verifikation
+    (--all --overwrite), i modsætning til get_all_races_with_missing(), som kun
+    finder løb med huller og derfor springer fuldt dækkede løb helt over."""
+    climbs = sb_get("stage_climbs", "?select=stage_id")
+    if not climbs:
+        return []
+    stage_ids = list({c["stage_id"] for c in climbs})
+    sid_list = ",".join(f'"{s}"' for s in stage_ids)
+    stages = sb_get("stages", f"?id=in.({sid_list})&select=race_id")
+    race_ids = list({s["race_id"] for s in stages})
+    rid_list = ",".join(f'"{r}"' for r in race_ids)
+    return sb_get("races", f"?id=in.({rid_list})&select=id,slug,name")
+
+
 def get_stages(race_id: str, stage_number: int | None) -> list[dict]:
     url = (
         f"?race_id=eq.{race_id}"
@@ -536,11 +552,21 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> i
 
 
 def run_all(overwrite: bool) -> None:
-    races = get_all_races_with_missing()
-    if not races:
-        print("Ingen løb med manglende ClimbFinder-profiler.")
-        return
-    print(f"Løb med manglende profiler: {len(races)}")
+    if overwrite:
+        # --all --overwrite = fuld re-verifikation (kontroltjek): tjek ALLE
+        # eksisterende matches mod de nuværende (strammede) tolerancer, ikke
+        # kun løb med huller — ellers springes fuldt dækkede løb helt over.
+        races = get_all_races_with_climbs()
+        if not races:
+            print("Ingen løb med stigninger fundet.")
+            return
+        print(f"Fuld re-verifikation — løb med stigninger: {len(races)}")
+    else:
+        races = get_all_races_with_missing()
+        if not races:
+            print("Ingen løb med manglende ClimbFinder-profiler.")
+            return
+        print(f"Løb med manglende profiler: {len(races)}")
     total = 0
     for race in races:
         total += process_race(race["slug"], stage_number=None, overwrite=overwrite)

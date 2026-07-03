@@ -17,8 +17,9 @@ For et løb/en etape, kør kæden i rækkefølge (jf. `ARKITEKTUR.md`):
 2. `gpx_climb_agent.py --race SLUG` — klatreinfo og `gradient_sections`.
 3. `profile_reader_agent.py --race SLUG` — Claude vision aflæser de **rigtige** klatredata fra højdeprofil-billedet og kører ClimbFinder-søgning.
 4. `climbfinder_agent.py --race SLUG` — finder CF-profilbilledet og **verificerer mod DB-data** (forkerte match afvises automatisk; GPX/Nominatim-fallback).
-5. `climb_region_agent.py --race SLUG` — region.
-6. `elevation_image_agent.py --race SLUG` — gemmer profilbillederne i Supabase Storage.
+5. `climb_profile_generator.py --race SLUG --all --style full --write-db` — **fast, automatisk fallback** for stigninger climbfinder ikke fandt/verificerede. Genererer klassementet.dk's egne profilbilleder fra rå GPX-højdedata. Rører aldrig et eksisterende `profile_image_url`.
+6. `climb_region_agent.py --race SLUG` — region.
+7. `elevation_image_agent.py --race SLUG` — gemmer profilbillederne i Supabase Storage.
 
 Bekræft altid bagefter: har hver stigning i etapen en **verificeret** profil? En manglende eller afvist profil er et issue, ikke en detalje.
 
@@ -26,8 +27,9 @@ Bekræft altid bagefter: har hver stigning i etapen en **verificeret** profil? E
 
 Det er her, "nye og mere akkurate metoder" kommer ind. Når en stigning ikke matcher (fx ligger som `None` i `SEARCH_OVERRIDES`, ikke findes på ClimbFinder, eller giver geografisk forkert match):
 
+- **Første fallback (fast, automatisk):** kør `climb_profile_generator.py --race SLUG --all --style full --write-db`. Den genererer klassementet.dk's egne profilbilleder direkte fra rå GPX-højdedata og skriver kun til DB, når det udledte segment består `within_tolerance()` mod DB'ens kendte højdemeter/hældning — stigninger der ikke består, springes over og logges, aldrig gættet på. Den rører aldrig et eksisterende `profile_image_url` uden `--overwrite`, så den er sikker at køre igen og igen. GPX-kilden dækker p.t. kun et udvalg af løb (`CYCLINGSTAGE_GPX_PAGES` i scriptet) — for andre løb springer den automatisk og ufarligt over.
 - Forbedr søgningen: prøv bedre søgetermer, juster `SEARCH_OVERRIDES` eller `CLIMB_PREFIXES`, eller brug GPX-summit-koordinaterne mere præcist.
-- Overvej alternative, lovlige kilder til profilen, hvis ClimbFinder ikke har den.
+- Overvej alternative, lovlige kilder til profilen, hvis hverken ClimbFinder eller GPX-generatoren har den.
 - Lykkes det stadig ikke efter rimelige forsøg, så følg `PROTOKOL.md`: rapportér til direktøren, der efter eskaleringsgrænsen kan sætte **research-agenten** på at finde en bedre metode eller kilde.
 
 ## Verifikation (definition of done)
