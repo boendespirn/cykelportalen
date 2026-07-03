@@ -314,19 +314,28 @@ export async function generateMetadata(
   props: { params: Promise<{ slug: string }> }
 ): Promise<Metadata> {
   const { slug } = await props.params;
-  const race = await getRace(slug);
+  const [race, stages] = await Promise.all([getRace(slug), getStages(slug)]);
   if (!race) return { title: "Løb ikke fundet" };
   const year = race.start_date ? new Date(race.start_date + "T00:00:00").getFullYear() : "";
+  const dateRange = race.start_date
+    ? race.end_date && race.end_date !== race.start_date
+      ? `${formatDate(race.start_date)} – ${formatDate(race.end_date)}`
+      : formatDate(race.start_date)
+    : null;
+  const isOneDay = race.race_type === "oneday";
+  const description = isOneDay
+    ? `${race.name} ${year}${dateRange ? ` (${dateRange})` : ""}: favoritter, ruteinfo, højdeprofil og resultat fra dette enkeltdagsløb — se det hele på Klassementet.`
+    : `${race.name} ${year}${dateRange ? ` (${dateRange})` : ""}: alle ${stages.length || ""} etaper med startliste, favoritter, højdeprofiler og klassement.`;
   return {
     title: `${race.name} ${year}`,
-    description: `Alt om ${race.name} ${year}: startliste, etaper, favoritter, højdeprofiler og klassementer.`,
+    description,
     alternates: {
       canonical: `/${slug}`,
       types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
     },
     openGraph: {
       title: `${race.name} ${year} | Klassementet`,
-      description: `Startliste, etapeinfo, favoritter og live klassement fra ${race.name} ${year}.`,
+      description,
     },
   };
 }
