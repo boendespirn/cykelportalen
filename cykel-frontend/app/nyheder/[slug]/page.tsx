@@ -1,6 +1,7 @@
 export const revalidate = 3600;
 
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { marked } from "marked";
@@ -72,6 +73,10 @@ export async function generateMetadata(
   return {
     title: article.title,
     description: article.meta_description ?? article.excerpt ?? undefined,
+    alternates: {
+      canonical: `/nyheder/${slug}`,
+      types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+    },
     openGraph: {
       title: article.title,
       description: article.meta_description ?? article.excerpt ?? undefined,
@@ -97,14 +102,7 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
   const article = await getArticle(slug);
 
   if (!article) {
-    return (
-      <div className="mx-auto max-w-3xl px-6 py-20 text-center">
-        <p className="text-slate-500">Artikel ikke fundet.</p>
-        <Link href="/nyheder" className="mt-4 inline-block text-sm text-emerald-400 hover:underline">
-          ← Alle nyheder
-        </Link>
-      </div>
-    );
+    notFound();
   }
 
   const contentHtml = renderMarkdown(article.content);

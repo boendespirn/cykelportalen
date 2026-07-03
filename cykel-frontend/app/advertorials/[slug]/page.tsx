@@ -1,5 +1,6 @@
 export const revalidate = 3600;
 
+import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -34,14 +35,7 @@ export default async function AdvertorialPage(props: { params: Promise<{ slug: s
   const article = await getArticle(slug);
 
   if (!article) {
-    return (
-      <div className="mx-auto max-w-3xl px-6 py-20 text-center">
-        <p className="text-slate-500">Artikel ikke fundet.</p>
-        <Link href="/advertorials" className="mt-4 inline-block text-sm text-emerald-400 hover:underline">
-          ← Advertorials
-        </Link>
-      </div>
-    );
+    notFound();
   }
 
   return (

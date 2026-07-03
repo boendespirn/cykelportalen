@@ -256,6 +256,9 @@ export default function AdminPage() {
           <p className="text-xs text-slate-500 mt-1">Artikel-godkendelse · Klassementet</p>
         </div>
         <div className="flex items-center gap-3">
+          <Link href="/admin/opgaver" className="text-xs text-slate-600 hover:text-emerald-400 transition-colors">
+            Opgaver →
+          </Link>
           <Link href="/nyheder" className="text-xs text-slate-600 hover:text-emerald-400 transition-colors">
             Se nyheder →
           </Link>

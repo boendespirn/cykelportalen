@@ -1,6 +1,7 @@
 export const revalidate = 3600;
 
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -88,6 +89,10 @@ export async function generateMetadata(
   return {
     title: team.name,
     description,
+    alternates: {
+      canonical: `/teams/${slug}`,
+      types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+    },
     openGraph: {
       title: `${team.name} | Hold | Klassementet`,
       description,
@@ -100,14 +105,7 @@ export default async function TeamPage(props: { params: Promise<{ slug: string }
   const [team, riders] = await Promise.all([getTeam(slug), getRiders(slug)]);
 
   if (!team) {
-    return (
-      <div className="mx-auto max-w-4xl px-6 py-20 text-center">
-        <p className="text-slate-500">Hold ikke fundet.</p>
-        <Link href="/teams" className="mt-4 inline-block text-sm text-emerald-400 hover:underline">
-          ← Alle hold
-        </Link>
-      </div>
-    );
+    notFound();
   }
 
   const categoryLabel = team.category === "WorldTeam" ? "WT" : team.category === "ProTeam" ? "PT" : team.category;

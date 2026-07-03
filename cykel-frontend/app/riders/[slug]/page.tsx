@@ -1,6 +1,7 @@
 export const revalidate = 3600;
 
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -180,6 +181,10 @@ export async function generateMetadata(
   return {
     title: rider.name,
     description,
+    alternates: {
+      canonical: `/riders/${slug}`,
+      types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+    },
     openGraph: {
       title: `${rider.name} | Klassementet`,
       description,
@@ -198,14 +203,7 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
   ]);
 
   if (!rider) {
-    return (
-      <div className="mx-auto max-w-3xl px-6 py-20 text-center">
-        <p className="text-slate-500">Rytter ikke fundet.</p>
-        <Link href="/riders" className="mt-4 inline-block text-sm text-emerald-400 hover:underline">
-          ← Alle ryttere
-        </Link>
-      </div>
-    );
+    notFound();
   }
 
   const specialityClass = rider.speciality && SPECIALITY_COLORS[rider.speciality]

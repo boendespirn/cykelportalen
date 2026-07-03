@@ -716,6 +716,40 @@ def _require_admin(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+ISSUES_MD_PATH = os.path.join(os.path.dirname(__file__), "state", "issues.md")
+
+
+def _parse_issues_md() -> list[dict]:
+    """Parser status/opgave-tabellen i state/issues.md til JSON til opgave-dashboardet."""
+    if not os.path.exists(ISSUES_MD_PATH):
+        return []
+    issues = []
+    with open(ISSUES_MD_PATH, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line.startswith("|"):
+                continue
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) < 5:
+                continue
+            if cells[0] == "ID" or cells[0].strip("-") == "":
+                continue
+            issues.append({
+                "id": cells[0],
+                "priority": cells[1],
+                "status": cells[2],
+                "owner": cells[3],
+                "description": " | ".join(cells[4:]),
+            })
+    return issues
+
+
+@app.get("/admin/issues")
+def admin_get_issues(request: Request):
+    _require_admin(request)
+    return _parse_issues_md()
+
+
 @app.get("/admin/articles")
 def admin_get_articles(request: Request, status: str = "draft", limit: int = 50):
     _require_admin(request)
@@ -757,6 +791,36 @@ def _fb_task(article_id: str) -> None:
     )
 
 
+INDEXNOW_KEY = "1a5a3688cfd86781c40cef01ce453403"
+INDEXNOW_HOST = "klassementet.dk"
+
+
+def submit_indexnow(urls: list[str]) -> None:
+    """Melder nye/opdaterede URL'er til IndexNow (Bing/Yandex) for hurtigere crawl. Jf. SEO-007."""
+    if not urls:
+        return
+    try:
+        requests.post(
+            "https://api.indexnow.org/indexnow",
+            json={
+                "host": INDEXNOW_HOST,
+                "key": INDEXNOW_KEY,
+                "keyLocation": f"https://{INDEXNOW_HOST}/{INDEXNOW_KEY}.txt",
+                "urlList": urls,
+            },
+            timeout=10,
+        )
+    except requests.RequestException:
+        pass
+
+
+def _indexnow_task(article_id: str) -> None:
+    art = _get_article_for_fb(article_id)
+    if not art:
+        return
+    submit_indexnow([f"https://{INDEXNOW_HOST}/nyheder/{art['slug']}"])
+
+
 def _ig_task(article_id: str) -> None:
     ig_user_id = os.getenv("META_INSTAGRAM_USER_ID", "")
     if not ig_user_id:
@@ -793,6 +857,7 @@ def admin_approve_article(article_id: str, request: Request, background_tasks: B
     )
     if res.ok:
         background_tasks.add_task(_fb_task, article_id)
+        background_tasks.add_task(_indexnow_task, article_id)
     return {"ok": res.ok}
 
 

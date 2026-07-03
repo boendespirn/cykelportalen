@@ -1,6 +1,7 @@
 export const revalidate = 300;
 
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
@@ -364,6 +365,10 @@ export async function generateMetadata(
   return {
     title,
     description: desc,
+    alternates: {
+      canonical: `/${slug}/stage/${n}`,
+      types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+    },
     openGraph: {
       title: `${title} | Klassementet`,
       description: desc,
@@ -381,17 +386,7 @@ export default async function StagePage(props: {
 
   const result = await getStageDetail(slug, n);
   if (!result) {
-    return (
-      <div className="mx-auto max-w-4xl px-6 py-20 text-center">
-        <p className="text-slate-500">Etape ikke fundet.</p>
-        <Link
-          href={`/${slug}`}
-          className="mt-4 inline-block text-sm text-emerald-400 hover:underline"
-        >
-          ← Tilbage til løbet
-        </Link>
-      </div>
-    );
+    notFound();
   }
 
   const { stage, race } = result;

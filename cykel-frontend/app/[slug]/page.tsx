@@ -1,6 +1,7 @@
 export const revalidate = 60;
 
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -319,6 +320,10 @@ export async function generateMetadata(
   return {
     title: `${race.name} ${year}`,
     description: `Alt om ${race.name} ${year}: startliste, etaper, favoritter, højdeprofiler og klassementer.`,
+    alternates: {
+      canonical: `/${slug}`,
+      types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+    },
     openGraph: {
       title: `${race.name} ${year} | Klassementet`,
       description: `Startliste, etapeinfo, favoritter og live klassement fra ${race.name} ${year}.`,
@@ -348,12 +353,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     ]);
 
   if (!race) {
-    return (
-      <div className="mx-auto max-w-4xl px-6 py-20 text-center">
-        <p className="text-slate-500">Løb ikke fundet.</p>
-        <Link href="/" className="mt-4 inline-block text-sm text-emerald-400 hover:underline">← Tilbage</Link>
-      </div>
-    );
+    notFound();
   }
 
   const isOngoing   = race.start_date <= today && (!race.end_date || race.end_date >= today);
