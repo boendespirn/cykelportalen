@@ -181,3 +181,53 @@ def locate_climb_segment(
         raise ValueError("For få GPX-punkter i det lokaliserede segment")
 
     return segment
+
+
+# ── Validering ──────────────────────────────────────────────────────────────
+
+def derive_climb_stats(segment_points: list[tuple[float, float, float]]) -> dict:
+    """Beregner nettohøjdemeter og gennemsnitshældning for et GPX-segment."""
+    start_elev = segment_points[0][2]
+    end_elev = segment_points[-1][2]
+    elevation_gain_m = end_elev - start_elev
+
+    dist_km = 0.0
+    for i in range(1, len(segment_points)):
+        dist_km += haversine_km(
+            segment_points[i - 1][0], segment_points[i - 1][1],
+            segment_points[i][0], segment_points[i][1],
+        )
+
+    avg_gradient = (elevation_gain_m / (dist_km * 1000)) * 100 if dist_km > 0 else 0.0
+
+    return {
+        "elevation_gain_m": round(elevation_gain_m),
+        "avg_gradient": round(avg_gradient, 1),
+        "distance_km": round(dist_km, 2),
+    }
+
+
+def within_tolerance(derived: dict, db_climb: dict) -> tuple[bool, str]:
+    """
+    Sammenligner GPX-udledte stats med DB'ens kendte klatredata.
+    Returnerer (godkendt, forklaring). Springer et tjek over hvis DB ikke har
+    den pågældende værdi. Samme ånd som climbfinder_agent.py's metrics_ok().
+    """
+    reasons = []
+
+    db_elev = db_climb.get("elevation_m")
+    if db_elev:
+        diff = abs(derived["elevation_gain_m"] - db_elev)
+        max_diff = max(100, db_elev * 0.25)
+        if diff > max_diff:
+            return False, f"højdemeter {derived['elevation_gain_m']}m vs DB {db_elev}m (diff {diff}m)"
+        reasons.append(f"elev {derived['elevation_gain_m']}≈{db_elev}m")
+
+    db_grad = db_climb.get("avg_gradient")
+    if db_grad:
+        diff = abs(derived["avg_gradient"] - db_grad)
+        if diff > 2.5:
+            return False, f"hældning {derived['avg_gradient']:.1f}% vs DB {db_grad}% (diff {diff:.1f}%)"
+        reasons.append(f"grad {derived['avg_gradient']:.1f}≈{db_grad}%")
+
+    return True, " | ".join(reasons) if reasons else "ingen metrics at tjekke"

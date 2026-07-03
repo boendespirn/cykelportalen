@@ -16,6 +16,8 @@ from climb_profile_generator import (
     haversine_km,
     cumulative_distances_km,
     locate_climb_segment,
+    derive_climb_stats,
+    within_tolerance,
 )
 
 
@@ -91,6 +93,43 @@ class TestLocateClimbSegment(unittest.TestCase):
         with self.assertRaises(ValueError):
             locate_climb_segment(self.points, self.cum, stage_distance_km=0,
                                   km_from_start=1.0, length_km=2.0)
+
+
+class TestDeriveClimbStats(unittest.TestCase):
+    def test_computes_elevation_gain_and_gradient(self):
+        # 3 punkter, ~0.5559 km mellem hver (0.005° breddegrad), total ~1.1119 km
+        segment = [(45.0, 6.0, 100.0), (45.005, 6.0, 150.0), (45.01, 6.0, 200.0)]
+        stats = derive_climb_stats(segment)
+        self.assertEqual(stats["elevation_gain_m"], 100)
+        self.assertAlmostEqual(stats["avg_gradient"], 9.0, delta=0.1)
+
+
+class TestWithinTolerance(unittest.TestCase):
+    def test_accepts_close_match(self):
+        derived = {"elevation_gain_m": 390, "avg_gradient": 5.8}
+        db_climb = {"elevation_m": 400, "avg_gradient": 6.0}
+        ok, reason = within_tolerance(derived, db_climb)
+        self.assertTrue(ok)
+
+    def test_rejects_wildly_different_elevation(self):
+        derived = {"elevation_gain_m": 100, "avg_gradient": 5.8}
+        db_climb = {"elevation_m": 800, "avg_gradient": 6.0}
+        ok, reason = within_tolerance(derived, db_climb)
+        self.assertFalse(ok)
+        self.assertIn("højdemeter", reason)
+
+    def test_rejects_wildly_different_gradient(self):
+        derived = {"elevation_gain_m": 400, "avg_gradient": 2.0}
+        db_climb = {"elevation_m": 400, "avg_gradient": 9.0}
+        ok, reason = within_tolerance(derived, db_climb)
+        self.assertFalse(ok)
+        self.assertIn("hældning", reason)
+
+    def test_skips_check_when_db_value_missing(self):
+        derived = {"elevation_gain_m": 400, "avg_gradient": 6.0}
+        db_climb = {"elevation_m": None, "avg_gradient": None}
+        ok, reason = within_tolerance(derived, db_climb)
+        self.assertTrue(ok)
 
 
 if __name__ == "__main__":
