@@ -441,3 +441,167 @@ def render_climb_profile(
                fill=TEXT_COLOR, anchor="mb")
 
     return img
+
+
+# ── Supabase ────────────────────────────────────────────────────────────────
+
+def get_race_id(race_slug: str) -> str | None:
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?slug=eq.{race_slug}&select=id&limit=1",
+        headers=SB_AUTH,
+    )
+    data = res.json()
+    return data[0]["id"] if res.ok and data else None
+
+
+def get_stage(race_id: str, stage_number: int) -> dict | None:
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages"
+        f"?race_id=eq.{race_id}&stage_number=eq.{stage_number}"
+        f"&select=id,stage_number,distance_km&limit=1",
+        headers=SB_AUTH,
+    )
+    data = res.json()
+    return data[0] if res.ok and data else None
+
+
+def get_climbs_for_stage(stage_id: str) -> list[dict]:
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stage_climbs"
+        f"?stage_id=eq.{stage_id}"
+        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,profile_image_url"
+        f"&order=km_from_start.asc",
+        headers=SB_AUTH,
+    )
+    return res.json() if res.ok else []
+
+
+def upload_image(path: str, data: bytes) -> str | None:
+    res = requests.post(
+        f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}",
+        data=data,
+        headers={**SB_AUTH, "Content-Type": "image/png", "x-upsert": "true"},
+    )
+    if not res.ok:
+        print(f"    Upload fejl {res.status_code}: {res.text[:120]}")
+        return None
+    return f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{path}"
+
+
+def update_climb_profile(climb_id: str, profile_url: str) -> bool:
+    res = requests.patch(
+        f"{SUPABASE_URL}/rest/v1/stage_climbs?id=eq.{climb_id}",
+        json={"profile_image_url": profile_url, "source": "generated"},
+        headers=SB_HEADERS,
+    )
+    return res.ok
+
+
+# ── Hovedpipeline ─────────────────────────────────────────────────────────────
+
+def process_climb(
+    stage: dict,
+    climb: dict,
+    gpx_points: list[tuple[float, float, float]],
+    cum_dist: list[float],
+    style: str,
+    write_db: bool,
+    overwrite: bool,
+) -> str:
+    """Genererer og gemmer profilbillede(r) for én stigning. Returnerer en statusbesked."""
+    km_from_start = climb.get("km_from_start")
+    length_km = climb.get("length_km")
+    if km_from_start is None or not length_km:
+        return f"  ✗ {climb['name']}: mangler km_from_start/length_km i DB"
+
+    if write_db and climb.get("profile_image_url") and not overwrite:
+        return f"  → {climb['name']}: har allerede et profilbillede, springer over (brug --overwrite)"
+
+    try:
+        segment = locate_climb_segment(
+            gpx_points, cum_dist, stage["distance_km"],
+            float(km_from_start), float(length_km),
+        )
+    except ValueError as e:
+        return f"  ✗ {climb['name']}: {e}"
+
+    derived = derive_climb_stats(segment)
+    ok, reason = within_tolerance(derived, climb)
+    if not ok:
+        return f"  ✗ {climb['name']}: GPX-segment matcher ikke DB-data — {reason}"
+
+    resampled = resample_elevation_profile(segment)
+    sections = compute_gradient_sections(resampled)
+
+    styles = ["full", "minimal"] if style == "both" else [style]
+    urls = []
+    for s in styles:
+        img = render_climb_profile(
+            climb["name"], sections, s,
+            length_km=float(length_km),
+            avg_gradient=float(climb.get("avg_gradient") or derived["avg_gradient"]),
+        )
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+
+        path = f"generated/{climb['id']}.png" if write_db else f"test/{climb['id']}-{s}.png"
+        url = upload_image(path, buf.getvalue())
+        if not url:
+            return f"  ✗ {climb['name']} ({s}): upload fejlede"
+        urls.append(url)
+
+        if write_db and not update_climb_profile(climb["id"], url):
+            return f"  ✗ {climb['name']}: DB-opdatering fejlede"
+
+    status = "opdateret i DB" if write_db else "genereret (test)"
+    return f"  ✓ {climb['name']} — {reason} — {status}: " + " | ".join(urls)
+
+
+def process_stage(race_slug: str, stage_number: int, style: str, write_db: bool, overwrite: bool) -> None:
+    if write_db and style == "both":
+        print("Fejl: --write-db kræver ét enkelt --style (full eller minimal), ikke 'both'")
+        return
+
+    race_id = get_race_id(race_slug)
+    if not race_id:
+        print(f"Løb ikke fundet: {race_slug}")
+        return
+
+    stage = get_stage(race_id, stage_number)
+    if not stage or not stage.get("distance_km"):
+        print(f"Etape {stage_number} ikke fundet eller mangler distance_km")
+        return
+
+    climbs = get_climbs_for_stage(stage["id"])
+    if not climbs:
+        print("Ingen stigninger fundet for denne etape")
+        return
+
+    print(f"climb_profile_generator.py — {race_slug} etape {stage_number}")
+    print("Henter GPX...")
+    gpx_points = download_stage_gpx(race_slug, stage_number)
+    if not gpx_points:
+        print("Kunne ikke hente/parse GPX-fil for denne etape")
+        return
+
+    cum_dist = cumulative_distances_km(gpx_points)
+    print(f"GPX: {len(gpx_points)} punkter, {cum_dist[-1]:.1f} km "
+          f"(officiel distance: {stage['distance_km']} km)\n")
+
+    for climb in climbs:
+        print(process_climb(stage, climb, gpx_points, cum_dist, style, write_db, overwrite))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--race", required=True, help="Løb-slug, fx tour-de-france-2026")
+    parser.add_argument("--stage", type=int, required=True, help="Etapenummer")
+    parser.add_argument("--style", choices=["full", "minimal", "both"], default="both",
+                         help="Hvilken stilart der skal genereres (default: begge, kun ved test)")
+    parser.add_argument("--write-db", action="store_true",
+                         help="Upload til generated/ og patch profile_image_url (default: kun test/-upload)")
+    parser.add_argument("--overwrite", action="store_true",
+                         help="Ved --write-db: overskriv stigninger der allerede har et profilbillede")
+    args = parser.parse_args()
+
+    process_stage(args.race, args.stage, args.style, args.write_db, args.overwrite)
