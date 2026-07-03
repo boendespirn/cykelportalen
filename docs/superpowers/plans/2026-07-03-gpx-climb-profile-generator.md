@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.10+, `requests`, `beautifulsoup4`, `Pillow` (allerede i `requirements.txt` — ingen nye dependencies), stdlib `unittest` til de rene logik-funktioner (ingen pytest i dette repo).
 
+**Afvigelse fundet under eksekvering (2026-07-03):** Task 3's oprindelige `locate_climb_segment()` (ren proportional position) blev afprøvet mod rigtige etape-2-data i Task 9 og fejlede for alle 4 stigninger — GPS-støj fra sving koncentreres i klatre-afsnittene selv, ikke jævnt langs hele ruten, så den proportionale gætning overskød systematisk (voksende fra ~3 km ved første stigning til ~14 km ved fjerde). Rettet ved at gøre det proportionale gæt til udgangspunkt for en vinduessøgning, der scorer kandidatsegmenter mod DB'ens kendte højdemeter/hældning (ny parameter `db_climb` på `locate_climb_segment()`). Se commit "fix: erstat proportional segment-gaetning med vinduessoegning". Genkørt Task 9 efter rettelsen: alle 4 etape-2-stigninger validerer nu korrekt.
+
 ## Global Constraints
 
 - Alt brugervendt output (print-beskeder, docstrings, kommentarer) skrives på dansk, jf. CLAUDE.md §"Alt arbejde foregår på dansk". Funktions-/variabelnavne er engelske, som i resten af `agents/`.
