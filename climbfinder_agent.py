@@ -197,14 +197,22 @@ def metrics_ok(cf: dict, db: dict) -> tuple[bool, str]:
             return False, f"længde {cf_len:.1f} km vs DB {db_len:.1f} km (ratio {len_ratio:.2f})"
         reasons.append(f"len {cf_len:.1f}≈{db_len:.1f}km")
 
-    # Tophøjdetjek (maks 100m forskel)
+    # Højdemeter-tjek. db_elev er klatrede højdemeter (gain), IKKE tophøjde —
+    # cf['finish_elevation'] er derimod CF's tophøjde over havet (summit altitude),
+    # en helt anden fysisk størrelse (se STG-007). De to kan ikke sammenlignes
+    # direkte. Beregner i stedet CF's egen implicerede gain fra dens length+
+    # gradient (samme formel som DB'ens elevation_m), og sammenligner den mod
+    # db_elev — apples-to-apples, ligesom within_tolerance() i
+    # climb_profile_generator.py.
     db_elev = db.get("elevation_m")
-    cf_elev = cf.get("finish_elevation")
-    if db_elev and cf_elev:
-        diff = abs(cf_elev - db_elev)
-        if diff > 100:
-            return False, f"tophøjde {cf_elev}m vs DB {db_elev}m (diff {diff}m)"
-        reasons.append(f"elev {cf_elev}≈{db_elev}m")
+    cf_grad_for_gain = cf.get("gradient_pct", 0)
+    cf_gain = cf_len * cf_grad_for_gain * 10 if cf_len and cf_grad_for_gain else None
+    if db_elev and cf_gain:
+        diff = abs(cf_gain - db_elev)
+        max_diff = max(150, db_elev * 0.35)
+        if diff > max_diff:
+            return False, f"beregnet højdemeter {cf_gain:.0f}m vs DB {db_elev}m (diff {diff:.0f}m)"
+        reasons.append(f"gain {cf_gain:.0f}≈{db_elev}m")
 
     # Hældiningstjek (maks 1.5% forskel)
     db_grad = db.get("avg_gradient")
@@ -503,6 +511,18 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> i
         for climb in climbs:
             climb_name = (climb.get("name") or "").strip()
             if not climb_name:
+                continue
+
+            # Permanent override=None betyder "kendt IKKE på ClimbFinder" —
+            # denne agent skal aldrig røre et eksisterende billede for sådan
+            # en stigning (det kan stamme fra climb_profile_generator.py's
+            # GPX-fallback, som findes netop fordi CF ikke har klatringen).
+            # Uden dette ryddede --overwrite alle fallback-billeder hver
+            # gang den kørte, fordi find_verified_profile() altid returnerer
+            # None for disse — se STG-007-opfølgning.
+            if climb_name in SEARCH_OVERRIDES and SEARCH_OVERRIDES[climb_name] is None:
+                print(f"  • {climb_name}: permanent override — springer helt over "
+                      f"(rører ikke evt. eksisterende billede)")
                 continue
 
             print(f"  • {climb_name} "
