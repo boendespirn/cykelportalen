@@ -21,6 +21,7 @@ from climb_profile_generator import (
     resample_elevation_profile,
     compute_gradient_sections,
     gradient_to_color,
+    render_climb_profile,
 )
 
 
@@ -180,6 +181,43 @@ class TestGradientToColor(unittest.TestCase):
         self.assertTrue(253 <= c[0] <= 255)
         self.assertTrue(224 <= c[1] <= 255)
         self.assertTrue(166 <= c[2] <= 255)
+
+
+class TestRenderClimbProfile(unittest.TestCase):
+    def setUp(self):
+        # To sektioner med tydeligt forskellig, eksplicit valgt avg_gradient,
+        # saa udfyldningsfarven er entydig at forudsige. Elevation stiger jaevnt
+        # saa toppolygonens kant ligger godt over baseline overalt undtagen i x=0.
+        self.sections = [
+            {"start_km": 0.0, "end_km": 1.0, "start_elev": 100.0, "end_elev": 300.0, "avg_gradient": 0.0},
+            {"start_km": 1.0, "end_km": 2.0, "start_elev": 300.0, "end_elev": 500.0, "avg_gradient": 10.0},
+        ]
+
+    def test_image_has_expected_size(self):
+        img = render_climb_profile("Test Climb", self.sections, "minimal",
+                                    length_km=2.0, avg_gradient=5.0)
+        self.assertEqual(img.size, (2400, 1200))
+        self.assertEqual(img.mode, "RGB")
+
+    def test_section_fill_colors_match_gradient_to_color(self):
+        img = render_climb_profile("Test Climb", self.sections, "minimal",
+                                    length_km=2.0, avg_gradient=5.0)
+
+        pad_left, pad_right, pad_top, pad_bottom = 110, 40, 90, 90
+        inner_w = 2400 - pad_left - pad_right
+        baseline_y = pad_top + (1200 - pad_top - pad_bottom)
+        sample_y = baseline_y - 5
+
+        x_section1 = int(pad_left + (0.5 / 2.0) * inner_w)  # midt i sektion 1 (0-1km)
+        x_section2 = int(pad_left + (1.5 / 2.0) * inner_w)  # midt i sektion 2 (1-2km)
+
+        self.assertEqual(img.getpixel((x_section1, sample_y)), (255, 255, 255))
+        self.assertEqual(img.getpixel((x_section2, sample_y)), (214, 40, 40))
+
+    def test_rejects_unknown_style(self):
+        with self.assertRaises(ValueError):
+            render_climb_profile("Test Climb", self.sections, "ugyldig",
+                                  length_km=2.0, avg_gradient=5.0)
 
 
 if __name__ == "__main__":

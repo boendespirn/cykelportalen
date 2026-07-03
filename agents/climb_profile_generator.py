@@ -324,3 +324,120 @@ def gradient_to_color(gradient_pct: float) -> tuple[int, int, int]:
             frac = (g - g0) / (g1 - g0)
             return tuple(int(round(c0[k] + frac * (c1[k] - c0[k]))) for k in range(3))
     return COLOR_STOPS[-1][1]
+
+
+# ── Rendering ───────────────────────────────────────────────────────────────
+
+WIDTH, HEIGHT = 2400, 1200
+BG_COLOR = (15, 23, 42)        # slate-900
+TEXT_COLOR = (226, 232, 240)   # slate-200
+GRID_COLOR = (51, 65, 85)      # slate-700
+LINE_COLOR = (241, 245, 249)   # slate-100 (terrænkant)
+BRAND_COLOR = (100, 116, 139)  # slate-500
+
+PAD_LEFT, PAD_RIGHT, PAD_TOP, PAD_BOTTOM = 110, 40, 90, 90
+
+_FONT_CANDIDATES = [
+    "C:/Windows/Fonts/arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
+
+
+def _font(size: int):
+    for p in _FONT_CANDIDATES:
+        if Path(p).exists():
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def render_climb_profile(
+    climb_name: str,
+    sections: list[dict],
+    style: str,
+    length_km: float,
+    avg_gradient: float,
+) -> Image.Image:
+    """
+    Renderer et ClimbFinder-inspireret stigningsprofil-billede.
+    sections: output fra compute_gradient_sections().
+    style: "full" (akser, %-labels, titel) eller "minimal" (kun kurve + højder).
+    """
+    if style not in ("full", "minimal"):
+        raise ValueError(f"Ukendt stil: {style}")
+
+    img = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    inner_w = WIDTH - PAD_LEFT - PAD_RIGHT
+    inner_h = HEIGHT - PAD_TOP - PAD_BOTTOM
+
+    all_elevs = [s["start_elev"] for s in sections] + [sections[-1]["end_elev"]]
+    min_elev, max_elev = min(all_elevs), max(all_elevs)
+    elev_range = max(max_elev - min_elev, 1.0)
+    max_elev_padded = max_elev + elev_range * 0.08
+
+    total_km = sections[-1]["end_km"]
+    baseline_y = PAD_TOP + inner_h
+
+    def to_xy(km: float, elev: float) -> tuple[float, float]:
+        x = PAD_LEFT + (km / total_km) * inner_w
+        y = PAD_TOP + inner_h - ((elev - min_elev) / (max_elev_padded - min_elev)) * inner_h
+        return x, y
+
+    # Terrænsektioner — hver farvet efter sin egen gennemsnitshældning
+    for s in sections:
+        x0, y0 = to_xy(s["start_km"], s["start_elev"])
+        x1, y1 = to_xy(s["end_km"], s["end_elev"])
+        color = gradient_to_color(s["avg_gradient"])
+        draw.polygon([(x0, baseline_y), (x0, y0), (x1, y1), (x1, baseline_y)], fill=color)
+
+    # Terrænkant
+    outline_pts = [to_xy(s["start_km"], s["start_elev"]) for s in sections]
+    outline_pts.append(to_xy(sections[-1]["end_km"], sections[-1]["end_elev"]))
+    draw.line(outline_pts, fill=LINE_COLOR, width=4)
+
+    start_elev = sections[0]["start_elev"]
+    summit_elev = sections[-1]["end_elev"]
+
+    if style == "full":
+        for i in range(5):
+            elev = min_elev + (max_elev_padded - min_elev) * i / 4
+            _, y = to_xy(0, elev)
+            draw.line([(PAD_LEFT, y), (WIDTH - PAD_RIGHT, y)], fill=GRID_COLOR, width=1)
+            draw.text((PAD_LEFT - 15, y), f"{int(round(elev))}m", font=_font(24),
+                       fill=TEXT_COLOR, anchor="rm")
+
+        step = max(1, round(total_km / 8))
+        km_marker = 0
+        while km_marker <= total_km:
+            x, _ = to_xy(km_marker, min_elev)
+            draw.line([(x, baseline_y), (x, baseline_y + 8)], fill=GRID_COLOR, width=1)
+            draw.text((x, baseline_y + 15), f"{km_marker}km", font=_font(22),
+                       fill=TEXT_COLOR, anchor="ma")
+            km_marker += step
+
+        for s in sections:
+            mid_km = (s["start_km"] + s["end_km"]) / 2
+            mid_elev = (s["start_elev"] + s["end_elev"]) / 2
+            x, y = to_xy(mid_km, mid_elev)
+            draw.text((x, y - 20), f"{s['avg_gradient']:.0f}%", font=_font(26),
+                       fill=(255, 255, 255), anchor="mb", stroke_width=2, stroke_fill=(0, 0, 0))
+
+        draw.text((PAD_LEFT, 30), climb_name, font=_font(40), fill=TEXT_COLOR, anchor="lm")
+        draw.text((PAD_LEFT, 65), f"{length_km:.1f} km @ {avg_gradient:.1f}%",
+                   font=_font(26), fill=BRAND_COLOR, anchor="lm")
+        draw.text((WIDTH - PAD_RIGHT, HEIGHT - 20), "klassementet.dk",
+                   font=_font(22), fill=BRAND_COLOR, anchor="rb")
+
+    x0, y0 = to_xy(0, start_elev)
+    draw.text((x0, y0 + 15), f"{int(round(start_elev))}m", font=_font(30),
+               fill=TEXT_COLOR, anchor="ma")
+    x1, y1 = to_xy(total_km, summit_elev)
+    draw.text((x1, y1 - 15), f"{int(round(summit_elev))}m", font=_font(30),
+               fill=TEXT_COLOR, anchor="mb")
+
+    return img
