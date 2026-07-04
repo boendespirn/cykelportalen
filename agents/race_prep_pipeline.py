@@ -26,6 +26,56 @@ Kør resultater separat (løbende under løbet):
 import subprocess
 import sys
 import os
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# api.py ligger i repo-roden (én mappe over agents/) — tilføj til sys.path så
+# vi kan genbruge submit_indexnow() derfra i stedet for at duplikere
+# IndexNow-POST-logikken her (jf. SEO-010).
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+
+def notify_indexnow(db_slug: str) -> None:
+    """Melder løbets side + alle etapesider til IndexNow (Bing/Yandex) efter en
+    pipeline-kørsel, så de nyoprettede/opdaterede sider bliver fundet hurtigere.
+    Rammer ikke Google (se SEO-010) — kun et billigt, lavrisiko supplement.
+    Fejler aldrig pipelinen: alle fejl fanges og logges, intet trin afbrydes."""
+    try:
+        from api import submit_indexnow  # genbruger den eksisterende funktion, ingen duplikering
+
+        urls = [f"https://klassementet.dk/{db_slug}"]
+
+        if SUPABASE_URL and SUPABASE_KEY:
+            headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            race_rows = requests.get(
+                f"{SUPABASE_URL}/rest/v1/races",
+                params={"slug": f"eq.{db_slug}", "select": "id"},
+                headers=headers,
+                timeout=15,
+            ).json()
+            if race_rows:
+                stage_rows = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/stages",
+                    params={"race_id": f"eq.{race_rows[0]['id']}", "select": "stage_number"},
+                    headers=headers,
+                    timeout=15,
+                ).json()
+                for s in stage_rows:
+                    n = s.get("stage_number")
+                    if n:
+                        urls.append(f"https://klassementet.dk/{db_slug}/stage/{n}")
+
+        submit_indexnow(urls)
+        print(f"\n[IndexNow] Meldt {len(urls)} URL'er (løb + etaper) for {db_slug}")
+    except Exception as e:
+        print(f"\n[IndexNow] Kunne ikke melde URL'er til IndexNow (ikke-kritisk): {e}")
 
 
 def run(cmd: list[str], label: str) -> bool:
@@ -103,6 +153,8 @@ def main():
     print(f"\nNæste trin når løbet kører:")
     print(f"  python giro_results_agent.py --db-slug {db_slug} --pcs-slug {pcs_slug} --stages N")
     print(f"  (kør efter hver etape er afsluttet)")
+
+    notify_indexnow(db_slug)
 
 
 if __name__ == "__main__":

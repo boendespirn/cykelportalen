@@ -117,6 +117,27 @@ def sb_patch(table: str, where: str, data: dict) -> bool:
 
 # ── Subprocess helpers ────────────────────────────────────────────────────────
 
+def notify_indexnow(slug: str, race_id: str) -> None:
+    """Melder løbets side + dens etapesider til IndexNow (Bing/Yandex), når
+    startliste eller etapedata er blevet oprettet/opdateret for løbet i denne
+    kørsel. Rammer ikke Google (se SEO-010) — kun et billigt, lavrisiko
+    supplement til crawl-signalet. Fejler aldrig kørslen: alle fejl fanges."""
+    try:
+        from api import submit_indexnow  # genbruger den eksisterende funktion, ingen duplikering
+
+        urls = [f"https://klassementet.dk/{slug}"]
+        stage_rows = sb_get("stages", f"race_id=eq.{race_id}&select=stage_number")
+        for s in stage_rows:
+            n = s.get("stage_number")
+            if n:
+                urls.append(f"https://klassementet.dk/{slug}/stage/{n}")
+
+        submit_indexnow(urls)
+        print(f"  [IndexNow] Meldt {len(urls)} URL'er")
+    except Exception as e:
+        print(f"  [IndexNow] Fejl (ikke-kritisk): {e}")
+
+
 def run_script(script: str, *args: str, label: str = "") -> bool:
     cmd = [sys.executable, script, *args]
     print(f"    → {' '.join(cmd)}")
@@ -202,6 +223,8 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
             print()
             continue
 
+        race_changed = False  # sporer om løbs-/etapesider blev oprettet/opdateret (til IndexNow, SEO-010)
+
         # ── Startliste ────────────────────────────────────────────────────────
         # Normal: løb indenfor 90 dage. --startlists-only: alle kommende løb.
         if startlists_only:
@@ -217,11 +240,14 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
             ok = run_script("startlist_agent.py", pcs_slug, label=f"startlist {slug}")
             if ok:
                 updated_startlists += 1
+                race_changed = True
             time.sleep(2)  # Kort pause så Supabase ikke throttler
         else:
             print(f"  [Startliste] Starter om {days_until}d — springer over (>90d)")
 
         if startlists_only:
+            if race_changed:
+                notify_indexnow(slug, race["id"])
             print()
             continue
 
@@ -239,6 +265,7 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
             ok = run_script("stage_pcs_agent.py", pcs_slug, *extra_args, label=f"stages {slug}")
             if ok:
                 updated_stages += 1
+                race_changed = True
 
                 # Opdater end_date baseret på seneste etapedato
                 max_date_rows = sb_get(
@@ -252,6 +279,9 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
                         print(f"  → end_date opdateret: {new_end}")
         else:
             print(f"  [Etaper] {len(stage_rows)} etaper i DB — OK")
+
+        if race_changed:
+            notify_indexnow(slug, race["id"])
 
         print()
 
