@@ -71,6 +71,16 @@ SEARCH_OVERRIDES: dict[str, str | None] = {
     "COLLE GIOVO":                      "Colle Giovo",
     "Muro di Ca' del Poggio":           "Ca del Poggio",
     "Puy Mary - Pas de Peyrol":         "Puy Mary",
+    # STG-009: ClimbFinders søgning på blot "Col du Calvaire" returnerer 20
+    # kandidater hvis indbyrdes rækkefølge IKKE er stabil på tværs af kald
+    # (bekræftet: samme søgning gav to forskellige rækkefølger to kørsler i
+    # træk) — det rigtige match ("...Font Romeu from Estavar via Col de Fau",
+    # Cerdagne) endte derfor uden for top-5-loftet og blev afvist/ryddet i en
+    # efterfølgende fuld re-verifikation, selvom en enkeltstående test lige
+    # forinden fandt det korrekt. Et mere specifikt søgeterm returnerer kun de
+    # tre ægte Font Romeu-varianter (ingen Vosges-forveksling) og er derfor
+    # stabilt uanset rækkefølge.
+    "Col du Calvaire":                  "Col du Calvaire de Font Romeu",
     "Le Salève - Col de la Croisette":  "Le Saleve",
     "Gavarnie-Gèdre":                   None,
     "Les Angles":                       None,
@@ -226,6 +236,32 @@ def metrics_ok(cf: dict, db: dict) -> tuple[bool, str]:
     return True, " | ".join(reasons) if reasons else "ingen metrics at tjekke"
 
 
+GEO_MAX_KM = 50.0
+# Hård geografisk cross-check (STG-009). metrics_ok() alene stoppede ikke
+# et vilkårligt fransk bjerg med lignende længde/hældning/gain i at matche
+# en helt anden stigning i et andet land/region — bekræftet for tre TdF
+# 2026-stigninger (Côte de Begues → Ardèche, Col de Toses → Drôme, Col du
+# Calvaire → Vosges, alle >300 km fra det GPX-udledte summit). ClimbFinders
+# søgeresultater indeholder allerede kandidatens egne lat/lng (ingen ekstra
+# API-kald nødvendigt), som sammenlignes mod summit-koordinaten udledt af
+# vores GPX/route_points (samme udregning som GPS-fallback-søgningen
+# nedenfor). 50 km er en generøs margin: ægte matches i stikprøven lå 2-20 km
+# fra det udledte summit, forkerte matches lå 300-9000 km væk.
+def geo_ok(candidate: dict, summit_lat_lon: tuple[float, float] | None) -> tuple[bool, str]:
+    """Tjekker at CF-kandidatens egne koordinater ligger tæt på det GPX-udledte
+    summit. Springes over (godkendt) hvis vi ikke har koordinater at tjekke mod —
+    kan da ikke være strengere end dataen tillader."""
+    if not summit_lat_lon:
+        return True, "intet geo-tjek (ingen GPX-summit-koordinat)"
+    lat, lng = candidate.get("lat"), candidate.get("lng")
+    if lat is None or lng is None:
+        return True, "intet geo-tjek (CF mangler koordinater)"
+    dist = haversine_km(summit_lat_lon[0], summit_lat_lon[1], lat, lng)
+    if dist > GEO_MAX_KM:
+        return False, f"geografisk afstand {dist:.0f} km fra forventet summit (maks {GEO_MAX_KM:.0f})"
+    return True, f"geo {dist:.0f}km"
+
+
 # ── GPS-hjælpere ──────────────────────────────────────────────────────────────
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -346,11 +382,28 @@ def find_verified_profile(
         if not candidates:
             continue
 
-        # Foretræk kendte lande; ellers alle
+        # Foretræk kendte lande; ellers alle — bevarer CF's egen relevans-
+        # rækkefølge inden for den foretrukne liste (undgår at gætte en
+        # "tættere men forkert side/variant" af samme bjerg, som en fuld
+        # afstands-sortering risikerede for allerede-korrekte match som Col
+        # du Tourmalet/Col d'Aspin under test af STG-009).
         preferred = [c for c in candidates if c.get("countryIso") in PREFERRED_COUNTRIES]
-        to_try = preferred if preferred else candidates[:3]
+        pool = preferred if preferred else candidates
+        # Når vi har en GPX-udledt summit-koordinat at hård-verificere imod
+        # (geo_ok nedenfor), er det trygt at kigge længere ned i CF's liste end
+        # de oprindelige top 3 — rodårsagen bag STG-009 var netop, at det
+        # rigtige match ("Col du Calvaire de Font Romeu") lå som nr. 4 i CF's
+        # søgeresultat, uden for det tidligere hårdkodede loft, mens tre
+        # geografisk forkerte kandidater (samme navnemønster, andet bjerg)
+        # lå højere og bestod de dengang løse metrics-tolerancer alene.
+        to_try = pool[:5] if summit_lat_lon else pool[:3]
 
-        for candidate in to_try[:3]:
+        for candidate in to_try:
+            g_ok, g_reason = geo_ok(candidate, summit_lat_lon)
+            if not g_ok:
+                print(f"    ✗ Afvist (geo): {candidate.get('name')} — {g_reason}")
+                continue
+
             detail = cf_get_detail(session, candidate["id"])
             time.sleep(DELAY)
             if not detail:
@@ -359,7 +412,7 @@ def find_verified_profile(
             ok, reason = metrics_ok(detail, db_climb)
 
             if ok:
-                print(f"    ✓ Match: {detail['name']} ({detail['country']}) — {reason}")
+                print(f"    ✓ Match: {detail['name']} ({detail['country']}) — {reason} | {g_reason}")
                 if not detail.get("profile"):
                     print("    → Ingen profilbillede på CF")
                     continue
@@ -424,17 +477,31 @@ def get_stages(race_id: str, stage_number: int | None) -> list[dict]:
 def get_climbs_for_stage(stage_id: str, only_missing: bool) -> list[dict]:
     url = (
         f"?stage_id=eq.{stage_id}"
-        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,profile_image_url"
+        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,profile_image_url,source"
         f"&order=km_from_start.asc"
     )
     rows = sb_get("stage_climbs", url)
     return [r for r in rows if not r.get("profile_image_url")] if only_missing else rows
 
 
-def update_climb_profile(climb_id: str, profile_url: str | None) -> bool:
+def update_climb_profile(climb_id: str, profile_url: str | None, set_source: bool = True) -> bool:
+    """
+    set_source=True (default) sætter altid source="vision" (denne agents
+    konvention-værdi for et CF-hentet billede, matcher profile_reader_agent.py)
+    når vi rent faktisk skriver/rydder et match her. Uden dette forblev
+    `source` fejlagtigt "generated" på stigninger, hvor climb_profile_generator.py
+    tidligere havde lavet et fallback-billede, og climbfinder_agent.py senere
+    fandt og gemte et ægte CF-match ovenpå (fx Côte de Begues, STG-009) — hvilket
+    ville have narret STG-014-beskyttelsen (aldrig ryd source="generated") til
+    fejlagtigt at frede et almindeligt CF-match ved en senere mislykket
+    re-verifikation.
+    """
+    payload = {"profile_image_url": profile_url}
+    if set_source:
+        payload["source"] = "vision"
     res = requests.patch(
         f"{SUPABASE_URL}/rest/v1/stage_climbs?id=eq.{climb_id}",
-        json={"profile_image_url": profile_url},
+        json=payload,
         headers=SB_HEADERS,
     )
     return res.status_code in (200, 204)
@@ -449,12 +516,22 @@ def clear_stale_override_images(stage_id: str) -> int:
     get_climbs_for_stage(only_missing=True) springer klatringer med et sat
     profile_image_url over — og --overwrite kræves normalt ikke for hver kørsel.
     Kører derfor altid, uafhængigt af --overwrite.
+
+    VIGTIGT (fundet under STG-009-arbejdet, se STG-014): denne funktion rydder
+    KUN CF-hentede billeder (source != "generated"). Et override=None-navn er
+    netop det, climb_profile_generator.py's GPX-fallback findes for — hvis vi
+    ubetinget ryddede ethvert billede for disse navne, ville vi slette
+    fallback-billedet igen ved hver eneste kørsel af climbfinder_agent.py
+    (bekræftet: Côte de Loucroup, Gavarnie-Gèdre, Les Angles og Côte de
+    l'Estadi Olímpic blev alle ramt af netop dette, uafhængigt af --overwrite).
     """
     climbs = get_climbs_for_stage(stage_id, only_missing=False)
     cleared = 0
     for climb in climbs:
         name = (climb.get("name") or "").strip()
         has_override_none = name in SEARCH_OVERRIDES and SEARCH_OVERRIDES[name] is None
+        if climb.get("source") == "generated":
+            continue  # aldrig rør et GPX-genereret fallback-billede her
         if has_override_none and climb.get("profile_image_url"):
             if update_climb_profile(climb["id"], None):
                 print(f"  ⚠ Ryddet forældet/uverificeret match: {name} "
@@ -555,7 +632,12 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> i
                 # forkert billede stille og roligt, blot fordi ingen ny kandidat
                 # kunne verificeres denne kørsel (samme fejlmønster som den
                 # oprindelige stale-override-bug, men for det generelle tilfælde).
-                if climb.get("profile_image_url"):
+                # Undtagelse (STG-014): rør aldrig et GPX-genereret fallback-
+                # billede (source="generated") her — climbfinder_agent.py finder
+                # naturligvis ingen CF-match for et navn climb_profile_generator.py
+                # allerede har genereret et billede til (typisk fordi klatringen
+                # slet ikke findes på ClimbFinder), og skal ikke slette det.
+                if climb.get("profile_image_url") and climb.get("source") != "generated":
                     update_climb_profile(climb["id"], None)
                     print("    → Ryddet tidligere match (bestod ikke verifikation nu)")
                 continue
