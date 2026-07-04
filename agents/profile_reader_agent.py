@@ -15,6 +15,7 @@ import sys
 import io
 import json
 import time
+import math
 import argparse
 import requests
 import anthropic
@@ -248,6 +249,58 @@ def cf_find_profile(session: requests.Session, climb_name: str) -> str | None:
     return detail_res.json().get("data", {}).get("profile")
 
 
+# ── Gradient section generering ───────────────────────────────────────────────
+# Samme formel som gpx_climb_agent.py's generate_gradient_sections() (bevidst
+# duplikeret, ikke importeret — se STG-003 i state/issues.md). Denne funktion
+# blev tidligere kun kaldt i gpx_climb_agent.py, men profile_reader_agent.py
+# sletter og genindsætter alle klatringer på etapen med Claude-vision-data
+# (rigtige navn/længde/gradient) og satte aldrig gradient_sections selv —
+# konsekvensen var NULL gradient_sections for stort set alle stigninger i
+# databasen, og enhver stigning uden ClimbFinder-billede blev derfor helt
+# usynlig i frontend-fanerne (se ClimbProfile.tsx hasVisualProfile()).
+#
+# Bemærk: dette er en visuel APPROKSIMATION af hvordan hældningen fordeler sig
+# langs stigningen (sinusbølge + let variation) — IKKE målt per-sektion data.
+# Navn, længde, gennemsnits-/max-gradient og kategori er fortsat de rigtige,
+# Claude-vision-aflæste tal; kun formen på kurven mellem start og top er
+# estimeret. climb_profile_generator.py's egne GPX-udledte sektioner (når et
+# løb har GPX-kilde og segmentet består within_tolerance()) er en mere præcis
+# kilde og opdaterer gradient_sections separat, hvis tilgængelig.
+
+def generate_gradient_sections(
+    length_km: float,
+    avg_gradient: float,
+    max_gradient: float | None = None,
+) -> list[dict]:
+    """
+    Genererer realistiske gradient-sektioner per 500m til frontend-fallback-
+    grafen, når intet ClimbFinder- eller GPX-genereret profilbillede findes.
+    """
+    if not length_km or not avg_gradient:
+        return []
+    max_gradient = max_gradient or avg_gradient * 1.5
+
+    n_sections = max(2, int(length_km * 2))  # 500m sektioner
+    sections = []
+
+    for i in range(n_sections):
+        progress = i / n_sections  # 0 → 1
+        sine_factor = math.sin(progress * math.pi * 0.8 + 0.2)
+        variation = (hash(f"{i}{avg_gradient}") % 100 - 50) / 250
+        gradient = avg_gradient * (0.5 + sine_factor * 0.8) + variation * avg_gradient
+
+        if 0.6 <= progress <= 0.8:
+            gradient = min(gradient * 1.3, max_gradient)
+
+        gradient = max(0.5, min(gradient, max_gradient))
+        sections.append({
+            "km":       round(i * 0.5, 1),
+            "gradient": round(gradient, 1),
+        })
+
+    return sections
+
+
 # ── Hovedpipeline ─────────────────────────────────────────────────────────────
 
 def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> None:
@@ -334,6 +387,8 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
                 else:
                     print(f"    -> Ingen match")
 
+            gradient_sections = generate_gradient_sections(length_km, avg_grad, max_grad)
+
             record = {
                 "stage_id":        s_id,
                 "name":            name,
@@ -342,6 +397,7 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
                 "elevation_m":     elevation_m,
                 "avg_gradient":    avg_grad,
                 "max_gradient":    max_grad,
+                "gradient_sections": gradient_sections or None,
                 "profile_image_url": profile_url,
                 "source":          "vision",
             }
