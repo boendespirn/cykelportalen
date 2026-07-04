@@ -52,7 +52,7 @@ DELAY = 0.5  # sekunder mellem kald
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
-def get_stages(race_slug: str | None, force_all: bool) -> list[dict]:
+def get_stages(race_slug: str | None, force_all: bool, stage_number: int | None = None) -> list[dict]:
     race_filter = ""
     if race_slug:
         r = requests.get(
@@ -65,12 +65,15 @@ def get_stages(race_slug: str | None, force_all: bool) -> list[dict]:
             return []
         race_filter = f"&race_id=eq.{data[0]['id']}"
 
-    desc_filter = "" if force_all else "&description=is.null"
+    # --stage kræver implicit --all-semantik (vi vil regenerere netop DENNE
+    # etape uanset om den allerede har en beskrivelse) — se STG-012.
+    desc_filter = "" if (force_all or stage_number) else "&description=is.null"
+    stage_filter = f"&stage_number=eq.{stage_number}" if stage_number else ""
     url = (
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?select=id,race_id,stage_number,name,date,distance_km,stage_type,"
         f"start_location,finish_location,elevation_gain_m,profile_score"
-        f"{desc_filter}{race_filter}"
+        f"{desc_filter}{race_filter}{stage_filter}"
         f"&order=race_id.asc,stage_number.asc&limit=500"
     )
     r = requests.get(url, headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"})
@@ -130,7 +133,13 @@ Returner præcis dette JSON-objekt:
 
 fun_facts: 3-4 konkrete bullets om etapen (geografi, historik, vejbeskaffenhed, vigtige stigninger).
 finish_type: sprint=massespurt, uphill=bjergfinish, cobblestone=brosten, tt=enkeltstart.
-stage_start_time: null hvis usikker."""
+stage_start_time: null hvis usikker.
+
+VIGTIGT (tal-konsistens, se STG-012): distance og højdemeter står allerede i felterne ovenfor
+({stage.get('distance_km', '?')} km, {f'+{elev} m' if elev else 'ukendt'} højdemeter). Hvis du nævner
+disse tal i description eller fun_facts, SKAL du bruge PRÆCIS disse værdier — afrund ikke, og opfind
+IKKE et andet tal for distance, højdemeter eller profil-score. Er du i tvivl, undlad hellere at nævne
+det konkrete tal end at gætte forkert."""
 
 
 def extract_json(text: str) -> dict:
@@ -158,14 +167,14 @@ def call_claude(client: Anthropic, race_name: str, stage: dict) -> dict | None:
 
 # ── Hoved ─────────────────────────────────────────────────────────────────────
 
-def run(race_slug: str | None, force_all: bool) -> None:
+def run(race_slug: str | None, force_all: bool, stage_number: int | None = None) -> None:
     if not ANTHROPIC_KEY:
         print("FEJL: ANTHROPIC_API_KEY mangler i .env filen")
         print("Hent nøgle på: https://console.anthropic.com/settings/keys")
         sys.exit(1)
 
     client = Anthropic(api_key=ANTHROPIC_KEY)
-    stages = get_stages(race_slug, force_all)
+    stages = get_stages(race_slug, force_all, stage_number)
     total  = len(stages)
     print(f"Fandt {total} etaper\n")
     if not total:
@@ -204,5 +213,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--race",    help="Løbets slug (fx giro-d-italia-2026)", default=None)
     parser.add_argument("--all",     dest="force_all", action="store_true")
+    parser.add_argument("--stage",   type=int, default=None, help="Regenerer kun denne etape (kræver --race)")
     args = parser.parse_args()
-    run(args.race, args.force_all)
+    run(args.race, args.force_all, args.stage)
