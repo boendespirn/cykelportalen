@@ -107,7 +107,14 @@ def get_gpx_url_for_stage(race_slug: str, stage_number: int) -> str | None:
     soup = BeautifulSoup(res.text, "html.parser")
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        m = re.fullmatch(r".*stage-(\d+)-route\.gpx", href)
+        # cyclingstage.com bruger to filnavns-mønstre for GPX-links: som regel
+        # "stage-N-route.gpx", men enkelte etaper (bekræftet: tour-de-france-2026
+        # etape 5 og 6) har i stedet "stage-N.gpx" uden "-route" — den oprindelige
+        # regex matchede kun det første mønster, hvilket fik get_gpx_url_for_stage()
+        # til fejlagtigt at returnere None for etape 6 og dermed springe
+        # Gavarnie-Gèdre/Côte de Loucroup helt over (se STG-006/STG-007/STG-002 i
+        # state/issues.md — troede fejlagtigt der slet ikke fandtes en GPX-kilde).
+        m = re.fullmatch(r".*stage-(\d+)(?:-route)?\.gpx", href)
         if not m:
             continue
         if int(m.group(1)) == stage_number:
