@@ -332,8 +332,16 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
         s_type = stage.get("stage_type", "")
         img    = stage["elevation_image_url"]
 
-        # Spring over flad/enkeltstart
-        if s_type in ("flat", "tt", "itt"):
+        # Spring over enkeltstart (ingen relevant klatreprofil at aflæse).
+        # BEMÆRK (STG-011): "flad" etaper sprang tidligere også over — men PCS
+        # klassificerer ofte en sprinteretape som "flat" på det overordnede
+        # stage_type, selvom den stadig indeholder en kort, officielt
+        # kategoriseret stigning tæt på mål (fx "Côte de Baleix", cat. 3,
+        # etape 5 Lannemezan-Pau). VISION_PROMPT beder allerede kun om
+        # officielt kategoriserede stigninger og returnerer naturligt en tom
+        # liste for en reelt flad etape uden nogen — så det er trygt (og
+        # nødvendigt) at lade Claude vision se billedet uanset stage_type.
+        if s_type in ("tt", "itt"):
             continue
 
         # Spring over hvis allerede har rigtige data (medmindre --all)
@@ -377,15 +385,21 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
                 print(f"    ⚠ {name}: elevation_m sat fra tophøjde ({altitude}m) — "
                       f"length/gradient mangler, kan være upræcist")
 
-            # Søg ClimbFinder
+            # BEMÆRK (STG-009): denne fils egen cf_find_profile() har ALDRIG
+            # verificeret et match mod DB-metrics eller geografi — kun
+            # land-præference + løs navnelighed. Bekræftet i praksis (etape 17,
+            # 2026-07-04): den satte "Col du Ballon from Rossillon" (10.8 km)
+            # som match for en 1.8 km DB-stigning, og "Côte Saint Jean d'Arves"
+            # (56 km væk, forkert by) for "Côte de Saint-Jean d'Arvey" — præcis
+            # samme fejlklasse som climbfinder_agent.py's metrics_ok() blev
+            # hærdet imod. For ikke at duplikere (og vedligeholde to steder)
+            # den samme verifikationslogik lader vi derfor profile_image_url stå
+            # tomt her og overlader ethvert match udelukkende til
+            # climbfinder_agent.py, som ALTID kører lige efter i pipelinen og nu
+            # har både metrics- og geo-verifikation. Search-koden nedenfor er
+            # bevidst ikke fjernet (kan være nyttig til debugging), men bruges
+            # ikke til at skrive et uverificeret billede til DB.
             profile_url = None
-            if cf_session:
-                print(f"  Søger ClimbFinder: '{name}'")
-                profile_url = cf_find_profile(cf_session, name)
-                if profile_url:
-                    print(f"    -> {profile_url}")
-                else:
-                    print(f"    -> Ingen match")
 
             gradient_sections = generate_gradient_sections(length_km, avg_grad, max_grad)
 
