@@ -1,7 +1,7 @@
 export const revalidate = 60;
 
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -69,6 +69,46 @@ type HistoryEntry = {
     riders: { name: string; slug: string; nationality: string | null } | null;
   } | null;
 };
+
+// ── Legacy URL-aliaser ─────────────────────────────────────────────────────
+// Kendte "spøgelses-URL'er" Google har indekseret, som ikke matcher noget rigtigt
+// løb i DB (fx en gammel/ekstern permalink-struktur). I stedet for blot at 404'e
+// og miste den akkumulerede ranking, sender vi et permanent (308/301-ækvivalent)
+// redirect videre til det aktuelt relevante løb — fundet dynamisk, så mappingen
+// ikke skal vedligeholdes manuelt år for år.
+const LEGACY_RACE_NAME_ALIASES: Record<string, string> = {
+  "tour-de-france-løb": "Tour de France",
+};
+
+async function getAllRaces(): Promise<{ name: string; slug: string; start_date: string; end_date: string | null }[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races`, { next: { revalidate: 3600 } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+/** Finder det mest relevante løb med et givent navn: igangværende først, ellers næste kommende, ellers seneste afsluttede. */
+async function resolveLegacyAliasTarget(raceName: string): Promise<string | null> {
+  const races = await getAllRaces();
+  const matches = races.filter((r) => r.name === raceName);
+  if (matches.length === 0) return null;
+
+  const today = getToday();
+  const ongoing = matches.find((r) => r.start_date <= today && (!r.end_date || r.end_date >= today));
+  if (ongoing) return ongoing.slug;
+
+  const upcoming = matches
+    .filter((r) => r.start_date > today)
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+  if (upcoming) return upcoming.slug;
+
+  const past = matches
+    .filter((r) => r.end_date && r.end_date < today)
+    .sort((a, b) => (b.end_date as string).localeCompare(a.end_date as string))[0];
+  return past?.slug ?? null;
+}
 
 // ── Fetchers ───────────────────────────────────────────────────────────────
 
@@ -314,6 +354,7 @@ export async function generateMetadata(
   props: { params: Promise<{ slug: string }> }
 ): Promise<Metadata> {
   const { slug } = await props.params;
+  if (LEGACY_RACE_NAME_ALIASES[slug]) return { title: "Tour de France" };
   const [race, stages] = await Promise.all([getRace(slug), getStages(slug)]);
   if (!race) return { title: "Løb ikke fundet" };
   const year = race.start_date ? new Date(race.start_date + "T00:00:00").getFullYear() : "";
@@ -345,6 +386,13 @@ export async function generateMetadata(
 export default async function RacePage(props: { params: Promise<{ slug: string }> }) {
   const { slug } = await props.params;
   const today = getToday();
+
+  const legacyRaceName = LEGACY_RACE_NAME_ALIASES[slug];
+  if (legacyRaceName) {
+    const target = await resolveLegacyAliasTarget(legacyRaceName);
+    if (target) permanentRedirect(`/${target}`);
+    notFound();
+  }
 
   const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, history, raceNews] =
     await Promise.all([
