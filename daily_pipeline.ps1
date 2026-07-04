@@ -20,7 +20,7 @@ Log "=== Klassementet daglig pipeline startet ==="
 
 # 1. RSS-nyheder
 Log "[1/4] Scraper RSS-nyheder..."
-python "$ROOT\rss_news_scraper.py" 2>&1 | Tee-Object -Append $LOG
+python "$ROOT\agents\rss_news_scraper.py" 2>&1 | Tee-Object -Append $LOG
 Log "[1/4] Faerdig."
 
 # 2. AI-nyhedsbehandling (max 15 scores, max 4/uge publiceret)
@@ -30,17 +30,17 @@ Log "[2/4] Faerdig."
 
 # 3. Resultater (seneste etape for igangvaerende loeb)
 Log "[3/5] Scraper etaperesultater..."
-python "$ROOT\results_agent.py" 2>&1 | Tee-Object -Append $LOG
+python "$ROOT\agents\results_agent.py" 2>&1 | Tee-Object -Append $LOG
 Log "[3/5] Faerdig."
 
 # 4. TV-tider (ugentlig opdatering)
 Log "[4/5] Opdaterer TV-tider..."
-python "$ROOT\tv_agent.py" 2>&1 | Tee-Object -Append $LOG
+python "$ROOT\agents\tv_agent.py" 2>&1 | Tee-Object -Append $LOG
 Log "[4/5] Faerdig."
 
 # 5. Social media posting (poster artikler med social_posted=false)
 Log "[5/5] Social media posting..."
-python "$ROOT\social_agent.py" 2>&1 | Tee-Object -Append $LOG
+python "$ROOT\agents\social_agent.py" 2>&1 | Tee-Object -Append $LOG
 Log "[5/5] Faerdig."
 
 Log "=== Pipeline faerdig ==="

@@ -209,7 +209,7 @@ def check_credentials() -> tuple[bool, bool]:
     return fb_ok, ig_ok
 
 
-def run(limit: int, dry_run: bool) -> None:
+def run(limit: int, dry_run: bool, allow_legacy_ig: bool = False) -> None:
     print(f"social_agent.py — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     fb_ok, ig_ok = check_credentials()
@@ -227,6 +227,17 @@ def run(limit: int, dry_run: bool) -> None:
     if dry_run:
         print("[DRY-RUN tilstand — ingen poster sendes]\n")
 
+    # MKT-002: Instagram må IKKE poste per-artikel — det spammer og strider mod
+    # den etablerede ugentlige/kuraterede IG-cadence (jf. marketing-agent.md).
+    # Per-artikel IG-posting er derfor deaktiveret som standard her; brug i
+    # stedet instagram_carousel_daily.py/instagram_carousel.py (ugentlig,
+    # kurateret karrusel) eller instagram_pinned.py til etape-readiness.
+    # --allow-legacy-ig-per-artikel findes kun som nød-flag, hvis nogen
+    # bevidst vil genindføre det gamle mønster — ikke tiltænkt normal drift.
+    if ig_ok and not allow_legacy_ig:
+        print("[IG] Per-artikel Instagram-posting er deaktiveret (MKT-002) — "
+              "brug instagram_carousel_daily.py (ugentlig) i stedet.\n")
+
     articles = get_unposted(limit)
     print(f"Fandt {len(articles)} ikke-postede artikler\n")
 
@@ -238,15 +249,15 @@ def run(limit: int, dry_run: bool) -> None:
         fb_success = False
         ig_success = False
 
-        # Facebook
+        # Facebook — etableret per-artikel-koncept, forbliver aktivt
         if fb_ok or dry_run:
             fb_success = post_facebook(art, dry_run)
             if fb_success:
                 posted_fb += 1
             time.sleep(DELAY)
 
-        # Instagram
-        if ig_ok or dry_run:
+        # Instagram — kun hvis eksplicit tilladt via --allow-legacy-ig-per-artikel
+        if allow_legacy_ig and (ig_ok or dry_run):
             ig_success = post_instagram(art, dry_run)
             if ig_success:
                 posted_ig += 1
@@ -267,5 +278,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="Vis uden at sende")
     parser.add_argument("--limit",   type=int, default=5, help="Max artikler per kørsel (default: 5)")
+    parser.add_argument("--allow-legacy-ig-per-artikel", action="store_true",
+                         help="Nød-flag: genaktiver per-artikel IG-posting (IKKE anbefalet, jf. MKT-002)")
     args = parser.parse_args()
-    run(args.limit, args.dry_run)
+    run(args.limit, args.dry_run, args.allow_legacy_ig_per_artikel)
