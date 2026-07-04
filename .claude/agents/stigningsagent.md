@@ -20,6 +20,7 @@ For et løb/en etape, kør kæden i rækkefølge (jf. `ARKITEKTUR.md`):
 5. `climb_profile_generator.py --race SLUG --all --style full --write-db` — **fast, automatisk fallback** for stigninger climbfinder ikke fandt/verificerede. Genererer klassementet.dk's egne profilbilleder fra rå GPX-højdedata. Rører aldrig et eksisterende `profile_image_url`.
 6. `climb_region_agent.py --race SLUG` — region.
 7. `elevation_image_agent.py --race SLUG` — gemmer profilbillederne i Supabase Storage.
+8. (Manuelt, pr.-etape) `stage_profile_generator.py --race SLUG --stage N --write-db` — fallback for **hele etapens** højdeprofil, når PCS ikke har noget hel-etape-billede overhovedet (se STG-002). Samme GPX-kilde/farveskala som `climb_profile_generator.py`, men for hele sporet, med kendte stigninger markeret som bånd. Rører aldrig et eksisterende `elevation_image_url` uden `--overwrite`.
 
 Bekræft altid bagefter: har hver stigning i etapen en **verificeret** profil? En manglende eller afvist profil er et issue, ikke en detalje.
 

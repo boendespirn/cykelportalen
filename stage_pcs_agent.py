@@ -502,7 +502,19 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
 # ── Gem til DB ────────────────────────────────────────────────────────────────
 
 def save_stages(race_id: str, stages: list[dict]) -> None:
-    records = [{"race_id": race_id, **s} for s in stages]
+    records = []
+    for s in stages:
+        record = {"race_id": race_id, **s}
+        # Udelad elevation_image_url fra upsert-payloaden når PCS ikke fandt
+        # noget denne kørsel (None) — merge-duplicates SÆTTER ellers kolonnen
+        # til NULL for alle felter i payloaden, hvilket ville overskrive et
+        # eksisterende billede (fx et selv-genereret fallback-billede fra
+        # stage_profile_generator.py, se STG-002) med intet, hver gang PCS
+        # stadig mangler profilet. Kolonner der udelades fra payloaden
+        # bevares uændret af PostgREST's merge-duplicates.
+        if record.get("elevation_image_url") is None:
+            record.pop("elevation_image_url", None)
+        records.append(record)
     ok = sb_upsert("stages", records, "race_id,stage_number")
     if ok:
         print(f"  Gemt {len(records)} etaper i DB")

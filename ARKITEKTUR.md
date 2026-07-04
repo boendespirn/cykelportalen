@@ -35,6 +35,10 @@ Dataflow for korrekte stigningsprofiler:
 
 Relaterede: `gpx_agent.py`, `pcs_profile_image_agent.py`, `giro_profile_agent.py`.
 
+**`agents/stage_profile_generator.py --race SLUG --stage N [--write-db] [--overwrite]`** — fallback for **hele etapens** højdeprofil (`stages.elevation_image_url`), til brug når PCS ikke har noget hel-etape-billede overhovedet (se STG-002, fx tour-de-france-2026 etape 3). Genbruger climb_profile_generator.py's GPX-kilde/farveskala, men tegner hele etapens spor og overlejrer kendte kategoriserede stigninger (fra `stage_climbs`) som markerede bånd med navn/gradient. Skriver kun når `elevation_image_url` er NULL, medmindre `--overwrite`. Manuelt/pr.-etape værktøj (ikke et fast pipeline-trin endnu) — kør når `elevation_image_agent.py` ikke fandt noget PCS-billede for en etape og løbet er dækket af `CYCLINGSTAGE_GPX_PAGES`.
+
+**Vigtigt:** `stage_pcs_agent.py`'s `save_stages()` udelader `elevation_image_url` fra sin upsert-payload når PCS ikke fandt et billede den kørsel — ellers ville `Prefer: resolution=merge-duplicates` nulstille et allerede sat billede (fx et `stage_profile_generator.py`-genereret) til NULL, hver gang etapen re-scrapes uden held (samme klasse fejl som STG-007's `--overwrite`-regression i climbfinder_agent.py).
+
 ---
 
 ## SEO / Search Console
