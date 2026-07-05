@@ -223,6 +223,40 @@ def _extract_time(td) -> str:
     return m.group(1) if m else raw
 
 
+def _find_resultscont_tables(soup: BeautifulSoup) -> list:
+    """
+    Finder de reelle rytter-ranglister inde i #resultsCont, parret med nærmeste
+    forudgående fane-overskriftstekst (fx "Youth day classification").
+
+    PCS' faste tabel-indekser (0=etape, 1=GC, 2=point, 6=bjerge, 7=ungdom) holder
+    IKKE altid: nogle etaper (fx holdenkeltstarter) har et varierende antal
+    per-hold rytterliste-widgets FØR de rigtige tabeller, hvilket forskyder alle
+    efterfølgende indekser. Vi finder i stedet tabeller med td.ridername og
+    mindst 5 rækker (udelukker små 1-2 rækkers "leder"-preview-widgets), afgrænset
+    til #resultsCont (udelukker per-hold rytterliste-widgets uden for rammen).
+    """
+    cont = soup.find(id="resultsCont")
+    if cont is None:
+        return []
+    tagged = []
+    for table in cont.find_all("table"):
+        if not table.find("td", class_="ridername"):
+            continue
+        if len(table.find_all("tr")) < 5:
+            continue
+        heading_el = table.find_previous(["a", "h2", "h3", "h4"])
+        heading = heading_el.get_text(strip=True).lower() if heading_el else ""
+        tagged.append((heading, table))
+    return tagged
+
+
+def _pick_table(tagged_tables: list, keyword: str):
+    for heading, table in tagged_tables:
+        if keyword in heading:
+            return table
+    return None
+
+
 def scrape_stage_result(pcs_stage_url: str) -> dict:
     """
     Scraper etaperesultat + alle 4 klassementer fra PCS med BeautifulSoup.
@@ -243,12 +277,21 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
             browser.close()
 
         soup = BeautifulSoup(html, "html.parser")
-        tables = soup.find_all("table")
-        if not tables:
+        tagged = _find_resultscont_tables(soup)
+        if not tagged:
             return result
 
-        # ── Tabel 0: Etaperesultat (sorteret efter etapeplacering) ───────────
-        for row in tables[0].find_all("tr")[1:11]:
+        # Første reelle rytter-rangliste i #resultsCont = etaperesultat (på en
+        # etape hvor GC endnu ikke findes som separat fane, fx etape 1, er
+        # etaperesultat og GC identiske, se fallback for gc_table nedenfor).
+        stage_table = tagged[0][1]
+        gc_table = _pick_table(tagged, "gc") or stage_table
+        points_table = _pick_table(tagged, "point")
+        mountains_table = _pick_table(tagged, "mountain") or _pick_table(tagged, "kom")
+        youth_table = _pick_table(tagged, "youth")
+
+        # ── Etaperesultat (sorteret efter etapeplacering) ────────────────────
+        for row in stage_table.find_all("tr")[1:11]:
             parsed = _parse_pcs_row(row)
             if not parsed:
                 continue
@@ -265,9 +308,9 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                 "time":     time_str,
             })
 
-        # ── DNF: rækker i tabel 0 efter DNF-header ───────────────────────────
+        # ── DNF: rækker i etaperesultat-tabellen efter DNF-header ────────────
         in_dnf = False
-        for row in tables[0].find_all("tr"):
+        for row in stage_table.find_all("tr"):
             cells = row.find_all("td")
             if cells and any("DNF" in c.get_text() for c in cells[:2]):
                 in_dnf = True
@@ -277,22 +320,21 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                 if parsed:
                     result["dnf"].append({"slug": parsed["slug"], "name": parsed["name"]})
 
-        # ── Tabel 1: GC-klassement ────────────────────────────────────────────
-        if len(tables) > 1:
-            for row in tables[1].find_all("tr")[1:21]:
-                parsed = _parse_pcs_row(row)
-                if not parsed:
-                    continue
-                time_str = _extract_time(row.find("td", class_="time"))
-                gap = 0 if parsed["pos"] == 1 else (parse_time_to_seconds(time_str) or 0)
-                result["gc"].append({
-                    "position": parsed["pos"], "slug": parsed["slug"],
-                    "name": parsed["name"], "time_gap_seconds": gap,
-                })
+        # ── GC-klassement ─────────────────────────────────────────────────────
+        for row in gc_table.find_all("tr")[1:21]:
+            parsed = _parse_pcs_row(row)
+            if not parsed:
+                continue
+            time_str = _extract_time(row.find("td", class_="time"))
+            gap = 0 if parsed["pos"] == 1 else (parse_time_to_seconds(time_str) or 0)
+            result["gc"].append({
+                "position": parsed["pos"], "slug": parsed["slug"],
+                "name": parsed["name"], "time_gap_seconds": gap,
+            })
 
-        # ── Tabel 2: Pointsklassement (pnt-kolonne = td[9]) ──────────────────
-        if len(tables) > 2:
-            for row in tables[2].find_all("tr")[1:21]:
+        # ── Pointsklassement (pnt-kolonne = td[9]) ────────────────────────────
+        if points_table is not None:
+            for row in points_table.find_all("tr")[1:21]:
                 parsed = _parse_pcs_row(row)
                 if not parsed:
                     continue
@@ -306,9 +348,9 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                     "name": parsed["name"], "points": pts,
                 })
 
-        # ── Tabel 6: Bjergklassement (pnt-kolonne = td[9]) ───────────────────
-        if len(tables) > 6:
-            for row in tables[6].find_all("tr")[1:21]:
+        # ── Bjergklassement (pnt-kolonne = td[9]) ─────────────────────────────
+        if mountains_table is not None:
+            for row in mountains_table.find_all("tr")[1:21]:
                 parsed = _parse_pcs_row(row)
                 if not parsed:
                     continue
@@ -322,9 +364,9 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                     "name": parsed["name"], "points": pts,
                 })
 
-        # ── Tabel 7: Ungdomsklassement (time-kolonne = td[9]) ────────────────
-        if len(tables) > 7:
-            for row in tables[7].find_all("tr")[1:21]:
+        # ── Ungdomsklassement (time-kolonne = td[9]) ──────────────────────────
+        if youth_table is not None:
+            for row in youth_table.find_all("tr")[1:21]:
                 parsed = _parse_pcs_row(row)
                 if not parsed:
                     continue
