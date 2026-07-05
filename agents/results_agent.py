@@ -121,6 +121,7 @@ def mark_dnf(race_id: str, rider: dict, stage_number: int) -> None:
 def upsert_stage_results(race_id: str, stage_id: str, top10: list[dict]) -> None:
     """Gemmer etaperesultater (top10) i results-tabellen."""
     rows = []
+    last_gap = 0
     for entry in top10:
         rid = get_rider_id(entry["slug"], entry["name"])
         if not rid:
@@ -128,13 +129,15 @@ def upsert_stage_results(race_id: str, stage_id: str, top10: list[dict]) -> None
         pos = entry.get("position")
         time_str = entry.get("time", "")
         secs = parse_time_to_seconds(time_str) if time_str else None
+        gap = _resolve_gap(pos == 1, time_str, last_gap)
+        last_gap = gap
         rows.append({
             "race_id":          race_id,
             "stage_id":         stage_id,
             "rider_id":         rid,
             "position":         pos,
             "time_seconds":     secs if pos == 1 else None,
-            "time_gap_seconds": 0 if pos == 1 else secs,
+            "time_gap_seconds": gap,
         })
     if rows:
         requests.post(
@@ -190,6 +193,19 @@ def parse_time_to_seconds(s: str) -> int | None:
     except ValueError:
         pass
     return None
+
+
+def _resolve_gap(is_leader: bool, time_str: str, last_gap: int) -> int:
+    """
+    PCS udelader (blank celle eller "0:00") tiden for en rytter, der har samme
+    tid som rytteren lige før i ranglisten — det betyder IKKE at rytteren har
+    samme tid som lederen. Falder derfor tilbage til forrige rækkes gap i
+    stedet for at antage 0, når feltet er tomt/uparsérbart.
+    """
+    if is_leader:
+        return 0
+    secs = parse_time_to_seconds(time_str) if time_str else None
+    return secs if secs else last_gap
 
 
 def _parse_pcs_row(row) -> dict | None:
@@ -321,12 +337,14 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                     result["dnf"].append({"slug": parsed["slug"], "name": parsed["name"]})
 
         # ── GC-klassement ─────────────────────────────────────────────────────
+        last_gap = 0
         for row in gc_table.find_all("tr")[1:21]:
             parsed = _parse_pcs_row(row)
             if not parsed:
                 continue
             time_str = _extract_time(row.find("td", class_="time"))
-            gap = 0 if parsed["pos"] == 1 else (parse_time_to_seconds(time_str) or 0)
+            gap = _resolve_gap(parsed["pos"] == 1, time_str, last_gap)
+            last_gap = gap
             result["gc"].append({
                 "position": parsed["pos"], "slug": parsed["slug"],
                 "name": parsed["name"], "time_gap_seconds": gap,
@@ -364,15 +382,16 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                     "name": parsed["name"], "points": pts,
                 })
 
-        # ── Ungdomsklassement (time-kolonne = td[9]) ──────────────────────────
+        # ── Ungdomsklassement (time-kolonne = td.time, ligesom GC) ────────────
         if youth_table is not None:
+            last_gap = 0
             for row in youth_table.find_all("tr")[1:21]:
                 parsed = _parse_pcs_row(row)
                 if not parsed:
                     continue
-                tds = row.find_all("td", recursive=False)
-                time_str = _extract_time(tds[9]) if len(tds) > 9 else ""
-                gap = 0 if parsed["pos"] == 1 else (parse_time_to_seconds(time_str) or 0)
+                time_str = _extract_time(row.find("td", class_="time"))
+                gap = _resolve_gap(parsed["pos"] == 1, time_str, last_gap)
+                last_gap = gap
                 result["youth"].append({
                     "position": parsed["pos"], "slug": parsed["slug"],
                     "name": parsed["name"], "time_gap_seconds": gap,
