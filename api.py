@@ -261,9 +261,12 @@ def get_stage_results(slug: str, stage_number: int, limit: int = 10):
     return res.json() if res.ok and isinstance(res.json(), list) else []
 
 
-@app.get("/races/{slug}/stages/{stage_number}/gc")
-def get_gc_after_stage(slug: str, stage_number: int):
-    """GC-klassement efter en bestemt etape."""
+@app.get("/races/{slug}/stages/{stage_number}/classifications/{classif_type}")
+def get_classification_after_stage(slug: str, stage_number: int, classif_type: str):
+    """Et klassement (gc/points/mountains/youth) som det så ud efter en bestemt etape."""
+    if classif_type not in ("gc", "points", "mountains", "youth"):
+        return {"error": "Ukendt klassement"}
+
     race_res = requests.get(
         f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1",
         headers=get_headers(),
@@ -275,8 +278,8 @@ def get_gc_after_stage(slug: str, stage_number: int):
 
     url = (
         f"{SUPABASE_URL}/rest/v1/classifications"
-        f"?race_id=eq.{race_id}&classification_type=eq.gc&after_stage_number=eq.{stage_number}"
-        f"&select=position,time_gap_seconds,riders(name,slug,nationality,photo_url,teams(name,slug))"
+        f"?race_id=eq.{race_id}&classification_type=eq.{classif_type}&after_stage_number=eq.{stage_number}"
+        f"&select=position,time_gap_seconds,points,riders(name,slug,nationality,photo_url,teams(name,slug))"
         f"&order=position.asc&limit=20"
     )
     data = requests.get(url, headers=get_headers()).json()

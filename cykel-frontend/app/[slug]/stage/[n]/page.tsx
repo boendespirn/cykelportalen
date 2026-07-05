@@ -6,6 +6,8 @@ import Image from "next/image";
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
 import ClimbProfile from "./ClimbProfile";
+import Disclosure from "../../Disclosure";
+import ClassificationTabs, { type StandingEntry } from "../../ClassificationTabs";
 import { API_BASE } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -143,12 +145,6 @@ type StageResult = {
   riders: { name: string; slug: string; nationality: string | null; photo_url: string | null } | null;
 };
 
-type GCEntry = {
-  position: number | null;
-  time_gap_seconds: number | null;
-  riders: { name: string; slug: string; nationality: string | null; photo_url: string | null; teams: { name: string; slug: string } | null } | null;
-};
-
 async function getStageResults(slug: string, n: string): Promise<StageResult[]> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/results?limit=10`, { next: { revalidate: 300 } });
@@ -158,13 +154,22 @@ async function getStageResults(slug: string, n: string): Promise<StageResult[]> 
   } catch { return []; }
 }
 
-async function getStageGC(slug: string, n: string): Promise<{ after_stage: number; standings: GCEntry[] } | null> {
+async function getStageClassification(
+  slug: string,
+  n: string,
+  classifType: "gc" | "points" | "mountains" | "youth"
+): Promise<StandingEntry[]> {
   try {
-    const res = await fetch(`${API_BASE}/races/${slug}/stages/${n}/gc`, { next: { revalidate: 300 } });
-    if (!res.ok) return null;
+    const res = await fetch(
+      `${API_BASE}/races/${slug}/stages/${n}/classifications/${classifType}`,
+      { next: { revalidate: 300 } }
+    );
+    if (!res.ok) return [];
     const data = await res.json();
-    return data?.standings?.length ? data : null;
-  } catch { return null; }
+    return Array.isArray(data?.standings) ? data.standings : [];
+  } catch {
+    return [];
+  }
 }
 
 async function geocodeCity(
@@ -391,14 +396,33 @@ export default async function StagePage(props: {
 
   const { stage, race } = result;
 
-  const [startlist, climbs, broadcastAll, allStages, stageResults, stageGC] = await Promise.all([
+  const [
+    startlist,
+    climbs,
+    broadcastAll,
+    allStages,
+    stageResults,
+    gcStandings,
+    pointsStandings,
+    mountainsStandings,
+    youthStandings,
+  ] = await Promise.all([
     getStartlist(slug),
     getClimbs(slug, n),
     getBroadcast(slug),
     getAllStages(slug),
     getStageResults(slug, n),
-    getStageGC(slug, n),
+    getStageClassification(slug, n, "gc"),
+    getStageClassification(slug, n, "points"),
+    getStageClassification(slug, n, "mountains"),
+    getStageClassification(slug, n, "youth"),
   ]);
+
+  const hasClassificationData =
+    gcStandings.length > 0 ||
+    pointsStandings.length > 0 ||
+    mountainsStandings.length > 0 ||
+    youthStandings.length > 0;
 
   const stageNum   = parseInt(n);
   const prevStage  = allStages.find((s) => s.stage_number === stageNum - 1) ?? null;
@@ -537,109 +561,78 @@ export default async function StagePage(props: {
         )}
       </header>
 
-      {/* Etaperesultat */}
-      {stageResults.length > 0 && (
-        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-          <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
-            <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">Etaperesultat</span>
-            <span className="text-xs text-slate-600">Top {stageResults.length}</span>
-          </div>
-          <div className="divide-y divide-slate-800/40">
-            {stageResults.map((r) => {
-              const rider = r.riders;
-              if (!rider) return null;
-              const flag = rider.nationality?.length === 2
-                ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
-                : "";
-              const podiumColors: Record<number, string> = {
-                1: "text-yellow-400 font-bold",
-                2: "text-slate-300 font-semibold",
-                3: "text-amber-600 font-semibold",
-              };
-              const gapSec = r.time_gap_seconds ?? 0;
-              const gap = gapSec > 0
-                ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
-                : null;
-              const isTop3 = r.position <= 3;
-              return (
-                <div key={r.position} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
-                  <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${podiumColors[r.position] ?? "text-slate-600"}`}>
-                    {r.position}.
-                  </span>
-                  {rider.photo_url && (
-                    <div className="relative w-7 h-7 flex-shrink-0">
-                      <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
-                    </div>
-                  )}
-                  <span className="text-sm flex-shrink-0">{flag}</span>
-                  <Link
-                    href={`/riders/${rider.slug}`}
-                    className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
-                  >
-                    {rider.name}
-                  </Link>
-                  {gap
-                    ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
-                    : r.position === 1 && r.time_seconds
-                      ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{Math.floor(r.time_seconds / 3600)}:{String(Math.floor((r.time_seconds % 3600) / 60)).padStart(2, "0")}:{String(r.time_seconds % 60).padStart(2, "0")}</span>
-                      : null
-                  }
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Etaperesultat + klassement efter etapen */}
+      <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        {stageResults.length > 0 && (
+          <Disclosure
+            title="Etaperesultat"
+            subtitle={`Top ${stageResults.length}`}
+            accentColor="text-emerald-400"
+          >
+            <div className="divide-y divide-slate-800/40">
+              {stageResults.map((r) => {
+                const rider = r.riders;
+                if (!rider) return null;
+                const flag = rider.nationality?.length === 2
+                  ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
+                  : "";
+                const podiumColors: Record<number, string> = {
+                  1: "text-yellow-400 font-bold",
+                  2: "text-slate-300 font-semibold",
+                  3: "text-amber-600 font-semibold",
+                };
+                const gapSec = r.time_gap_seconds ?? 0;
+                const gap = gapSec > 0
+                  ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
+                  : null;
+                const isTop3 = r.position <= 3;
+                return (
+                  <div key={r.position} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
+                    <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${podiumColors[r.position] ?? "text-slate-600"}`}>
+                      {r.position}.
+                    </span>
+                    {rider.photo_url && (
+                      <div className="relative w-7 h-7 flex-shrink-0">
+                        <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
+                      </div>
+                    )}
+                    <span className="text-sm flex-shrink-0">{flag}</span>
+                    <Link
+                      href={`/riders/${rider.slug}`}
+                      className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
+                    >
+                      {rider.name}
+                    </Link>
+                    {gap
+                      ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
+                      : r.position === 1 && r.time_seconds
+                        ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{Math.floor(r.time_seconds / 3600)}:{String(Math.floor((r.time_seconds % 3600) / 60)).padStart(2, "0")}:{String(r.time_seconds % 60).padStart(2, "0")}</span>
+                        : null
+                    }
+                  </div>
+                );
+              })}
+            </div>
+          </Disclosure>
+        )}
 
-      {/* GC-klassement efter etapen */}
-      {stageGC && stageGC.standings.length > 0 && (
-        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-          <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
-            <span className="text-xs uppercase tracking-[0.2em] text-pink-400 font-medium">Klassement efter etape {stageGC.after_stage}</span>
-          </div>
-          <div className="divide-y divide-slate-800/40">
-            {stageGC.standings.map((entry) => {
-              const rider = entry.riders;
-              if (!rider) return null;
-              const flag = rider.nationality?.length === 2
-                ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
-                : "";
-              const gapSec = entry.time_gap_seconds ?? 0;
-              const gap = gapSec > 0
-                ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
-                : null;
-              const pos = entry.position ?? 0;
-              const isTop3 = pos <= 3;
-              return (
-                <div key={rider.slug} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
-                  <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${pos === 1 ? "text-pink-400 font-bold" : pos <= 3 ? "text-slate-300 font-semibold" : "text-slate-600"}`}>
-                    {pos}.
-                  </span>
-                  {rider.photo_url && (
-                    <div className="relative w-7 h-7 flex-shrink-0">
-                      <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
-                    </div>
-                  )}
-                  <span className="text-sm flex-shrink-0">{flag}</span>
-                  <Link
-                    href={`/riders/${rider.slug}`}
-                    className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
-                  >
-                    {rider.name}
-                  </Link>
-                  {rider.teams && (
-                    <span className="text-xs text-slate-600 truncate hidden sm:block max-w-[120px]">{rider.teams.name}</span>
-                  )}
-                  {gap
-                    ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
-                    : pos === 1 ? <span className="text-[10px] font-bold text-pink-500 flex-shrink-0">FØRER</span> : null
-                  }
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+        {hasClassificationData && (
+          <Disclosure
+            title={`Klassement efter etape ${stage.stage_number}`}
+            accentColor="text-pink-400"
+          >
+            <div className="p-4">
+              <ClassificationTabs
+                gcStandings={gcStandings}
+                pointsStandings={pointsStandings}
+                mountainsStandings={mountainsStandings}
+                youthStandings={youthStandings}
+                raceSlug={slug}
+              />
+            </div>
+          </Disclosure>
+        )}
+      </div>
 
       {/* Højdeprofil + individuelle stigninger */}
       <ClimbProfile
