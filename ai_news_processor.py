@@ -1,14 +1,17 @@
 """
 ai_news_processor.py
 Behandler råartikler fra raw_news med Claude (Anthropic API):
-  1. Scorer relevans for danske cykelfans (1-10)
-  2. Omskriver top-artikler til dansk med interne links
-  3. Gemmer i news_articles
+  1. Scorer relevans for danske cykelfans (1-10) for ALLE kandidater i puljen
+  2. Rangerer de kvalificerede kandidater og omskriver kun den/de allerbedste
+     til dansk med interne links (max MAX_DRAFTS_PER_RUN, mål er 1 — se
+     STRATEGI.md §1: kvalitet frem for mængde, mens vi venter på indeksering)
+  3. Gemmer i news_articles som kladde (kræver godkendelse i /admin)
 
 Krav: ANTHROPIC_API_KEY i .env
 
 Kør: python ai_news_processor.py
-     python ai_news_processor.py --limit 5   (behandl max 5 artikler)
+     python ai_news_processor.py --limit 5          (score max 5 kandidater)
+     python ai_news_processor.py --max-drafts 1      (skriv kun den allerbedste)
 
 Sæt op i Windows Task Scheduler til at køre efter rss_news_scraper.py.
 """
@@ -39,10 +42,11 @@ DB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-MODEL            = "claude-haiku-4-5-20251001"  # hurtig og billig; skift til claude-sonnet-4-6 for højere kvalitet
-MIN_SCORE        = 8      # kun tophistorier scores videre (8-10)
-MAX_ARTICLES     = 15     # max artikler der scores per kørsel
-DELAY            = 0.5    # sekunder mellem API-kald
+MODEL              = "claude-haiku-4-5-20251001"  # hurtig og billig; skift til claude-sonnet-4-6 for højere kvalitet
+MIN_SCORE          = 8      # kun tophistorier scores videre (8-10)
+MAX_ARTICLES       = 15     # max artikler der SCORES per kørsel (kandidatpuljen)
+MAX_DRAFTS_PER_RUN = 2      # max artikler der rent faktisk SKRIVES per kørsel — målet er 1, se STRATEGI.md §1
+DELAY              = 0.5    # sekunder mellem API-kald
 
 # ── Løb der linkes til internt (opdateres automatisk fra DB) ─────────────────
 
@@ -236,7 +240,7 @@ Returner præcis dette JSON:
 
 # ── Hoved ─────────────────────────────────────────────────────────────────────
 
-def run(limit: int) -> None:
+def run(limit: int, max_drafts: int) -> None:
     if not ANTHROPIC_KEY:
         print("FEJL: ANTHROPIC_API_KEY mangler i .env")
         print("Hent nøgle på: https://console.anthropic.com/settings/keys")
@@ -249,14 +253,16 @@ def run(limit: int) -> None:
 
     print(f"ai_news_processor.py — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Fandt {len(articles)} ubehandlede artikler | {len(races)} løb til interne links")
+    print(f"Max {max_drafts} artikel(er) skrives denne kørsel (mål: 1, jf. STRATEGI.md §1)")
     print(f"Artikler gemmes som kladder — godkend på klassementet.dk/admin\n")
 
-    drafted = skipped = failed = 0
-
+    # ── Trin 1: Score ALLE kandidater først, før vi skriver noget ────────────
+    # Vi skal kunne sammenligne dagens nyheder og vælge den allerbedste,
+    # i stedet for blot at skrive den første, der overstiger tærsklen.
+    qualified = []
+    skipped = 0
     for i, art in enumerate(articles, 1):
         print(f"[{i}/{len(articles)}] {art['title'][:70]}")
-
-        # Trin 1: Relevans-scoring
         score = score_article(client, art)
         print(f"  Score: {score:.0f}/10", end="")
 
@@ -264,12 +270,29 @@ def run(limit: int) -> None:
             print(" — for lav, springer over")
             mark_processed(art["id"], score)
             skipped += 1
-            time.sleep(DELAY)
-            continue
+        else:
+            print(" — kvalificeret, sammenlignes med dagens øvrige kandidater")
+            qualified.append((score, art))
 
-        print(" — omskriver...")
+        time.sleep(DELAY)
 
-        # Trin 2: Omskrivning
+    # ── Trin 2: Vælg kun den/de allerbedste blandt de kvalificerede ─────────
+    # Stabil sortering: ved lige score vinder den nyeste (articles kom allerede
+    # i published_at-faldende rækkefølge fra get_unprocessed()).
+    qualified.sort(key=lambda pair: pair[0], reverse=True)
+    to_draft = qualified[:max_drafts]
+    not_drafted = qualified[max_drafts:]
+
+    if not_drafted:
+        titles = ", ".join(a["title"][:50] for _, a in not_drafted)
+        print(f"\n{len(not_drafted)} kvalificeret(e) artikel(er) IKKE skrevet (dagligt loft nået): {titles}")
+        for score, art in not_drafted:
+            mark_processed(art["id"], score)  # markér behandlet, så den ikke gentages i morgen
+
+    drafted = failed = 0
+    for score, art in to_draft:
+        print(f"\nSkriver: {art['title'][:70]} (score {score:.0f}/10)")
+
         result = rewrite_article(client, art, races, startlist_context)
         if not result or not result.get("title") or not result.get("content"):
             print("  -> FEJL ved omskrivning")
@@ -278,7 +301,6 @@ def run(limit: int) -> None:
             time.sleep(DELAY)
             continue
 
-        # Trin 3: Gem i news_articles som kladde (kræver godkendelse i /admin)
         slug = slug_from_title(result["title"])
         saved = save_article({
             "slug":             slug,
@@ -304,13 +326,15 @@ def run(limit: int) -> None:
 
         time.sleep(DELAY)
 
-    print(f"\nFærdig: {drafted} kladder gemt, {skipped} sprunget over, {failed} fejl")
+    print(f"\nFærdig: {drafted} kladder gemt, {len(not_drafted)} kvalificerede-men-ikke-skrevet (dagligt loft), {skipped} for lav score, {failed} fejl")
     print(f"Godkend på: klassementet.dk/admin")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=MAX_ARTICLES,
-                        help=f"Max artikler per kørsel (default: {MAX_ARTICLES})")
+                        help=f"Max artikler der SCORES per kørsel (default: {MAX_ARTICLES})")
+    parser.add_argument("--max-drafts", type=int, default=MAX_DRAFTS_PER_RUN,
+                        help=f"Max artikler der rent faktisk SKRIVES per kørsel (default: {MAX_DRAFTS_PER_RUN}, mål er 1)")
     args = parser.parse_args()
-    run(args.limit)
+    run(args.limit, args.max_drafts)

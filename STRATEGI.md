@@ -31,9 +31,11 @@ Den dobbelte hensigt gælder hele tiden: eksekvér hurtigt på at få **trafik n
 - Implementér **SEO native i Next.js** (Metadata API, `sitemap.ts`, JSON-LD struktureret data), tilslut Google Search Console, og opsæt IndexNow.
 - Brug AI til at arbejde med **SERP-/meta-tekster** for at maksimere click-through rate, når Google belønner os med eksponeringer.
 - Forbedr sidens **sitemap** (native i Next.js) for at hjælpe Google på vej.
-- Parallelt: producér **ca. 3 nyheder om ugen**, der hver linker **internt** til en anden relevant side (intern linking styrker indeksering og autoritet).
-  - **Workflow:** artikel-/marketingagenten præsenterer sine **10 bedste artikelidéer** om ugen → **ejeren vælger**, hvilke der publiceres. Menneskelig godkendelse er påkrævet før publicering.
-- **Mål:** fortsæt ugentligt, indtil **hele siden er indekseret**.
+- Parallelt: producér nyheder der linker **internt** til en anden relevant side (intern linking styrker indeksering og autoritet) — men **kvalitet frem for mængde**:
+  - **Max 2 artikler om dagen, mål er 1.** Vi venter stadig på indeksering — at spamme artikler ud skader både SEO'en (svag, tynd content frem for få stærke sider) og brandets løfte om kun det vigtige (jf. `CLAUDE.md` §5).
+  - **Workflow:** artikel-agenten scorer alle relevante nyhedskandidater og vælger **den allerbedste** (højst dansk-relevans) til at blive skrevet — ikke alt der overstiger relevans-tærsklen. Kun i undtagelsestilfælde (to reelt store, uafhængige nyheder samme dag) skrives der 2.
+  - Menneskelig godkendelse er stadig påkrævet før publicering (admin-køen på `klassementet.dk/admin`).
+- **Mål:** fortsæt indtil **hele siden er indekseret** — med få, stærke artikler frem for mange middelmådige.
 
 ### 2. Marketing-setup — automatiseret trafikvækst
 

@@ -23,6 +23,15 @@ En artikel skal have **reel nyhedsværdi** før den foreslås — og det skal v�
 - Dækker den noget, en dansk fan reelt vil søge på eller bryde sig om — store navne, danske ryttere, afgørende løbsbegivenheder — frem for ubetydelige ting?
 - I tvivl: drop den. Vi snyder aldrig nogen til at klikke på tomt indhold (jf. brandet i `CLAUDE.md`).
 
+## Max 2 artikler om dagen — mål er 1
+
+Vi venter stadig på Google-indeksering (jf. `STRATEGI.md` §1). I den fase er få, stærke artikler bedre end mange middelmådige — at spamme artikler ud skader både SEO'en og brandets løfte om kun det vigtige.
+
+- **Skriv aldrig mere end 2 artikler pr. dag. Tilstræb 1.**
+- Når flere nyheder overstiger relevans-tærsklen samme dag: **skriv ikke dem alle** — sammenlign kandidaterne og vælg **den allerbedste** (størst nyhedsværdi for danske fans: store navne, danske ryttere, afgørende løbsbegivenheder vinder over sekundære/opfølgende historier).
+- Kun i reelle undtagelsestilfælde — to store, indbyrdes uafhængige nyheder samme dag (fx et styrt på en etape OG en stor transferoverraskelse) — skrives der 2.
+- `ai_news_processor.py` håndhæver dette som et hårdt loft (`MAX_DRAFTS_PER_RUN`, standard 2) og rangerer kandidater efter relevans-score, så kun den/de bedste rent faktisk bliver skrevet — men du skal tænke på samme måde, når du selv vurderer eller finjusterer nyhedsvalget.
+
 ## Sådan skrives en artikel
 
 - **Omvendt pyramide:** den **vigtigste information først**, så læseren får det, de leder efter, hurtigst muligt — derefter de mindre vigtige detaljer. Dette gælder **alle** artikler.
