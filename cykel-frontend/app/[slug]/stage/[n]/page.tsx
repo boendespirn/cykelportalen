@@ -154,22 +154,36 @@ async function getStageResults(slug: string, n: string): Promise<StageResult[]> 
   } catch { return []; }
 }
 
-async function getStageClassification(
+type ClassificationResult = { standings: StandingEntry[]; afterStage: number | null };
+
+async function fetchClassificationStandings(url: string): Promise<ClassificationResult> {
+  try {
+    const res = await fetch(url, { next: { revalidate: 300 } });
+    if (!res.ok) return { standings: [], afterStage: null };
+    const data = await res.json();
+    return Array.isArray(data?.standings)
+      ? { standings: data.standings, afterStage: data.after_stage ?? null }
+      : { standings: [], afterStage: null };
+  } catch {
+    return { standings: [], afterStage: null };
+  }
+}
+
+// Klassementet som det så ud lige efter DENNE etape, hvis det er hentet endnu
+// (fryser permanent, se CLAUDE.md-note om historik) — ellers det nyeste
+// tilgængelige klassement, indtil etapen er kørt og data er hentet.
+async function getEffectiveClassification(
   slug: string,
   n: string,
   classifType: "gc" | "points" | "mountains" | "youth"
-): Promise<StandingEntry[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/races/${slug}/stages/${n}/classifications/${classifType}`,
-      { next: { revalidate: 300 } }
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data?.standings) ? data.standings : [];
-  } catch {
-    return [];
+): Promise<ClassificationResult> {
+  const frozen = await fetchClassificationStandings(
+    `${API_BASE}/races/${slug}/stages/${n}/classifications/${classifType}`
+  );
+  if (frozen.standings.length > 0) {
+    return { standings: frozen.standings, afterStage: parseInt(n) };
   }
+  return fetchClassificationStandings(`${API_BASE}/races/${slug}/classifications/${classifType}`);
 }
 
 async function geocodeCity(
@@ -402,27 +416,38 @@ export default async function StagePage(props: {
     broadcastAll,
     allStages,
     stageResults,
-    gcStandings,
-    pointsStandings,
-    mountainsStandings,
-    youthStandings,
+    gcResult,
+    pointsResult,
+    mountainsResult,
+    youthResult,
   ] = await Promise.all([
     getStartlist(slug),
     getClimbs(slug, n),
     getBroadcast(slug),
     getAllStages(slug),
     getStageResults(slug, n),
-    getStageClassification(slug, n, "gc"),
-    getStageClassification(slug, n, "points"),
-    getStageClassification(slug, n, "mountains"),
-    getStageClassification(slug, n, "youth"),
+    getEffectiveClassification(slug, n, "gc"),
+    getEffectiveClassification(slug, n, "points"),
+    getEffectiveClassification(slug, n, "mountains"),
+    getEffectiveClassification(slug, n, "youth"),
   ]);
+
+  const gcStandings = gcResult.standings;
+  const pointsStandings = pointsResult.standings;
+  const mountainsStandings = mountainsResult.standings;
+  const youthStandings = youthResult.standings;
 
   const hasClassificationData =
     gcStandings.length > 0 ||
     pointsStandings.length > 0 ||
     mountainsStandings.length > 0 ||
     youthStandings.length > 0;
+
+  // Etaperesultater findes altid pr. etape, klassementet kan enten være frosset
+  // for netop denne etape eller falde tilbage til det nyeste tilgængelige — så
+  // panelets overskrift skal afspejle, hvilken etape dataene reelt er fra.
+  const classificationAfterStage =
+    gcResult.afterStage ?? pointsResult.afterStage ?? mountainsResult.afterStage ?? youthResult.afterStage;
 
   const stageNum   = parseInt(n);
   const prevStage  = allStages.find((s) => s.stage_number === stageNum - 1) ?? null;
@@ -561,79 +586,6 @@ export default async function StagePage(props: {
         )}
       </header>
 
-      {/* Etaperesultat + klassement efter etapen */}
-      <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-        {stageResults.length > 0 && (
-          <Disclosure
-            title="Etaperesultat"
-            subtitle={`Top ${stageResults.length}`}
-            accentColor="text-emerald-400"
-          >
-            <div className="divide-y divide-slate-800/40">
-              {stageResults.map((r) => {
-                const rider = r.riders;
-                if (!rider) return null;
-                const flag = rider.nationality?.length === 2
-                  ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
-                  : "";
-                const podiumColors: Record<number, string> = {
-                  1: "text-yellow-400 font-bold",
-                  2: "text-slate-300 font-semibold",
-                  3: "text-amber-600 font-semibold",
-                };
-                const gapSec = r.time_gap_seconds ?? 0;
-                const gap = gapSec > 0
-                  ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
-                  : null;
-                const isTop3 = r.position <= 3;
-                return (
-                  <div key={r.position} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
-                    <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${podiumColors[r.position] ?? "text-slate-600"}`}>
-                      {r.position}.
-                    </span>
-                    {rider.photo_url && (
-                      <div className="relative w-7 h-7 flex-shrink-0">
-                        <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
-                      </div>
-                    )}
-                    <span className="text-sm flex-shrink-0">{flag}</span>
-                    <Link
-                      href={`/riders/${rider.slug}`}
-                      className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
-                    >
-                      {rider.name}
-                    </Link>
-                    {gap
-                      ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
-                      : r.position === 1 && r.time_seconds
-                        ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{Math.floor(r.time_seconds / 3600)}:{String(Math.floor((r.time_seconds % 3600) / 60)).padStart(2, "0")}:{String(r.time_seconds % 60).padStart(2, "0")}</span>
-                        : null
-                    }
-                  </div>
-                );
-              })}
-            </div>
-          </Disclosure>
-        )}
-
-        {hasClassificationData && (
-          <Disclosure
-            title={`Klassement efter etape ${stage.stage_number}`}
-            accentColor="text-pink-400"
-          >
-            <div className="p-4">
-              <ClassificationTabs
-                gcStandings={gcStandings}
-                pointsStandings={pointsStandings}
-                mountainsStandings={mountainsStandings}
-                youthStandings={youthStandings}
-                raceSlug={slug}
-              />
-            </div>
-          </Disclosure>
-        )}
-      </div>
-
       {/* Højdeprofil + individuelle stigninger */}
       <ClimbProfile
         climbs={climbs}
@@ -730,6 +682,83 @@ export default async function StagePage(props: {
           </div>
         </div>
       )}
+
+      {/* Etaperesultat + klassement */}
+      <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        {stageResults.length > 0 && (
+          <Disclosure
+            title="Etaperesultat"
+            subtitle={`Top ${stageResults.length}`}
+            accentColor="text-emerald-400"
+          >
+            <div className="divide-y divide-slate-800/40">
+              {stageResults.map((r) => {
+                const rider = r.riders;
+                if (!rider) return null;
+                const flag = rider.nationality?.length === 2
+                  ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
+                  : "";
+                const podiumColors: Record<number, string> = {
+                  1: "text-yellow-400 font-bold",
+                  2: "text-slate-300 font-semibold",
+                  3: "text-amber-600 font-semibold",
+                };
+                const gapSec = r.time_gap_seconds ?? 0;
+                const gap = gapSec > 0
+                  ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
+                  : null;
+                const isTop3 = r.position <= 3;
+                return (
+                  <div key={r.position} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
+                    <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${podiumColors[r.position] ?? "text-slate-600"}`}>
+                      {r.position}.
+                    </span>
+                    {rider.photo_url && (
+                      <div className="relative w-7 h-7 flex-shrink-0">
+                        <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
+                      </div>
+                    )}
+                    <span className="text-sm flex-shrink-0">{flag}</span>
+                    <Link
+                      href={`/riders/${rider.slug}`}
+                      className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
+                    >
+                      {rider.name}
+                    </Link>
+                    {gap
+                      ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
+                      : r.position === 1 && r.time_seconds
+                        ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{Math.floor(r.time_seconds / 3600)}:{String(Math.floor((r.time_seconds % 3600) / 60)).padStart(2, "0")}:{String(r.time_seconds % 60).padStart(2, "0")}</span>
+                        : null
+                    }
+                  </div>
+                );
+              })}
+            </div>
+          </Disclosure>
+        )}
+
+        {hasClassificationData && (
+          <Disclosure
+            title={
+              classificationAfterStage !== null
+                ? `Klassement efter etape ${classificationAfterStage}`
+                : "Klassement"
+            }
+            accentColor="text-pink-400"
+          >
+            <div className="p-4">
+              <ClassificationTabs
+                gcStandings={gcStandings}
+                pointsStandings={pointsStandings}
+                mountainsStandings={mountainsStandings}
+                youthStandings={youthStandings}
+                raceSlug={slug}
+              />
+            </div>
+          </Disclosure>
+        )}
+      </div>
 
       {/* Kort + Stats */}
       <div className="grid gap-4 lg:grid-cols-[1fr_260px] mb-10">
