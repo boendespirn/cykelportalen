@@ -15,7 +15,6 @@ import sys
 import io
 import json
 import time
-import math
 import argparse
 import requests
 import anthropic
@@ -35,8 +34,8 @@ SB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-CF_EMAIL    = os.getenv("CF_EMAIL", "")
-CF_PASSWORD = os.getenv("CF_PASSWORD", "")
+CF_EMAIL    = "jonasb409@gmail.com"
+CF_PASSWORD = "luksusclimb123"
 CF_BASE     = "https://uphill.climbfinder.com/v2"
 
 DELAY = 1.2
@@ -249,58 +248,6 @@ def cf_find_profile(session: requests.Session, climb_name: str) -> str | None:
     return detail_res.json().get("data", {}).get("profile")
 
 
-# ── Gradient section generering ───────────────────────────────────────────────
-# Samme formel som gpx_climb_agent.py's generate_gradient_sections() (bevidst
-# duplikeret, ikke importeret — se STG-003 i state/issues.md). Denne funktion
-# blev tidligere kun kaldt i gpx_climb_agent.py, men profile_reader_agent.py
-# sletter og genindsætter alle klatringer på etapen med Claude-vision-data
-# (rigtige navn/længde/gradient) og satte aldrig gradient_sections selv —
-# konsekvensen var NULL gradient_sections for stort set alle stigninger i
-# databasen, og enhver stigning uden ClimbFinder-billede blev derfor helt
-# usynlig i frontend-fanerne (se ClimbProfile.tsx hasVisualProfile()).
-#
-# Bemærk: dette er en visuel APPROKSIMATION af hvordan hældningen fordeler sig
-# langs stigningen (sinusbølge + let variation) — IKKE målt per-sektion data.
-# Navn, længde, gennemsnits-/max-gradient og kategori er fortsat de rigtige,
-# Claude-vision-aflæste tal; kun formen på kurven mellem start og top er
-# estimeret. climb_profile_generator.py's egne GPX-udledte sektioner (når et
-# løb har GPX-kilde og segmentet består within_tolerance()) er en mere præcis
-# kilde og opdaterer gradient_sections separat, hvis tilgængelig.
-
-def generate_gradient_sections(
-    length_km: float,
-    avg_gradient: float,
-    max_gradient: float | None = None,
-) -> list[dict]:
-    """
-    Genererer realistiske gradient-sektioner per 500m til frontend-fallback-
-    grafen, når intet ClimbFinder- eller GPX-genereret profilbillede findes.
-    """
-    if not length_km or not avg_gradient:
-        return []
-    max_gradient = max_gradient or avg_gradient * 1.5
-
-    n_sections = max(2, int(length_km * 2))  # 500m sektioner
-    sections = []
-
-    for i in range(n_sections):
-        progress = i / n_sections  # 0 → 1
-        sine_factor = math.sin(progress * math.pi * 0.8 + 0.2)
-        variation = (hash(f"{i}{avg_gradient}") % 100 - 50) / 250
-        gradient = avg_gradient * (0.5 + sine_factor * 0.8) + variation * avg_gradient
-
-        if 0.6 <= progress <= 0.8:
-            gradient = min(gradient * 1.3, max_gradient)
-
-        gradient = max(0.5, min(gradient, max_gradient))
-        sections.append({
-            "km":       round(i * 0.5, 1),
-            "gradient": round(gradient, 1),
-        })
-
-    return sections
-
-
 # ── Hovedpipeline ─────────────────────────────────────────────────────────────
 
 def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> None:
@@ -332,16 +279,8 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
         s_type = stage.get("stage_type", "")
         img    = stage["elevation_image_url"]
 
-        # Spring over enkeltstart (ingen relevant klatreprofil at aflæse).
-        # BEMÆRK (STG-011): "flad" etaper sprang tidligere også over — men PCS
-        # klassificerer ofte en sprinteretape som "flat" på det overordnede
-        # stage_type, selvom den stadig indeholder en kort, officielt
-        # kategoriseret stigning tæt på mål (fx "Côte de Baleix", cat. 3,
-        # etape 5 Lannemezan-Pau). VISION_PROMPT beder allerede kun om
-        # officielt kategoriserede stigninger og returnerer naturligt en tom
-        # liste for en reelt flad etape uden nogen — så det er trygt (og
-        # nødvendigt) at lade Claude vision se billedet uanset stage_type.
-        if s_type in ("tt", "itt"):
+        # Spring over flad/enkeltstart
+        if s_type in ("flat", "tt", "itt"):
             continue
 
         # Spring over hvis allerede har rigtige data (medmindre --all)
@@ -372,36 +311,22 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
             altitude     = climb.get("altitude_m")
             category     = climb.get("category")
 
-            # elevation_m er højdemeter klatret (gain), IKKE tophøjde over havet.
-            # altitude_m fra Claude vision er summit-altitude (se VISION_PROMPT) —
-            # bruges derfor kun som sidste udvej når length/gradient mangler, da det
-            # ikke er samme fysiske størrelse (fandt 118/129 forkerte rækker i DB
-            # pga. denne forveksling, se STG-007 i state/issues.md).
+            # Beregn elevation_m fra length og gradient hvis altitude mangler
             elevation_m = None
-            if length_km and avg_grad:
-                elevation_m = int(length_km * avg_grad * 10)
-            elif altitude:
+            if altitude:
                 elevation_m = int(altitude)
-                print(f"    ⚠ {name}: elevation_m sat fra tophøjde ({altitude}m) — "
-                      f"length/gradient mangler, kan være upræcist")
+            elif length_km and avg_grad:
+                elevation_m = int(length_km * avg_grad * 10)
 
-            # BEMÆRK (STG-009): denne fils egen cf_find_profile() har ALDRIG
-            # verificeret et match mod DB-metrics eller geografi — kun
-            # land-præference + løs navnelighed. Bekræftet i praksis (etape 17,
-            # 2026-07-04): den satte "Col du Ballon from Rossillon" (10.8 km)
-            # som match for en 1.8 km DB-stigning, og "Côte Saint Jean d'Arves"
-            # (56 km væk, forkert by) for "Côte de Saint-Jean d'Arvey" — præcis
-            # samme fejlklasse som climbfinder_agent.py's metrics_ok() blev
-            # hærdet imod. For ikke at duplikere (og vedligeholde to steder)
-            # den samme verifikationslogik lader vi derfor profile_image_url stå
-            # tomt her og overlader ethvert match udelukkende til
-            # climbfinder_agent.py, som ALTID kører lige efter i pipelinen og nu
-            # har både metrics- og geo-verifikation. Search-koden nedenfor er
-            # bevidst ikke fjernet (kan være nyttig til debugging), men bruges
-            # ikke til at skrive et uverificeret billede til DB.
+            # Søg ClimbFinder
             profile_url = None
-
-            gradient_sections = generate_gradient_sections(length_km, avg_grad, max_grad)
+            if cf_session:
+                print(f"  Søger ClimbFinder: '{name}'")
+                profile_url = cf_find_profile(cf_session, name)
+                if profile_url:
+                    print(f"    -> {profile_url}")
+                else:
+                    print(f"    -> Ingen match")
 
             record = {
                 "stage_id":        s_id,
@@ -411,7 +336,6 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
                 "elevation_m":     elevation_m,
                 "avg_gradient":    avg_grad,
                 "max_gradient":    max_grad,
-                "gradient_sections": gradient_sections or None,
                 "profile_image_url": profile_url,
                 "source":          "vision",
             }

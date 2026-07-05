@@ -237,7 +237,7 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
             has_startlist = len(count_rows) > 0
             action = "Opdaterer" if has_startlist else "Henter"
             print(f"  [{action} startliste]")
-            ok = run_script("startlist_agent.py", pcs_slug, label=f"startlist {slug}")
+            ok = run_script("agents/startlist_agent.py", pcs_slug, label=f"startlist {slug}")
             if ok:
                 updated_startlists += 1
                 race_changed = True
@@ -262,7 +262,7 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
             print(f"  [Etaper — {reason}]")
             is_oneday = race.get("race_type") == "oneday"
             extra_args = ["--oneday"] if is_oneday else []
-            ok = run_script("stage_pcs_agent.py", pcs_slug, *extra_args, label=f"stages {slug}")
+            ok = run_script("agents/stage_pcs_agent.py", pcs_slug, *extra_args, label=f"stages {slug}")
             if ok:
                 updated_stages += 1
                 race_changed = True
