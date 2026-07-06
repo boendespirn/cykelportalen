@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 import ast
 import os
 import requests
@@ -10,6 +11,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI()
+
+DK_TZ = ZoneInfo("Europe/Copenhagen")
+
+
+def today_dk() -> date:
+    """Dagens dato i dansk lokal tid — brug ALTID denne, ikke date.today(),
+    da serveren kører i UTC og ellers viser gårsdagens etape som "i dag"
+    mellem midnat og kl. 02 dansk tid (sommertid)."""
+    return datetime.now(DK_TZ).date()
 
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
@@ -96,7 +106,7 @@ def get_races():
 
 @app.get("/upcoming-races")
 def get_upcoming_races():
-    today = date.today().isoformat()
+    today = today_dk().isoformat()
     url = f"{SUPABASE_URL}/rest/v1/races?select=id,name,slug,start_date,end_date,country_code,category&start_date=gt.{today}&order=start_date.asc"
     races = requests.get(url, headers=get_headers()).json()
 
@@ -141,7 +151,7 @@ def get_upcoming_races():
 
 @app.get("/ongoing-races")
 def get_ongoing_races():
-    today = date.today().isoformat()
+    today = today_dk().isoformat()
     race_url = (
         f"{SUPABASE_URL}/rest/v1/races"
         f"?select=id,name,slug,start_date,end_date,country_code,category"
@@ -625,12 +635,17 @@ def get_rider_palmares(slug: str):
     )
     raw_gc = gc_res.json() if gc_res.ok and isinstance(gc_res.json(), list) else []
 
+    # Kun AFSLUTTEDE løb tæller som palmares — et igangværende etapeløbs
+    # mellemstilling er ikke en sejr/placering endnu (jf. CLAUDE.md §4/§6).
+    today = today_dk().isoformat()
+
     # Dedupliker: behold kun den post med højest after_stage_number per løb
     best_per_race: dict = {}
     for entry in raw_gc:
         race = entry.get("races") or {}
         slug = race.get("slug")
-        if not slug:
+        end_date = race.get("end_date")
+        if not slug or not end_date or end_date >= today:
             continue
         if slug not in best_per_race:
             best_per_race[slug] = entry

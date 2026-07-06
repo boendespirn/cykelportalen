@@ -1,8 +1,18 @@
 export const revalidate = 300;
 
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+
+export const metadata: Metadata = {
+  title: "Nyheder",
+  description: "Alle nyheder om cykling — resultater, startlister, analyser og interviews fra de store cykelløb.",
+  alternates: {
+    canonical: "/nyheder",
+    types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+  },
+};
 
 type Article = {
   slug: string;

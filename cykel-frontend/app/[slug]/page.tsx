@@ -353,7 +353,13 @@ function StartlistBlock({
 export async function generateMetadata(
   props: { params: Promise<{ slug: string }> }
 ): Promise<Metadata> {
-  const { slug } = await props.params;
+  const { slug: rawSlug } = await props.params;
+  let slug = rawSlug;
+  try {
+    slug = decodeURIComponent(rawSlug);
+  } catch {
+    // Ugyldig procent-sekvens: behold rawSlug.
+  }
   if (LEGACY_RACE_NAME_ALIASES[slug]) return { title: "Tour de France" };
   const [race, stages] = await Promise.all([getRace(slug), getStages(slug)]);
   if (!race) return { title: "Løb ikke fundet" };
@@ -384,7 +390,15 @@ export async function generateMetadata(
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default async function RacePage(props: { params: Promise<{ slug: string }> }) {
-  const { slug } = await props.params;
+  const { slug: rawSlug } = await props.params;
+  // Next.js 16 leverer params som det rå, procent-kodede segment (fx "l%C3%B8b")
+  // i stedet for at afkode det selv — afkod derfor eksplicit før alt slug-brug.
+  let slug = rawSlug;
+  try {
+    slug = decodeURIComponent(rawSlug);
+  } catch {
+    // Ugyldig procent-sekvens: behold rawSlug, matcher blot ingen kendte slugs/aliaser.
+  }
   const today = getToday();
 
   const legacyRaceName = LEGACY_RACE_NAME_ALIASES[slug];
