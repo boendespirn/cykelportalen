@@ -496,15 +496,18 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     "@context": "https://schema.org",
     "@type": "SportsEvent",
     name: race.name,
+    description: race.description ?? `${race.name}: etaper, ryttere, klassement og stigningsprofiler.`,
     sport: "Cycling",
     startDate: race.start_date,
     endDate: race.end_date ?? race.start_date,
+    ...(race.cover_image_url ? { image: race.cover_image_url } : {}),
     location: {
       "@type": "Place",
+      name: race.name,
       address: { "@type": "PostalAddress", addressCountry: race.country_code ?? "IT" },
     },
     url: `https://klassementet.dk/${race.slug}`,
-    organizer: { "@type": "Organization", name: "UCI WorldTour" },
+    organizer: { "@type": "Organization", name: "UCI WorldTour", url: "https://www.uci.org" },
   };
 
   // ══════════════════════════════════════════════════════════════════════

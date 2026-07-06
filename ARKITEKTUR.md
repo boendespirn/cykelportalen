@@ -44,7 +44,7 @@ Relaterede: `gpx_agent.py`, `pcs_profile_image_agent.py`, `giro_profile_agent.py
 ## SEO / Search Console
 
 - **`agents/gsc_agent.py`** — henter Search Console-data (performance pr. søgeord/side, sitemap-status, URL Inspection) via service account (`GSC_SERVICE_ACCOUNT_JSON` + `GSC_SITE_URL` i Railway). Finder striking-distance-søgeord (plads 4-20) og lav-CTR-sider til SEO-agenten. Kræver at service account-emailen er tilføjet som bruger i Search Console → Indstillinger → Brugere og tilladelser.
-- **IndexNow** — `submit_indexnow()` i `api.py` POST'er til `api.indexnow.org` som baggrundsopgave, når en artikel godkendes (`/admin/articles/{id}/approve`). Nøglefil: `cykel-frontend/public/1a5a3688cfd86781c40cef01ce453403.txt` (offentlig, ikke hemmelig).
+- **IndexNow** — `submit_indexnow()` i `api.py` POST'er til `api.indexnow.org` som baggrundsopgave. Trigges to steder: (1) når en artikel godkendes (`/admin/articles/{id}/approve`), (2) i `daily_update.py`s `notify_indexnow()` for løbets side + alle dens etapesider, hver gang startliste eller etapedata er blevet oprettet/opdateret for løbet i den kørsel (SEO-010). Nøglefil: `cykel-frontend/public/1a5a3688cfd86781c40cef01ce453403.txt` (offentlig, ikke hemmelig). **Vigtigt:** Google understøtter ikke IndexNow-protokollen (kun Bing, Yandex, Naver, Seznam, Yep) — det er et billigt supplement til crawl-signalet for de søgemaskiner, aldrig en genvej til Google-indeksering. Google-indeksering afhænger af sitemap.xml, intern linking og webstedets opfattede autoritet/vigtighed, ikke IndexNow.
 - **`GET /admin/issues`** (i `api.py`) — parser `state/issues.md` til JSON. Bruges af opgave-dashboardet på `/admin/opgaver` i frontenden.
 
 ## Øvrige domæner (indeks ud fra filnavne — bekræft gerne detaljer)

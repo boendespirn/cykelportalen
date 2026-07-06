@@ -477,17 +477,21 @@ export default async function StagePage(props: {
   const showMap = startCoords && finishCoords;
 
   const winner = stageResults[0]?.riders;
+  const stageDesc = `Etaperesultat og klassement for etape ${n} i ${race.name}: ${stage.start_location ?? ""}${stage.finish_location ? ` — ${stage.finish_location}` : ""}. Vinder: ${winner?.name ?? "ukendt"}.${stage.distance_km ? ` ${stage.distance_km} km.` : ""}`.trim();
   const jsonLd = winner ? {
     "@context": "https://schema.org",
     "@type": "SportsEvent",
     name: `${race.name} – Etape ${stage.stage_number}`,
+    description: stageDesc,
     sport: "Cycling",
     startDate: stage.date,
+    ...(stage.elevation_image_url ? { image: stage.elevation_image_url } : {}),
     location: {
       "@type": "Place",
-      name: stage.finish_location ?? stage.start_location ?? "",
+      name: stage.finish_location ?? stage.start_location ?? race.name,
     },
     url: `https://klassementet.dk/${slug}/stage/${n}`,
+    organizer: { "@type": "Organization", name: "UCI WorldTour", url: "https://www.uci.org" },
     winner: {
       "@type": "Person",
       name: winner.name,
