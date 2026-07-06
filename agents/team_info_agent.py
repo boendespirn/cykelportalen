@@ -46,7 +46,8 @@ def update_team(slug: str, description: str, history_text: str) -> bool:
 
 def generate_descriptions(teams: list[dict]) -> list[dict]:
     team_list = "\n".join(
-        f"- {t['name']} ({t.get('country_code', '?')})"
+        f"- {t['name']}"
+        + (f" ({t['country_code']})" if t.get("country_code") else "")
         + (f", grundlagt {t['founded_year']}" if t.get("founded_year") else "")
         for t in teams
     )
@@ -84,6 +85,42 @@ Slugs til reference:
     return json.loads(text[start:end])
 
 
+def proofread_descriptions(results: list[dict]) -> list[dict]:
+    """Selvstændigt korrekturtrin (jf. OPT-004): retter danske sprogfejl —
+    manglende mellemrum, manglende bøjning (fx "verdens" i stedet for "verden"),
+    ufuldstændige sætninger — i de allerede genererede tekster, før de skrives til DB.
+    Fejler korrekturtrinnet, bruges de ukorrigerede tekster i stedet (aldrig blokerende)."""
+    if not results:
+        return results
+
+    prompt = f"""Du er korrekturlæser på en dansk cykelportal. Gennemgå hvert hold nedenfor og ret
+eventuelle danske sprogfejl i "description" og "history_text" — manglende mellemrum, manglende
+bøjning (fx genitiv-s), ufuldstændige eller afbrudte sætninger. Bevar betydning og omtrentlig længde.
+Er en tekst allerede korrekt, returnér den uændret.
+
+Svar KUN med et JSON-array i samme format som input:
+{json.dumps(results, ensure_ascii=False)}
+"""
+
+    try:
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = message.content[0].text.strip()
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start == -1 or end == 0:
+            print("  ADVARSEL: korrekturtrin kunne ikke parses — bruger ukorrigerede tekster")
+            return results
+        corrected = json.loads(text[start:end])
+        return corrected if corrected else results
+    except Exception as e:
+        print(f"  ADVARSEL: korrekturtrin fejlede ({e}) — bruger ukorrigerede tekster")
+        return results
+
+
 def run(slug: str | None = None) -> None:
     teams = get_teams(slug)
     if not teams:
@@ -103,6 +140,8 @@ def run(slug: str | None = None) -> None:
             print(f"  FEJL ved API-kald: {e}")
             time.sleep(2)
             continue
+
+        results = proofread_descriptions(results)
 
         for r in results:
             team_slug = r.get("slug", "")

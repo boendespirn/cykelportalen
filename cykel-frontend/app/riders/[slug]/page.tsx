@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+import CollapsibleList from "./CollapsibleList";
 
 type Rider = {
   name: string;
@@ -340,8 +341,9 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
           <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">
             Palmares — samlet klassement
           </h2>
-          <div className="space-y-1.5">
-            {palmares.gc_results.map((r, i) => {
+          <CollapsibleList
+            initialCount={8}
+            items={palmares.gc_results.map((r, i) => {
               if (!r.races) return null;
               const year = r.races.start_date?.slice(0, 4);
               const podiumStyle = PODIUM_STYLES[r.position] ?? "bg-slate-800/60 text-slate-400 border-slate-700";
@@ -362,8 +364,8 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
                   <span className="text-xs text-slate-500 font-mono flex-shrink-0">{year}</span>
                 </Link>
               );
-            })}
-          </div>
+            }).filter((el): el is React.ReactElement => el !== null)}
+          />
         </section>
       )}
 
@@ -385,8 +387,10 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
             <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">
               Etapesejre
             </h2>
-            <div className="space-y-2">
-              {unique.map((win, i) => {
+            <CollapsibleList
+              initialCount={8}
+              className="space-y-2"
+              items={unique.map((win, i) => {
                 const s = win.stages;
                 if (!s || !s.races) return null;
                 return (
@@ -408,8 +412,8 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
                     </div>
                   </Link>
                 );
-              })}
-            </div>
+              }).filter((el): el is React.ReactElement => el !== null)}
+            />
           </section>
         );
       })()}
