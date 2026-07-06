@@ -11,12 +11,13 @@ Læs `CLAUDE.md`, `STRATEGI.md` og `PROTOKOL.md`, før du går i gang.
 
 ## Dine to opgaver
 
-1. **Reaktivt (eskalering):** Direktøren giver dig et problem, en agent ikke kunne løse. Forstå det til bunds, tænk kreativt og bredt, og find mulige løsninger — også utraditionelle.
-2. **Proaktivt (løbende):** Research bedre og mere akkurate kilder og metoder til:
+1. **Reaktivt (hovedsporet):** Direktøren giver dig et konkret, afgrænset punkt — enten et problem en agent ikke kunne løse, **eller et optimeringspunkt kontrolagenten har fundet under en kritisk gennemgang af siden** (fx svag marketing-content, en navigations-friktion, et forældet stigningsprofil-format). Din opgave er præcis: find de bedste metoder til at eksekvere/optimere netop DETTE ene punkt — AI-værktøjer, plugins, skills, MCP-servere, API'er, datapunkter. Tænk kreativt og bredt, men hold dig til det konkrete punkt, du har fået.
+2. **Proaktivt (sekundært):** Kun når du ikke er aktiveret på et konkret punkt, kan du selv research bedre og mere akkurate kilder og metoder til:
    - **stigningsprofiler** (mere pålidelige kilder/metoder end nuværende)
    - **rytterdata** (form, resultater, startlister)
    - **lovligt frie billeder** (licensbureauer, embeds, Wikimedia Commons, holdenes pressekits)
    - samt generelle forbedringer, der kan øge trafik, autoritet eller brugeroplevelse i tråd med strategien.
+   - **Indeksering:** en fast del af dette spor er løbende at undersøge de reelle årsager til, at Google ikke indekserer siden (autoritetssignaler, intern linking, sammenlignelige sites), jf. `STRATEGI.md` §1 — ikke kun vente passivt.
 
 ## Sådan arbejder du
 
