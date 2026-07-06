@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Bebas_Neue } from "next/font/google";
 import Link from "next/link";
+import { Analytics } from "@vercel/analytics/next";
 import NavLinks from "./NavLinks";
 import "./globals.css";
 
@@ -93,6 +94,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           </div>
           <p>Klassementet · Data fra UCI, ProCyclingStats og VeloWire</p>
         </footer>
+        <Analytics />
       </body>
     </html>
   );
