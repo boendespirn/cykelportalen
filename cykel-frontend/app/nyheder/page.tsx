@@ -5,14 +5,20 @@ import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
-export const metadata: Metadata = {
-  title: "Nyheder",
-  description: "Alle nyheder om cykling — resultater, startlister, analyser og interviews fra de store cykelløb.",
-  alternates: {
-    canonical: "/nyheder",
-    types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
-  },
-};
+export async function generateMetadata(
+  props: { searchParams: Promise<{ page?: string }> }
+): Promise<Metadata> {
+  const { page: pageParam } = await props.searchParams;
+  const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
+  return {
+    title: page > 1 ? `Nyheder — side ${page}` : "Nyheder",
+    description: "Alle nyheder om cykling — resultater, startlister, analyser og interviews fra de store cykelløb.",
+    alternates: {
+      canonical: page > 1 ? `/nyheder?page=${page}` : "/nyheder",
+      types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+    },
+  };
+}
 
 type Article = {
   slug: string;
@@ -77,20 +83,33 @@ const CATEGORY_ICON: Record<string, string> = {
   general:     "🚴",
 };
 
-async function getArticles(): Promise<Article[]> {
+const PAGE_SIZE = 24;
+
+async function getArticles(page: number): Promise<{ articles: Article[]; hasMore: boolean }> {
+  const offset = (page - 1) * PAGE_SIZE;
   try {
-    const res = await fetch(`${API_BASE}/news?advertorial=false&limit=40`, { next: { revalidate: 300 } });
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
+    const res = await fetch(
+      `${API_BASE}/news?advertorial=false&limit=${PAGE_SIZE + 1}&offset=${offset}`,
+      { next: { revalidate: 300 } }
+    );
+    if (!res.ok) return { articles: [], hasMore: false };
+    const data: Article[] = await res.json();
+    return { articles: data.slice(0, PAGE_SIZE), hasMore: data.length > PAGE_SIZE };
+  } catch {
+    return { articles: [], hasMore: false };
+  }
 }
 
 function formatDate(d: string): string {
   return new Date(d).toLocaleDateString("da-DK", { day: "numeric", month: "short", year: "numeric" });
 }
 
-export default async function NyhederPage() {
-  const articles = await getArticles();
+export default async function NyhederPage(
+  props: { searchParams: Promise<{ page?: string }> }
+) {
+  const { page: pageParam } = await props.searchParams;
+  const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
+  const { articles, hasMore } = await getArticles(page);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
@@ -113,7 +132,7 @@ export default async function NyhederPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {articles.map((article, i) => {
             const categoryColor = CATEGORY_COLORS[article.category] ?? "text-emerald-400";
-            const isLarge = i === 0; // Første artikel er stor
+            const isLarge = page === 1 && i === 0; // Kun første artikel på side 1 er stor
 
             return (
               <Link
@@ -178,6 +197,28 @@ export default async function NyhederPage() {
               </Link>
             );
           })}
+        </div>
+      )}
+
+      {(page > 1 || hasMore) && (
+        <div className="mt-10 flex items-center justify-center gap-3">
+          {page > 1 && (
+            <Link
+              href={page === 2 ? "/nyheder" : `/nyheder?page=${page - 1}`}
+              className="text-xs font-medium text-slate-400 hover:text-emerald-400 transition-colors px-4 py-2 rounded-lg border border-slate-800 hover:border-emerald-500/30"
+            >
+              ← Forrige
+            </Link>
+          )}
+          <span className="text-xs text-slate-600 px-2">Side {page}</span>
+          {hasMore && (
+            <Link
+              href={`/nyheder?page=${page + 1}`}
+              className="text-xs font-medium text-slate-400 hover:text-emerald-400 transition-colors px-4 py-2 rounded-lg border border-slate-800 hover:border-emerald-500/30"
+            >
+              Næste →
+            </Link>
+          )}
         </div>
       )}
     </div>
