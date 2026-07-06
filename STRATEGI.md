@@ -1,6 +1,6 @@
 # klassementet.dk — STRATEGI (bestyrelsens direktiv)
 
-*Sidst opdateret: juni 2026*
+*Sidst opdateret: 2026-07-07*
 
 Dette er det foranderlige direktiv. Det læses **hver kørsel** og vægter over generelle antagelser — men **aldrig over de hårde guardrails i `CLAUDE.md`**. Når virkeligheden ændrer sig, opdateres denne fil; `CLAUDE.md` står fast.
 
@@ -36,11 +36,15 @@ Den dobbelte hensigt gælder hele tiden: eksekvér hurtigt på at få **trafik n
   - **Workflow:** artikel-agenten scorer alle relevante nyhedskandidater og vælger **den allerbedste** (højst dansk-relevans) til at blive skrevet — ikke alt der overstiger relevans-tærsklen. Kun i undtagelsestilfælde (to reelt store, uafhængige nyheder samme dag) skrives der 2.
   - Menneskelig godkendelse er stadig påkrævet før publicering (admin-køen på `klassementet.dk/admin`).
 - **Mål:** fortsæt indtil **hele siden er indekseret** — med få, stærke artikler frem for mange middelmådige.
+- **Det on-page/tekniske arbejde er nu i praksis gjort** (Metadata API, sitemap, JSON-LD, IndexNow — se `state/issues.md` SEO-003 til SEO-012). Seneste kontrol (2026-07-06, SEO-001) viser dog, at kun 3 af 26 tjekkede URL'er reelt er indekseret, og mønsteret ("Discovered - not indexed" / "unknown to Google") peger på et **autoritets-/intern linking-problem, ikke en teknisk blokering**.
+- **Derfor er dette ikke passiv ventetid:** research-agenten skal løbende undersøge de reelle årsager til, at Google ikke indekserer siderne (autoritetssignaler, linkbuilding-taktikker, hvordan sammenlignelige sites er kommet igennem samme flaskehals), og præsentere konkrete, eksekverbare metoder til at forbedre præcis dette punkt — som et vedvarende forbedringsspor, ikke en engangsopgave.
 
-### 2. Marketing-setup — automatiseret trafikvækst
+### 2. Marketing — kvalitet, kvantitet og en AI-eksekverbar strategi
 
 - Byg et marketing-setup, så siden kan vækste med trafik via **Facebook, Instagram og TikTok**.
 - Slå det vigtigste op på de medier på en god måde, der **styrker brandet — aldrig skader det** (jf. brand-afsnittet i `CLAUDE.md`: lækkert, kun det vigtige, ingen clickbait).
+- **Både kvaliteten og kvantiteten af marketing-materialet har i dag reelt forbedringspotentiale.** Mens vi venter på nye Google-rapporter om indekseringen (se punkt 1), skal tiden bruges fornuftigt på at gøre dette spor bedre: en **strømlinet, let eksekverbar strategi** — drevet så vidt muligt af AI (videogenerering, content-formater, automatiserede workflows) — så mængden af godt marketing-materiale kan øges uden at gå på kompromis med kvaliteten eller brandet.
+- Dette hænger sammen med at **geare siden til kommende løb og ekstra trafik** (resten af Tour de France, og løb derefter) — flere velforberedte besøgende via andre kanaler end Google styrker i sidste ende også autoritets-/trafiksignalet, der hjælper indekseringen i punkt 1.
 
 ### 3. Data-korrekthed — stigningsagenten
 
