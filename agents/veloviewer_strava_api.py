@@ -47,6 +47,28 @@ API_BASE = "https://www.strava.com/api/v3"
 
 _access_token_cache: dict = {"token": None, "expires_at": 0}
 
+# Stravas rate limit nulstiller i rullende 15-minutters vinduer (200 kald/15 min,
+# 2000/dag). Ved 429 venter vi vinduet ud og prøver automatisk igen, i stedet for
+# at springe kandidaten/boksen over — så en lang kørsel (fx alle TdF-etaper)
+# selv finder tempoet, den kan holde, uden at nogen skal overvåge den undervejs.
+RATE_LIMIT_WAIT_SECONDS = 15 * 60
+MAX_RATE_LIMIT_RETRIES = 6  # op til 1,5 time ventetid i alt, før vi giver op
+
+
+def _get_with_retry(url: str, params: dict) -> requests.Response | None:
+    token = get_access_token()
+    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+        res = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=15)
+        if res.status_code != 429:
+            return res
+        if attempt == MAX_RATE_LIMIT_RETRIES:
+            print(f"    [rate limit] Stadig ramt efter {attempt} forsøg — giver op for dette kald")
+            return res
+        print(f"    [rate limit] Stravas API-grænse ramt — venter {RATE_LIMIT_WAIT_SECONDS // 60} min og prøver igen...")
+        time.sleep(RATE_LIMIT_WAIT_SECONDS)
+        token = get_access_token()
+    return None
+
 
 def get_access_token() -> str:
     """
@@ -84,20 +106,13 @@ def get_segment(segment_id: int) -> dict | None:
     — kald-stedet må ikke persistere eller vise disse felter, jf. modulets
     docstring.
     """
-    token = get_access_token()
-    res = requests.get(
-        f"{API_BASE}/segments/{segment_id}",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=15,
-    )
+    res = _get_with_retry(f"{API_BASE}/segments/{segment_id}", {})
+    if res is None:
+        return None
     if res.status_code == 404:
         return None
     if res.status_code == 429:
-        # Stravas rate limit (200/15 min, 2000/dag) ramt — springer denne kandidat over
-        # i stedet for at vælte hele kørslen. Klatren falder tilbage til den eksisterende
-        # pipeline, præcis som ved intet match.
-        print("    [rate limit] Stravas API-grænse ramt — springer kandidat over")
-        return None
+        return None  # opgav efter MAX_RATE_LIMIT_RETRIES forsøg — behandles som "intet fundet"
     res.raise_for_status()
     d = res.json()
     return {
@@ -123,16 +138,9 @@ def explore_segments(bounds: str, activity_type: str = "riding") -> list[dict]:
 
     `bounds` er "min_lat,min_lng,max_lat,max_lng".
     """
-    token = get_access_token()
-    res = requests.get(
-        f"{API_BASE}/segments/explore",
-        headers={"Authorization": f"Bearer {token}"},
-        params={"bounds": bounds, "activity_type": activity_type},
-        timeout=15,
-    )
-    if res.status_code == 429:
-        print("    [rate limit] Stravas API-grænse ramt — springer boks over")
-        return []
+    res = _get_with_retry(f"{API_BASE}/segments/explore", {"bounds": bounds, "activity_type": activity_type})
+    if res is None or res.status_code == 429:
+        return []  # opgav efter MAX_RATE_LIMIT_RETRIES forsøg
     res.raise_for_status()
     return res.json().get("segments", [])
 
