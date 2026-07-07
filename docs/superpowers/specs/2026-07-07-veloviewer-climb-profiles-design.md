@@ -1,7 +1,7 @@
 # VeloViewer-baseret stigningsprofil (ny prioritet 1) — design
 
-Dato: 2026-07-07
-Status: Godkendt af ejer (arkitekturvalg afklaret via spørgsmål + juridisk research), klar til implementeringsplan.
+Dato: 2026-07-07 (arkitektur forenklet 2026-07-08 efter test)
+Status: Backend (`veloviewer_agent.py` + `veloviewer_strava_api.py`) bygget og testkørt mod tour-de-france-2026 etape 6 — 2/5 stigninger verificeret matchet (Côte de Mauvezin, Col du Tourmalet), 3/5 korrekt faldet tilbage til eksisterende pipeline. **Frontend-ændringen (`ClimbProfile.tsx`) og `--write-db`-kørsel mod produktion mangler stadig** — afventer ejerens godkendelse før rigtig DB-skrivning.
 
 ## Baggrund og problem
 
@@ -28,17 +28,21 @@ Overvejet men fravalgt til fordel for live embed (ejerens valg): statiske VeloVi
 
 ## Segment-matching: hvordan vi finder det rigtige Strava-segment-ID
 
-Der findes ingen offentlig Strava-API til at oprette ruter eller matche et GPX-spor mod segment-databasen — det er UI-only (Route Builder, kræver Strava Premium/Summit, som ejeren allerede har). Derfor er dette den ene del af flowet, der kræver browserautomatisering (Playwright, logget ind på ejerens konto) i stedet for et rent API-kald — en afvejning ejeren har accepteret bevidst (samme handling som en person ville udføre manuelt).
+**Opdatering 2026-07-08 (efter test): browserautomatisering droppet.** Den oprindelige plan brugte Playwright til at logge ind og oprette en rute i Strava Route Builder, for derefter at læse dens "Segments"-faneblad. Under test viste det sig at:
 
-Flow pr. stigning (i nyt script `agents/veloviewer_agent.py`):
+- Stravas login-side er beskyttet af reCAPTCHA — automatisk login er hverken muligt eller ønsket, og kontoen bruger nu engangskoder (ikke password) for login.
+- Segment-markørerne i Route Builder er tegnet på et Mapbox vector-tile-lag (canvas), ikke almindelige HTML-links — at udtrække deres ID'er pålideligt ville kræve enten at afkode binære vector tiles eller klikke præcist på markører (risikabelt: et forkert klik tilføjer et rutepunkt i stedet).
+- Stravas officielle, **offentlige** API har derimod et `/segments/explore`-endpoint (bounding box → kandidat-segmenter), som viste sig at ramme plet for præcis vores højst-prioriterede case: **berømte Tour de France-bjerge er blandt de mest populære segmenter i deres område** (verificeret: Col du Tourmalet fundet med navnet "Col du Tourmalet (par Sainte Marie de Campan)", identisk med det ejeren selv fandt manuelt i Strava-appen).
 
-1. **Udtræk klatre-GPX'en**: genbrug vinduessøgningen fra `climb_profile_generator.py` (proportional km-position i etapens GPX, jf. dens eksisterende design) til at finde stigningens lat/lon-udsnit, og skriv det til en midlertidig GPX-fil. Ingen ny parsing-logik — kald ind i den eksisterende funktion i stedet for at duplikere den.
-2. **Playwright → Strava Route Builder**: log ind (session genbruges via gemt `storage_state` JSON, så vi ikke logger ind for hver stigning), opret en rute af klatre-GPX'en via Route Builder/GPX-importeren, navngivet genkendeligt (`KP-{race_slug}-s{stage}-{climb_slug}`, så den er let at identificere/rydde op i).
-3. **Læs rutens "Segments"-faneblad**: hent kandidat-segment-ID'er (fra hrefs, ingen tekstdata gemmes fra selve siden — kun ID'et, som er et Strava-internt nøgletal, ikke "Strava Data" i T&C-forstand).
-4. **Verificér hver kandidat via Stravas officielle segment-API** (`GET /segments/{id}`, OAuth via `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`/`STRAVA_REFRESH_TOKEN` — allerede i `.env`): sammenlign `distance`/`average_grade`/afledt højdemeter mod DB'ens `length_km`/`avg_gradient`/`elevation_m`, samme tolerance-mønster som `climbfinder_agent.py`s `metrics_ok()` og `climb_profile_generator.py`s `within_tolerance()` (±33% længde, ±35%/min. 150m højdemeter, ±1.5% hældning). Ny funktion: `segment_matches_climb()`. De hentede Strava-felter bruges **kun i denne sammenligning, i hukommelsen** — skrives aldrig til DB eller logges i klartekst nogen steder synligt for andre.
-5. **Ingen kandidat inden for tolerance** → stigningen springes over og logges som "intet VeloViewer-match", falder tilbage til eksisterende `climbfinder_agent.py` → `climb_profile_generator.py`-kæde. Aldrig gæt (samme princip som resten af pipelinen, jf. `CLAUDE.md` §7).
-6. **Match fundet** → skriv **kun** `stage_climbs.veloviewer_segment_id` (nyt DB-felt, se nedenfor). Rører aldrig et allerede sat `veloviewer_segment_id` uden `--overwrite` (samme mønster som de andre scripts).
-7. **Ryd op**: slet den midlertidige Strava-rute igen (holder ejerens "Mine ruter"-liste ren — ruten var kun et redskab til at finde ID'et).
+Flow pr. stigning (i `agents/veloviewer_agent.py`, ingen browser/login nødvendig):
+
+1. **Udtræk klatre-GPX'en**: genbrug vinduessøgningen fra `climb_profile_generator.py` (`download_stage_gpx`, `cumulative_distances_km`, `locate_climb_segment`) til at finde stigningens lat/lon-udsnit. Ingen ny parsing-logik — kalder direkte ind i de eksisterende funktioner.
+2. **Beregn bounding box** om GPX-udsnittet, udvidet med 20% på hver led (`compute_padded_bbox()`), og kald Stravas officielle `GET /segments/explore` (OAuth via `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`/`STRAVA_REFRESH_TOKEN`, allerede i `.env`) — returnerer op til 10 kandidat-segmenter, rangeret efter Stravas egen popularitet.
+3. **Verificér hver kandidat** via `GET /segments/{id}` mod DB'ens `length_km`/`avg_gradient`/`elevation_m`: samme tolerance-mønster som `climbfinder_agent.py`s `metrics_ok()` (±33% længde, ±35%/min. 150m højdemeter, ±1.5% hældning) — **plus et navnetjek** (`name_plausible_match()`): mindst ét betydende ord fra DB-klatrenavnet skal indgå i segmentnavnet. Dette ekstra guard var nødvendigt, fordi `/segments/explore` søger rent geografisk, ikke på navn — et testfund viste at "Col d'Aspin" ellers talmæssigt matchede "Ste Marie - Tourmalet 10kms" (en del af nabo-klatren Tourmalet), præcis den kendte fejlklasse fra STG-004/STG-009 (rigtige tal, forkert bjerg). Alle hentede Strava-felter (navn, distance, hældning, højdemeter) bruges **kun i denne sammenligning, i hukommelsen** — skrives aldrig til DB eller logges nogen steder synligt for andre.
+4. **Ingen kandidat består begge tjek** → stigningen springes over og logges som "intet VeloViewer-match", falder tilbage til eksisterende `climbfinder_agent.py` → `climb_profile_generator.py`-kæde. Aldrig gæt (samme princip som resten af pipelinen, jf. `CLAUDE.md` §7). Kendt begrænsning: navnetjekket er streng substring-matching, ikke stavefejl-tolerant — et testfund ("Loucroup" i DB vs. "Loucrup" i Strava-segmentnavnet) blev korrekt men unødvendigt afvist. Acceptabelt: en tabt (men sikker) match er bedre end en forkert.
+5. **Match fundet** → skriv **kun** `stage_climbs.veloviewer_segment_id` (nyt DB-felt, se nedenfor). Rører aldrig et allerede sat `veloviewer_segment_id` uden `--overwrite` (samme mønster som de andre scripts).
+
+**Kendt begrænsning ved denne metode:** `/segments/explore` returnerer kun top-10 mest populære segmenter i boksen — ikke en udtømmende liste. For mindre kendte, lokale stigninger i segment-tætte områder (bekræftet under test: en forstadsklatre uden for TdF) kan det rigtige segment blive skygget af mere populære naboer, og intet match findes. Det er en accepteret begrænsning: sådanne stigninger falder tilbage til den eksisterende pipeline, præcis som designet allerede forudsatte.
 
 ## Database
 
@@ -77,21 +81,21 @@ Opdateres i `ARKITEKTUR.md` og `.claude/agents/stigningsagent.md`:
 
 ## Credentials (allerede i `.env`)
 
-- `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN` — til det officielle API-verifikationskald. Access token fornyes af scriptet selv ved hvert kørsel via refresh-flowet; det korte access token, ejeren delte, gemmes ikke.
-- Nye, mangler stadig: `STRAVA_EMAIL`, `STRAVA_PASSWORD` — til Playwright-loginnet mod Route Builder (separat fra API-app'en). Aldrig hardkodet, jf. sikkerhedsnoten i `ARKITEKTUR.md`.
+- `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_REFRESH_TOKEN` — eneste påkrævede credentials. Bruges til både `/segments/explore` og `/segments/{id}`. Access token fornyes af scriptet selv ved hvert kørsel via refresh-flowet.
+- `STRAVA_EMAIL`/`STRAVA_PASSWORD` er **ikke længere nødvendige** (browserlogin droppet, se ovenfor) — kan fjernes fra `.env` igen.
 
 ## Risikobegrænsning
 
 - Kun løb i `CYCLINGSTAGE_GPX_PAGES` (giro, tour-de-france, dauphiné, tour-de-suisse) har en klatre-GPX-kilde i forvejen — omfanget er derfor naturligt begrænset til dem.
 - Tour de France prioriteres, jf. `stigningsagent.md` og `STRATEGI.md`.
-- Pauser mellem Playwright-handlinger for at holde volumen/mønster lavt og undgå unødig opmærksomhed på kontoen.
-- Oprettede Strava-ruter slettes igen efter brug (trin 7 ovenfor).
+- Pause (1s) mellem Strava API-kald pr. kandidat-segment, for at holde volumen lav.
+- Ingen konto-automatiseringsrisiko tilbage: metoden bruger udelukkende Stravas officielle, offentlige API — ingen login, ingen browser, ingen ToS-gråzone.
 
 ## Testplan
 
-1. Kør `veloviewer_agent.py` for **én** kendt stigning med et allerede-velkendt Strava-segment (fx en TdF-2026-stigning), uden `--write-db`, og verificér manuelt at det matchede segment-ID er korrekt (sammenlign selv `veloviewer.com/segments/{id}` mod DB-data).
-2. Kør for én hel etape (`--stage N`), stadig uden DB-skrivning, gennemgå log for match/ikke-match pr. stigning.
-3. Ejeren godkender, derefter `--write-db` for samme etape.
+1. ✅ Kørt for tour-de-france-2026 etape 6 (`--overwrite`, ingen `--write-db`): Côte de Mauvezin (segment 1936607) og Col du Tourmalet (segment 37855763) verificeret matchet; Côte de Loucroup, Col d'Aspin og Gavarnie-Gèdre korrekt uden match (falder tilbage).
+2. Byg frontend-ændringen (`ClimbProfile.tsx`) og verificér visuelt i browser at embed'en virker for et rigtigt matchet segment-ID.
+3. Ejeren godkender, derefter `--write-db` for etape 6.
 4. Rul ud til resten af Tour de France 2026, derefter øvrige dækkede løb.
 
 ## Ikke i scope for denne omgang

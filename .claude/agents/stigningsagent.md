@@ -16,10 +16,11 @@ For et løb/en etape, kør kæden i rækkefølge (jf. `ARKITEKTUR.md`):
 1. `stage_pcs_agent.py` — etapedata fra PCS.
 2. `gpx_climb_agent.py --race SLUG` — klatreinfo og `gradient_sections`.
 3. `profile_reader_agent.py --race SLUG` — Claude vision aflæser de **rigtige** klatredata fra højdeprofil-billedet og kører ClimbFinder-søgning.
-4. `climbfinder_agent.py --race SLUG` — finder CF-profilbilledet og **verificerer mod DB-data** (forkerte match afvises automatisk; GPX/Nominatim-fallback).
-5. `climb_profile_generator.py --race SLUG --all --style full --write-db` — **fast, automatisk fallback** for stigninger climbfinder ikke fandt/verificerede. Genererer klassementet.dk's egne profilbilleder fra rå GPX-højdedata. Rører aldrig et eksisterende `profile_image_url`.
-6. `climb_region_agent.py --race SLUG` — region.
-7. `elevation_image_agent.py --race SLUG` — gemmer profilbillederne i Supabase Storage.
+4. `veloviewer_agent.py --race SLUG` — **ny prioritet 1**: finder det korrekte Strava-segment via Stravas officielle `/segments/explore`-API og gemmer `stage_climbs.veloviewer_segment_id`. Ingen login/browser. Verificerer mod DB-data (tolerance + navnetjek); rammer godt for berømte klatre, finder ikke altid match for lokale stigninger (se design-spec).
+5. `climbfinder_agent.py --race SLUG` — finder CF-profilbilledet og **verificerer mod DB-data** (forkerte match afvises automatisk; GPX/Nominatim-fallback).
+6. `climb_profile_generator.py --race SLUG --all --style full --write-db` — **fast, automatisk fallback** for stigninger hverken veloviewer eller climbfinder fandt/verificerede. Genererer klassementet.dk's egne profilbilleder fra rå GPX-højdedata. Rører aldrig et eksisterende `profile_image_url`.
+7. `climb_region_agent.py --race SLUG` — region.
+8. `elevation_image_agent.py --race SLUG` — gemmer profilbillederne i Supabase Storage.
 8. (Manuelt, pr.-etape) `stage_profile_generator.py --race SLUG --stage N --write-db` — fallback for **hele etapens** højdeprofil, når PCS ikke har noget hel-etape-billede overhovedet (se STG-002). Samme GPX-kilde/farveskala som `climb_profile_generator.py`, men for hele sporet, med kendte stigninger markeret som bånd. Rører aldrig et eksisterende `elevation_image_url` uden `--overwrite`.
 
 Bekræft altid bagefter: har hver stigning i etapen en **verificeret** profil? En manglende eller afvist profil er et issue, ikke en detalje.

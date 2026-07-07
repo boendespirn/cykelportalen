@@ -107,14 +107,14 @@ def get_gpx_url_for_stage(race_slug: str, stage_number: int) -> str | None:
     soup = BeautifulSoup(res.text, "html.parser")
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        # cyclingstage.com bruger to filnavns-mønstre for GPX-links: som regel
-        # "stage-N-route.gpx", men enkelte etaper (bekræftet: tour-de-france-2026
-        # etape 5 og 6) har i stedet "stage-N.gpx" uden "-route" — den oprindelige
-        # regex matchede kun det første mønster, hvilket fik get_gpx_url_for_stage()
-        # til fejlagtigt at returnere None for etape 6 og dermed springe
-        # Gavarnie-Gèdre/Côte de Loucroup helt over (se STG-006/STG-007/STG-002 i
-        # state/issues.md — troede fejlagtigt der slet ikke fandtes en GPX-kilde).
-        m = re.fullmatch(r".*stage-(\d+)(?:-route)?\.gpx", href)
+        # cyclingstage.com bruger flere filnavns-mønstre for GPX-links: "stage-N-route.gpx"
+        # (giro), "stage-N.gpx" uden suffix (nogle tour-de-france-etaper, se
+        # STG-006/STG-007/STG-002), og siden juli 2026 "stage-N-parcours.gpx" for hele
+        # tour-de-france-2026 (bekræftet: cyclingstage.com skiftede navnekonvention —
+        # uden "-parcours" i regex fik get_gpx_url_for_stage() til at returnere None for
+        # ALLE TdF 2026-etaper, hvilket sprang veloviewer_agent.py's GPX-udtræk helt over,
+        # se STG-019).
+        m = re.fullmatch(r".*stage-(\d+)(?:-route|-parcours)?\.gpx", href)
         if not m:
             continue
         if int(m.group(1)) == stage_number:

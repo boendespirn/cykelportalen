@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Strava-loginsession (Playwright storage_state) - indeholder gyldige cookies
+.strava_session.json
+
 # Python
 __pycache__/
 *.py[cod]
