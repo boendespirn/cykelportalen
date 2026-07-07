@@ -62,6 +62,7 @@ type Climb = {
   max_gradient: number | null;
   gradient_sections: { km: number; gradient: number }[] | null;
   profile_image_url: string | null;
+  veloviewer_segment_id: number | null;
   region: string | null;
 };
 

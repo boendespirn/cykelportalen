@@ -14,6 +14,7 @@ type Climb = {
   max_gradient: number | null;
   gradient_sections: GradientSection[] | null;
   profile_image_url: string | null;
+  veloviewer_segment_id: number | null;
 };
 
 function avg4kmBuckets(sections: GradientSection[]): { km: number; gradient: number }[] {
@@ -224,7 +225,11 @@ function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
 }
 
 function hasVisualProfile(c: Climb): boolean {
-  return !!(c.profile_image_url || (c.gradient_sections && c.gradient_sections.length > 0));
+  return !!(
+    c.veloviewer_segment_id ||
+    c.profile_image_url ||
+    (c.gradient_sections && c.gradient_sections.length > 0)
+  );
 }
 
 export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
@@ -322,8 +327,15 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
               )}
             </div>
 
-            {/* ClimbFinder-billede foretrækkes — klik åbner lightbox */}
-            {activeClimb.profile_image_url ? (
+            {/* VeloViewer 3D-embed foretrækkes — derefter ClimbFinder-billede (lightbox), derefter egen graf */}
+            {activeClimb.veloviewer_segment_id ? (
+              <iframe
+                src={`https://veloviewer.com/segments/${activeClimb.veloviewer_segment_id}/embed`}
+                style={{ width: "100%", height: 450, border: 0, borderRadius: 8 }}
+                scrolling="no"
+                title={activeClimb.name}
+              />
+            ) : activeClimb.profile_image_url ? (
               <button
                 className="block w-full text-left cursor-zoom-in"
                 onClick={() => setLightboxUrl(activeClimb.profile_image_url!)}

@@ -31,6 +31,7 @@ import re
 import sys
 import io
 import time
+import bisect
 import argparse
 
 import requests
@@ -52,9 +53,6 @@ SB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-# Udvider klatrens egen GPX-bbox med denne andel på hver led, så vi ikke
-# misser et segment, der starter/slutter lidt uden for vores udtrukne vindue.
-BBOX_PADDING_RATIO = 0.2
 DELAY = 1.0  # pause mellem Strava API-kald pr. kandidat
 
 
@@ -102,46 +100,50 @@ def update_veloviewer_segment(climb_id: str, segment_id: int) -> bool:
 
 # ── Segment-matching ───────────────────────────────────────────────────────────
 
-def compute_padded_bbox(points: list[tuple[float, float, float]]) -> str:
-    """Bounding box (min_lat,min_lng,max_lat,max_lng) om et GPX-punktsæt, udvidet med BBOX_PADDING_RATIO."""
+def compute_bbox(points: list[tuple[float, float, float]], pad_ratio: float = 0.0) -> str:
+    """Bounding box (min_lat,min_lng,max_lat,max_lng) om et GPX-punktsæt, evt. udvidet med pad_ratio."""
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
     min_lat, max_lat = min(lats), max(lats)
     min_lon, max_lon = min(lons), max(lons)
-    lat_pad = (max_lat - min_lat) * BBOX_PADDING_RATIO or 0.01
-    lon_pad = (max_lon - min_lon) * BBOX_PADDING_RATIO or 0.01
+    lat_pad = (max_lat - min_lat) * pad_ratio or 0.01 * pad_ratio
+    lon_pad = (max_lon - min_lon) * pad_ratio or 0.01 * pad_ratio
     return f"{min_lat - lat_pad:.6f},{min_lon - lon_pad:.6f},{max_lat + lat_pad:.6f},{max_lon + lon_pad:.6f}"
 
 
-def find_veloviewer_segment(race_slug: str, stage_number: int, stage_distance_km: float,
-                             db_climb: dict) -> int | None:
+def compute_search_window_bbox(points: list[tuple[float, float, float]], cum_dist: list[float],
+                                stage_distance_km: float, km_from_start: float, length_km: float) -> str:
     """
-    Udtrækker klatrens GPX-segment (genbruger climb_profile_generator.py's
-    vinduessøgning), beregner dens bounding box, og finder + verificerer et
-    Strava-segment via det officielle API. Returnerer segment-ID ved match,
-    ellers None (aldrig gættet på — jf. CLAUDE.md §7).
+    Beregner en bounding box om det BREDE usikkerhedsvindue omkring klatrens
+    proportionale position i GPX'en — samme `SEARCH_RADIUS_KM` (25 km) som
+    `climb_profile_generator.py`s `locate_climb_segment()` selv bruger til at
+    kompensere for at GPX'ens kumulative distance sjældent matcher den
+    officielle etapedistance præcist.
+
+    Bruger bevidst dette brede vindue i stedet for `locate_climb_segment()`s
+    eget, smallere resultat: dens interne scoring kan (bekræftet: Col d'Aspin,
+    tour-de-france-2026 etape 6) vælge et forkert delsegment af sporet, hvis
+    et andet sted i etapen tilfældigvis har lignende højdemeter/hældning.
+    En bredere boks er mere tolerant over for netop den fejl — det er trygt,
+    fordi det efterfølgende tolerance- + navnetjek (segment_matches_climb())
+    alligevel skal godkende den endelige kandidat.
     """
-    points = cpg.download_stage_gpx(race_slug, stage_number)
-    if not points:
-        print(f"    [skip] ingen GPX-kilde for {race_slug} etape {stage_number}")
-        return None
+    gpx_total = cum_dist[-1]
+    scale = gpx_total / stage_distance_km
+    naive_start_km = km_from_start * scale
+    naive_end_km = (km_from_start + length_km) * scale
 
-    cum_dist = cpg.cumulative_distances_km(points)
-    try:
-        segment_points = cpg.locate_climb_segment(
-            points, cum_dist, stage_distance_km,
-            db_climb["km_from_start"], db_climb["length_km"], db_climb,
-        )
-    except ValueError as e:
-        print(f"    [skip] kunne ikke lokalisere GPX-segment: {e}")
-        return None
+    search_lo = max(0.0, naive_start_km - cpg.SEARCH_RADIUS_KM)
+    search_hi = min(gpx_total, naive_end_km + cpg.SEARCH_RADIUS_KM)
+    lo_idx = bisect.bisect_left(cum_dist, search_lo)
+    hi_idx = max(bisect.bisect_left(cum_dist, search_hi), lo_idx + 1)
 
-    bounds = compute_padded_bbox(segment_points)
+    return compute_bbox(points[lo_idx:hi_idx + 1])
+
+
+def _try_match(bounds: str, db_climb: dict) -> int | None:
+    """Kalder /segments/explore for en boks og returnerer det første verificerede match, hvis noget findes."""
     candidates = strava_api.explore_segments(bounds)
-    if not candidates:
-        print("    [intet match] /segments/explore fandt intet i boksen")
-        return None
-
     for cand in candidates:
         seg = strava_api.get_segment(cand["id"])
         if not seg:
@@ -151,6 +153,47 @@ def find_veloviewer_segment(race_slug: str, stage_number: int, stage_distance_km
             print(f"    [match] segment {cand['id']} godkendt ({reason})")
             return cand["id"]
         time.sleep(DELAY)
+    return None
+
+
+def find_veloviewer_segment(race_slug: str, stage_number: int, stage_distance_km: float,
+                             db_climb: dict) -> int | None:
+    """
+    Prøver først en smal boks om klatrens lokaliserede GPX-segment (præcis,
+    men kan i sjældne tilfælde ramme forkert, jf. locate_climb_segment()s
+    egen scoring — bekræftet: Col d'Aspin, tour-de-france-2026 etape 6).
+    Finder den intet verificeret match, prøves en bredere boks om hele
+    usikkerhedsvinduet (±SEARCH_RADIUS_KM om det proportionale gæt) som
+    fallback — mindre præcis, men fanger tilfælde hvor den smalle boks var
+    forkert placeret. Trygt at forsøge begge: `segment_matches_climb()`
+    skal under alle omstændigheder godkende den endelige kandidat.
+    Returnerer segment-ID ved match, ellers None (aldrig gættet på —
+    jf. CLAUDE.md §7).
+    """
+    points = cpg.download_stage_gpx(race_slug, stage_number)
+    if not points:
+        print(f"    [skip] ingen GPX-kilde for {race_slug} etape {stage_number}")
+        return None
+
+    cum_dist = cpg.cumulative_distances_km(points)
+
+    try:
+        narrow_points = cpg.locate_climb_segment(
+            points, cum_dist, stage_distance_km,
+            db_climb["km_from_start"], db_climb["length_km"], db_climb,
+        )
+        match_id = _try_match(compute_bbox(narrow_points, pad_ratio=0.2), db_climb)
+        if match_id:
+            return match_id
+    except ValueError:
+        pass  # smal lokalisering fejlede helt — gå direkte til det brede vindue
+
+    wide_bounds = compute_search_window_bbox(
+        points, cum_dist, stage_distance_km, db_climb["km_from_start"], db_climb["length_km"],
+    )
+    match_id = _try_match(wide_bounds, db_climb)
+    if match_id:
+        return match_id
 
     print("    [intet match] falder tilbage til climbfinder_agent.py/climb_profile_generator.py")
     return None

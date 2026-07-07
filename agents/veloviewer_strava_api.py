@@ -92,6 +92,12 @@ def get_segment(segment_id: int) -> dict | None:
     )
     if res.status_code == 404:
         return None
+    if res.status_code == 429:
+        # Stravas rate limit (200/15 min, 2000/dag) ramt — springer denne kandidat over
+        # i stedet for at vælte hele kørslen. Klatren falder tilbage til den eksisterende
+        # pipeline, præcis som ved intet match.
+        print("    [rate limit] Stravas API-grænse ramt — springer kandidat over")
+        return None
     res.raise_for_status()
     d = res.json()
     return {
@@ -124,6 +130,9 @@ def explore_segments(bounds: str, activity_type: str = "riding") -> list[dict]:
         params={"bounds": bounds, "activity_type": activity_type},
         timeout=15,
     )
+    if res.status_code == 429:
+        print("    [rate limit] Stravas API-grænse ramt — springer boks over")
+        return []
     res.raise_for_status()
     return res.json().get("segments", [])
 
