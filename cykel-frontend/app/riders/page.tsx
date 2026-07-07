@@ -1,7 +1,14 @@
 export const revalidate = 3600;
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+
+export const metadata: Metadata = {
+  title: "Ryttere",
+  description: "Find alle ryttere fra UCI WorldTour — nationalitet, speciale, UCI-ranking og hold.",
+  alternates: { canonical: "/riders" },
+};
 
 type Rider = {
   name: string;

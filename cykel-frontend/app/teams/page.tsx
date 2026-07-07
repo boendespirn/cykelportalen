@@ -1,7 +1,14 @@
 export const revalidate = 3600;
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+
+export const metadata: Metadata = {
+  title: "Hold",
+  description: "Find alle hold fra UCI WorldTour — kategori, nationalitet og UCI-holdkode.",
+  alternates: { canonical: "/teams" },
+};
 
 type Team = {
   name: string;
