@@ -266,11 +266,59 @@ def _find_resultscont_tables(soup: BeautifulSoup) -> list:
     return tagged
 
 
-def _pick_table(tagged_tables: list, keyword: str):
-    for heading, table in tagged_tables:
-        if keyword in heading:
-            return table
+def _find_first_visible_table(soup: BeautifulSoup):
+    """
+    Finder den første IKKE-skjulte rytter-rangliste inde i #resultsCont — dvs.
+    den tabel PCS reelt viser som standard for denne specifikke klassements-
+    side (…/-gc, …/-points, …/-kom, …/-youth).
+
+    Erstatter den tidligere overskrift-baserede `_pick_table()`, som antog at
+    klassementstypen kunne udledes af nærmeste overskriftstekst (fx "gc" i
+    teksten). Det holdt ikke: PCS' faktiske overskrifter over disse tabeller
+    er ofte generiske ("Today", "View full results") og indeholder ALDRIG
+    ordet "gc", og "point"/"kom" matcher lige så ofte en lille delvisning
+    (dagens mellemsprint/bjergspurt) som den rigtige samlede klassementstabel
+    — se RES-004. PCS' egen faneblade-mekanik markerer derimod pålideligt
+    hvilken tabel der er aktiv for URL'en via en `resTab`/`hide`-klasse, som vi
+    bruger i stedet.
+    """
+    cont = soup.find(id="resultsCont")
+    if cont is None:
+        return None
+    for table in cont.find_all("table"):
+        if not table.find("td", class_="ridername"):
+            continue
+        if len(table.find_all("tr")) < 5:
+            continue
+        el = table.parent
+        for _ in range(4):
+            if el is None:
+                break
+            classes = el.get("class") or []
+            if "resTab" in classes:
+                if "hide" not in classes:
+                    return table
+                break
+            el = el.parent
     return None
+
+
+def _fetch_soup(browser, headers: dict, url: str) -> BeautifulSoup:
+    """
+    Åbner en FRISK page pr. URL (i stedet for at genbruge én page på tværs af
+    goto()-kald). PCS' faneblade er client-side navigation på samme
+    side-skabelon, og en baggrunds-JS-proces derfra ser ud til aldrig at gå i
+    ro igen efter første goto — genbrug af page fik `wait_until="networkidle"`
+    til at time ud på alle efterfølgende navigationer (verificeret ved fejl).
+    """
+    page = browser.new_page()
+    page.set_extra_http_headers(headers)
+    try:
+        page.goto(url, wait_until="networkidle", timeout=25_000)
+        time.sleep(2)
+        return BeautifulSoup(page.content(), "html.parser")
+    finally:
+        page.close()
 
 
 def scrape_stage_result(pcs_stage_url: str) -> dict:
@@ -279,32 +327,36 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
     Returnerer: {top10, dnf, gc, points, mountains, youth}
     """
     result = {"top10": [], "dnf": [], "gc": [], "points": [], "mountains": [], "youth": []}
+    base_url = pcs_stage_url[: -len("/result")] if pcs_stage_url.endswith("/result") else pcs_stage_url
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.set_extra_http_headers({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            })
-            page.goto(pcs_stage_url, wait_until="networkidle", timeout=25_000)
-            time.sleep(2)
-            html = page.content()
+
+            soup = _fetch_soup(browser, headers, pcs_stage_url)
+            tagged = _find_resultscont_tables(soup)
+            if not tagged:
+                browser.close()
+                return result
+            # Første reelle rytter-rangliste i #resultsCont = etaperesultat.
+            stage_table = tagged[0][1]
+
+            # Klassementerne hentes hver fra deres egen dedikerede PCS-side
+            # (samme URL'er som faneblade-navigationen selv peger på), da
+            # klassementstypen ikke pålideligt kan skelnes på samme side som
+            # etaperesultatet — se _find_first_visible_table().
+            gc_soup        = _fetch_soup(browser, headers, f"{base_url}-gc")
+            points_soup    = _fetch_soup(browser, headers, f"{base_url}-points")
+            mountains_soup = _fetch_soup(browser, headers, f"{base_url}-kom")
+            youth_soup     = _fetch_soup(browser, headers, f"{base_url}-youth")
+
             browser.close()
 
-        soup = BeautifulSoup(html, "html.parser")
-        tagged = _find_resultscont_tables(soup)
-        if not tagged:
-            return result
-
-        # Første reelle rytter-rangliste i #resultsCont = etaperesultat (på en
-        # etape hvor GC endnu ikke findes som separat fane, fx etape 1, er
-        # etaperesultat og GC identiske, se fallback for gc_table nedenfor).
-        stage_table = tagged[0][1]
-        gc_table = _pick_table(tagged, "gc") or stage_table
-        points_table = _pick_table(tagged, "point")
-        mountains_table = _pick_table(tagged, "mountain") or _pick_table(tagged, "kom")
-        youth_table = _pick_table(tagged, "youth")
+        gc_table        = _find_first_visible_table(gc_soup) or stage_table
+        points_table    = _find_first_visible_table(points_soup)
+        mountains_table = _find_first_visible_table(mountains_soup)
+        youth_table     = _find_first_visible_table(youth_soup)
 
         # ── Etaperesultat (sorteret efter etapeplacering) ────────────────────
         for row in stage_table.find_all("tr")[1:11]:
