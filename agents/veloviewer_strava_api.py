@@ -48,11 +48,34 @@ API_BASE = "https://www.strava.com/api/v3"
 _access_token_cache: dict = {"token": None, "expires_at": 0}
 
 # Stravas rate limit nulstiller i rullende 15-minutters vinduer (200 kald/15 min,
-# 2000/dag). Ved 429 venter vi vinduet ud og prøver automatisk igen, i stedet for
-# at springe kandidaten/boksen over — så en lang kørsel (fx alle TdF-etaper)
-# selv finder tempoet, den kan holde, uden at nogen skal overvåge den undervejs.
+# 2000/dag for "overall"; det separate, lavere "read"-loft — som /segments/explore
+# og /segments/{id} begge trækker på — er 100 kald/15 min, 1000/dag). Ved 429
+# venter vi vinduet ud og prøver automatisk igen, i stedet for at springe
+# kandidaten/boksen over — så en lang kørsel (fx alle TdF-etaper) selv finder
+# tempoet, den kan holde, uden at nogen skal overvåge den undervejs.
 RATE_LIMIT_WAIT_SECONDS = 15 * 60
 MAX_RATE_LIMIT_RETRIES = 6  # op til 1,5 time ventetid i alt, før vi giver op
+
+# STG-021-fund (2026-07-08): Stravas 429 dækker over TO forskellige lofter, som
+# begge udløser samme statuskode: det rullende 15-minutters vindue (kan altid
+# ventes ud) OG det daglige loft (1000 read-kald/dag), som IKKE nulstiller
+# ved at vente 15 minutter — det nulstiller først ved midnat UTC. Uden dette
+# tjek ville _get_with_retry blindt bruge alle MAX_RATE_LIMIT_RETRIES (op til
+# 1,5 time) på HVERT efterfølgende kald resten af dagen, når det daglige loft
+# er ramt — spild af tid uden nogensinde at kunne lykkes. Vi læser derfor
+# X-ReadRateLimit-Usage/-Limit-headeren (format "15min,daglig") og stopper med
+# det samme, hvis det daglige antal er nået.
+def _daily_limit_exhausted(res: requests.Response) -> bool:
+    usage = res.headers.get("X-ReadRateLimit-Usage") or res.headers.get("x-readratelimit-usage")
+    limit = res.headers.get("X-ReadRateLimit-Limit") or res.headers.get("x-readratelimit-limit")
+    if not usage or not limit:
+        return False
+    try:
+        daily_usage = int(usage.split(",")[1])
+        daily_limit = int(limit.split(",")[1])
+    except (IndexError, ValueError):
+        return False
+    return daily_usage >= daily_limit
 
 
 def _get_with_retry(url: str, params: dict) -> requests.Response | None:
@@ -60,6 +83,11 @@ def _get_with_retry(url: str, params: dict) -> requests.Response | None:
     for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
         res = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=15)
         if res.status_code != 429:
+            return res
+        if _daily_limit_exhausted(res):
+            print("    [rate limit] Stravas DAGLIGE read-loft (1000 kald/dag) er nået — "
+                  "nulstiller først ved midnat UTC, så vi venter ikke vinduet ud. "
+                  "Giver op for resten af kørslen, prøv igen efter midnat UTC.")
             return res
         if attempt == MAX_RATE_LIMIT_RETRIES:
             print(f"    [rate limit] Stadig ramt efter {attempt} forsøg — giver op for dette kald")
