@@ -37,14 +37,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     };
   });
 
-  const stageUrls: MetadataRoute.Sitemap = races.flatMap((r) =>
-    Array.from({ length: r.stage_count ?? 0 }, (_, i) => ({
-      url: `${BASE}/${r.slug}/stage/${i + 1}`,
-      lastModified: r.start_date,
-      changeFrequency: "daily" as const,
-      priority: 0.8,
-    }))
-  );
+  // Etsdagsløb (stage_count <= 1) har al deres info på løbssiden selv —
+  // /stage/1 redirecter permanent dertil, så den skal ikke i sitemappet.
+  const stageUrls: MetadataRoute.Sitemap = races
+    .filter((r) => (r.stage_count ?? 0) > 1)
+    .flatMap((r) =>
+      Array.from({ length: r.stage_count ?? 0 }, (_, i) => ({
+        url: `${BASE}/${r.slug}/stage/${i + 1}`,
+        lastModified: r.start_date,
+        changeFrequency: "daily" as const,
+        priority: 0.8,
+      }))
+    );
 
   const riderUrls: MetadataRoute.Sitemap = riders.map((r) => ({
     url: `${BASE}/riders/${r.slug}`,

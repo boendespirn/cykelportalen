@@ -1,7 +1,7 @@
 export const revalidate = 300;
 
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
@@ -421,6 +421,15 @@ export default async function StagePage(props: {
   const result = await getStageDetail(slug, n);
   if (!result) {
     notFound();
+  }
+
+  // Etsdagsløb (1 etape i alt) har al deres info på løbssiden selv — /stage/1
+  // er en redundant, ulinket duplikat (fundet som orphan page i Ahrefs-scan).
+  if (n === "1") {
+    const allStages = await getAllStages(slug);
+    if (allStages.length <= 1) {
+      permanentRedirect(`/${slug}`);
+    }
   }
 
   const { stage, race } = result;
