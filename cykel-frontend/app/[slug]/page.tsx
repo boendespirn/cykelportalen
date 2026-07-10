@@ -384,6 +384,11 @@ export async function generateMetadata(
     openGraph: {
       title: `${race.name} ${year} | Klassementet`,
       description,
+      url: `/${slug}`,
+      siteName: "Klassementet",
+      locale: "da_DK",
+      type: "website",
+      images: race.cover_image_url ? [{ url: race.cover_image_url }] : [],
     },
   };
 }

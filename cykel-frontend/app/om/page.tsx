@@ -5,6 +5,16 @@ export const metadata: Metadata = {
   title: "Om os",
   description:
     "Klassementet er lavet af en cykel- og AI-entusiast, der ville samle al den fedeste data om professionel cykling ét sted.",
+  alternates: { canonical: "/om" },
+  openGraph: {
+    url: "/om",
+    title: "Om os | Klassementet",
+    description: "Klassementet er lavet af en cykel- og AI-entusiast, der ville samle al den fedeste data om professionel cykling ét sted.",
+    siteName: "Klassementet",
+    locale: "da_DK",
+    type: "website",
+    images: [{ url: "/social-cover.png", width: 1200, height: 630 }],
+  },
 };
 
 export default function OmPage() {

@@ -175,11 +175,12 @@ export async function generateMetadata(
   const { slug } = await props.params;
   const rider = await getRider(slug);
   if (!rider) return { title: "Rytter ikke fundet" };
-  const description = [
+  const profileLine = [
     rider.speciality,
     rider.teams?.name,
     rider.nationality ? `Nationalitet: ${rider.nationality}` : null,
   ].filter(Boolean).join(" · ");
+  const description = `${rider.name} — ${profileLine}. Se ryttertal, resultater og karrierestatistik på Klassementet.`;
   return {
     title: rider.name,
     description,
@@ -190,6 +191,10 @@ export async function generateMetadata(
     openGraph: {
       title: `${rider.name} | Klassementet`,
       description,
+      url: `/riders/${slug}`,
+      siteName: "Klassementet",
+      locale: "da_DK",
+      type: "profile",
       images: rider.photo_url ? [{ url: rider.photo_url }] : [],
     },
   };

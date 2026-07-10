@@ -80,6 +80,9 @@ export async function generateMetadata(
     openGraph: {
       title: article.title,
       description: article.meta_description ?? article.excerpt ?? undefined,
+      url: `/nyheder/${slug}`,
+      siteName: "Klassementet",
+      locale: "da_DK",
       type: "article",
       publishedTime: article.published_at,
       images: [

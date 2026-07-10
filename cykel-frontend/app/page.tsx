@@ -1,8 +1,21 @@
 export const revalidate = 60;
 
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+
+export const metadata: Metadata = {
+  openGraph: {
+    url: "/",
+    title: "Klassementet — Dansk cykelportal",
+    description: "Klassementet er Danmarks bedste cykelportal med etapeinfo, favoritter, højdeprofiler og klassementer fra UCI WorldTour.",
+    siteName: "Klassementet",
+    locale: "da_DK",
+    type: "website",
+    images: [{ url: "/social-cover.png", width: 1200, height: 630 }],
+  },
+};
 
 type Race = {
   name: string;

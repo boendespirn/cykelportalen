@@ -8,6 +8,16 @@ import { API_BASE } from "@/lib/api";
 export const metadata: Metadata = {
   title: "Kalender",
   description: "Fuld kalender over UCI WorldTour-løb i 2026-sæsonen — etaper, startlister og klassementer.",
+  alternates: { canonical: "/races" },
+  openGraph: {
+    url: "/races",
+    title: "Kalender | Klassementet",
+    description: "Fuld kalender over UCI WorldTour-løb i 2026-sæsonen — etaper, startlister og klassementer.",
+    siteName: "Klassementet",
+    locale: "da_DK",
+    type: "website",
+    images: [{ url: "/social-cover.png", width: 1200, height: 630 }],
+  },
 };
 
 type Race = {

@@ -8,6 +8,15 @@ export const metadata: Metadata = {
   title: "Hold",
   description: "Find alle hold fra UCI WorldTour — kategori, nationalitet og UCI-holdkode.",
   alternates: { canonical: "/teams" },
+  openGraph: {
+    url: "/teams",
+    title: "Hold | Klassementet",
+    description: "Find alle hold fra UCI WorldTour — kategori, nationalitet og UCI-holdkode.",
+    siteName: "Klassementet",
+    locale: "da_DK",
+    type: "website",
+    images: [{ url: "/social-cover.png", width: 1200, height: 630 }],
+  },
 };
 
 type Team = {

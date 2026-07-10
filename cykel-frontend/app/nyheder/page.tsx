@@ -10,12 +10,24 @@ export async function generateMetadata(
 ): Promise<Metadata> {
   const { page: pageParam } = await props.searchParams;
   const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
+  const title = page > 1 ? `Nyheder — side ${page}` : "Nyheder";
+  const description = "Alle nyheder om cykling — resultater, startlister, analyser og interviews fra de store cykelløb.";
+  const canonical = page > 1 ? `/nyheder?page=${page}` : "/nyheder";
   return {
-    title: page > 1 ? `Nyheder — side ${page}` : "Nyheder",
-    description: "Alle nyheder om cykling — resultater, startlister, analyser og interviews fra de store cykelløb.",
+    title,
+    description,
     alternates: {
-      canonical: page > 1 ? `/nyheder?page=${page}` : "/nyheder",
+      canonical,
       types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
+    },
+    openGraph: {
+      url: canonical,
+      title: `${title} | Klassementet`,
+      description,
+      siteName: "Klassementet",
+      locale: "da_DK",
+      type: "website",
+      images: [{ url: "/social-cover.png", width: 1200, height: 630 }],
     },
   };
 }

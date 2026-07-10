@@ -383,7 +383,12 @@ export async function generateMetadata(
   const winner = results[0]?.riders;
   const title = `Etape ${n}: ${start}${finish ? ` — ${finish}` : ""} | ${race.name}`;
   const winnerText = winner ? ` Vinder: ${winner.name}.` : "";
-  const desc = `Etaperesultat og klassement for etape ${n} i ${race.name}: ${start}${finish ? ` — ${finish}` : ""}.${winnerText} ${stage.distance_km ? `${stage.distance_km} km.` : ""}`.trim();
+  // Ruteteksten udelades helt, hvis både start og mål mangler — undgår "i {løb}: ." (tomt felt).
+  const route = start && finish ? `${start} — ${finish}` : start || finish;
+  const routeText = route ? `: ${route}` : "";
+  const typeLabel = stage.stage_type ? STAGE_TYPE_CONFIG[stage.stage_type]?.label : null;
+  const typeText = typeLabel ? ` (${typeLabel})` : "";
+  const desc = `Etaperesultat og klassement for etape ${n} i ${race.name}${routeText}${typeText}.${winnerText} ${stage.distance_km ? `${stage.distance_km} km.` : ""}`.trim();
   return {
     title,
     description: desc,
@@ -394,6 +399,10 @@ export async function generateMetadata(
     openGraph: {
       title: `${title} | Klassementet`,
       description: desc,
+      url: `/${slug}/stage/${n}`,
+      siteName: "Klassementet",
+      locale: "da_DK",
+      type: "website",
       images: stage.elevation_image_url ? [{ url: stage.elevation_image_url }] : [],
     },
   };

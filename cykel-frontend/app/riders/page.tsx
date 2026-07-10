@@ -8,6 +8,15 @@ export const metadata: Metadata = {
   title: "Ryttere",
   description: "Find alle ryttere fra UCI WorldTour — nationalitet, speciale, UCI-ranking og hold.",
   alternates: { canonical: "/riders" },
+  openGraph: {
+    url: "/riders",
+    title: "Ryttere | Klassementet",
+    description: "Find alle ryttere fra UCI WorldTour — nationalitet, speciale, UCI-ranking og hold.",
+    siteName: "Klassementet",
+    locale: "da_DK",
+    type: "website",
+    images: [{ url: "/social-cover.png", width: 1200, height: 630 }],
+  },
 };
 
 type Rider = {

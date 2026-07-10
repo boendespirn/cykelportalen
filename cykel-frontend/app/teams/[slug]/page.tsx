@@ -96,6 +96,10 @@ export async function generateMetadata(
     openGraph: {
       title: `${team.name} | Hold | Klassementet`,
       description,
+      url: `/teams/${slug}`,
+      siteName: "Klassementet",
+      locale: "da_DK",
+      type: "website",
     },
   };
 }
