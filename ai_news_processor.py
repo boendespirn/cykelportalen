@@ -238,6 +238,33 @@ Returner præcis dette JSON:
         return None
 
 
+def sanitize_links(content: str, races: list[dict]) -> str:
+    """Fjerner (til plain text) ethvert INTERNT markdown-link, der ikke peger på
+    et kendt løb (evt. dets etapesider), eller forsiden. Ægte eksterne links
+    (kilder som uci.org) røres ikke. rewrite_article()s prompt beder Claude om
+    kun at bruge løbslinks, men LLM'en følger det ikke altid (se NEWS-001:
+    publicerede artikler med hallucinerede links som /jonas-vingegaard,
+    /tour-de-france-klassement). Dette er et deterministisk sikkerhedsnet
+    før DB-skrivning."""
+    race_slugs = {r["slug"] for r in races}
+
+    def is_allowed(url: str) -> bool:
+        if url.startswith("https://klassementet.dk"):
+            url = url[len("https://klassementet.dk"):] or "/"
+        elif url.startswith("http://") or url.startswith("https://"):
+            return True  # ægte ekstern kilde
+        if url == "/":
+            return True
+        m = re.match(r"^/([^/]+)(?:/stage/\d+)?$", url)
+        return bool(m) and m.group(1) in race_slugs
+
+    def replace(match: re.Match) -> str:
+        text, url = match.group(1), match.group(2)
+        return match.group(0) if is_allowed(url) else text
+
+    return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace, content)
+
+
 # ── Hoved ─────────────────────────────────────────────────────────────────────
 
 def run(limit: int, max_drafts: int) -> None:
@@ -306,7 +333,7 @@ def run(limit: int, max_drafts: int) -> None:
             "slug":             slug,
             "title":            result["title"],
             "excerpt":          result.get("excerpt", ""),
-            "content":          result["content"],
+            "content":          sanitize_links(result["content"], races),
             "meta_description": result.get("excerpt", "")[:160],
             "category":         result.get("category", "generelt"),
             "author":           "Klassementet AI",
