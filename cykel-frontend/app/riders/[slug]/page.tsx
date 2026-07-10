@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+import { isHistoricRaceSlug } from "@/lib/historic-stage";
 import CollapsibleList from "./CollapsibleList";
 
 type Rider = {
@@ -393,12 +394,9 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
               items={unique.map((win, i) => {
                 const s = win.stages;
                 if (!s || !s.races) return null;
-                return (
-                  <Link
-                    key={i}
-                    href={`/${s.races.slug}/stage/${s.stage_number}`}
-                    className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
-                  >
+                const historic = isHistoricRaceSlug(s.races.slug);
+                const inner = (
+                  <>
                     <span className="text-emerald-400 font-mono font-bold text-sm w-8 flex-shrink-0">
                       E{s.stage_number}
                     </span>
@@ -410,6 +408,25 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
                       {s.date && <p className="text-xs text-slate-500 font-mono">{formatShortDate(s.date)}</p>}
                       <p className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider mt-0.5">1. plads</p>
                     </div>
+                  </>
+                );
+                if (historic) {
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3"
+                    >
+                      {inner}
+                    </div>
+                  );
+                }
+                return (
+                  <Link
+                    key={i}
+                    href={`/${s.races.slug}/stage/${s.stage_number}`}
+                    className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
+                  >
+                    {inner}
                   </Link>
                 );
               }).filter((el): el is React.ReactElement => el !== null)}

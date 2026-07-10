@@ -5,6 +5,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+import { isHistoricRaceSlug } from "@/lib/historic-stage";
 import SpoilerSection from "./SpoilerSection";
 import DnfSection from "./DnfSection";
 import StageMapLoader from "./stage/[n]/StageMapLoader";
@@ -975,13 +976,14 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 const status = stageStatus(stage.date, today);
                 const isCompleted = status === "completed";
                 const isToday = status === "today";
-                return (
-                  <Link key={stage.stage_number} href={`/${race.slug}/stage/${stage.stage_number}`} className="block group">
-                    <div className={`rounded-xl border overflow-hidden transition-colors ${
-                      isToday     ? "border-emerald-500/40 bg-emerald-500/5 hover:border-emerald-500/60"
-                      : isCompleted ? "border-slate-800/50 bg-slate-900/20 hover:border-slate-700/60"
-                      :               "border-slate-800/80 bg-slate-900/40 hover:border-slate-700"
-                    }`}>
+                const historic = isHistoricRaceSlug(race.slug);
+                const cardClass = `rounded-xl border overflow-hidden transition-colors ${
+                  isToday     ? "border-emerald-500/40 bg-emerald-500/5" + (historic ? "" : " hover:border-emerald-500/60")
+                  : isCompleted ? "border-slate-800/50 bg-slate-900/20" + (historic ? "" : " hover:border-slate-700/60")
+                  :               "border-slate-800/80 bg-slate-900/40" + (historic ? "" : " hover:border-slate-700")
+                }`;
+                const card = (
+                    <div className={cardClass}>
                       {stage.elevation_image_url && (
                         <div className={`relative w-full h-28 bg-slate-950 border-b border-slate-800/60 ${isCompleted ? "opacity-50" : ""}`}>
                           <Image src={stage.elevation_image_url} alt="" fill sizes="(max-width: 640px) 100vw, 33vw" className="object-cover" />
@@ -1022,6 +1024,13 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                         </div>
                       </div>
                     </div>
+                );
+                if (historic) {
+                  return <div key={stage.stage_number}>{card}</div>;
+                }
+                return (
+                  <Link key={stage.stage_number} href={`/${race.slug}/stage/${stage.stage_number}`} className="block group">
+                    {card}
                   </Link>
                 );
               })}

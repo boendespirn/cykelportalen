@@ -165,9 +165,9 @@ export default function SearchBar() {
                     <ResultGroup label="Stigninger">
                       {results.climbs.map((c, i) => {
                         const race = c.stages?.races;
-                        const href = race
-                          ? `/${race.slug}/stage/${c.stages?.stage_number}`
-                          : "#";
+                        // Peger på løbssiden, ikke den specifikke etapeside — undgår
+                        // 404 for historiske etaper uden egen landingsside.
+                        const href = race ? `/${race.slug}` : "#";
                         return (
                           <ResultItem key={i} href={href} onClick={() => setOpen(false)}>
                             <span className="text-sm text-slate-200">{c.name}</span>

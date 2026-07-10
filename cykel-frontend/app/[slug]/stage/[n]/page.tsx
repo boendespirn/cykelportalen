@@ -9,6 +9,7 @@ import ClimbProfile from "./ClimbProfile";
 import Disclosure from "../../Disclosure";
 import ClassificationTabs, { type StandingEntry } from "../../ClassificationTabs";
 import { API_BASE } from "@/lib/api";
+import { isHistoricRaceSlug } from "@/lib/historic-stage";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -370,6 +371,7 @@ export async function generateMetadata(
   props: { params: Promise<{ slug: string; n: string }> }
 ): Promise<Metadata> {
   const { slug, n } = await props.params;
+  if (isHistoricRaceSlug(slug)) return { title: "Etape ikke fundet" };
   const [detail, results] = await Promise.all([
     getStageDetail(slug, n),
     getStageResults(slug, n),
@@ -403,6 +405,9 @@ export default async function StagePage(props: {
   params: Promise<{ slug: string; n: string }>;
 }) {
   const { slug, n } = await props.params;
+  if (isHistoricRaceSlug(slug)) {
+    notFound();
+  }
 
   const result = await getStageDetail(slug, n);
   if (!result) {

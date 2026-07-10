@@ -188,7 +188,9 @@ export default async function SearchPage(props: { searchParams: Promise<{ q?: st
               <div className="space-y-1.5">
                 {results.climbs.map((c, i) => {
                   const race = c.stages?.races;
-                  const href = race ? `/${race.slug}/stage/${c.stages?.stage_number}` : "#";
+                  // Peger på løbssiden, ikke den specifikke etapeside — undgår 404
+                  // for historiske etaper, som ikke længere har egen landingsside.
+                  const href = race ? `/${race.slug}` : "#";
                   return (
                     <Link
                       key={i}
