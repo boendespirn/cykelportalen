@@ -65,43 +65,75 @@ spor. Følg checklisten under "Næste skridt" nedenfor, i rækkefølge.
 
 ---
 
-## IKKE bygget endnu — dette er den faktiske næste opgave
+## Bygget og deployet 2026-07-15 (samme dag, opfølgende session)
 
-`race_prep_pipeline.py` kører stadig altid alle 9 trin (inkl. stignings-
-oprettelse) uanset `--historic`. Der findes **endnu ingen** letvægts-pipeline
-og **ingen** narrativ-generator. Konkret mangler:
+Punkt 1-4 fra den tidligere "IKKE bygget endnu"-liste er nu færdige,
+committet (`2cdad6b`, "feat(SEO-023): byg narrativ-agent + genaabn
+historiske etapesider (letvaegt)") og pushet til `master`:
 
-1. **DB-migration:** nyt felt `stages.historic_recap` (text, nullable) —
-   adskilt fra det eksisterende `description` (anden tone/formål, se spec).
-2. **Ny narrativ-agent** (fx `agents/historic_recap_agent.py`): for en given
-   `--race SLUG --stage N`, slå `db_slug` op i `tourtracker_id_map.json`,
-   hent `reports`/`plays` for den etape, og generér original, varieret,
-   kommentator-sprog-tekst efter kriteriet i punkt 4 ovenfor. Skriv til
-   `stages.historic_recap`.
-3. **Letvægts-pipeline-flow for historiske løb:** `race_prep_pipeline.py`s
-   `--historic`-gren skal opdateres til at **springe stignings-trinnene (6-8)
-   over** (de blev tilføjet til STG-023 for indeværende sæson, men gælder ikke
-   historisk efter revisionen) og tilføje det nye narrativ-trin i stedet.
-4. **Frontend:** `cykel-frontend/app/[slug]/stage/[n]/page.tsx` og
-   `lib/historic-stage.ts` skal ændres fra en blank årstals-404 til reel
-   sidevisning for historiske løb med komplet data — jf. Fase 3 i plan-
-   dokumentet: datafuldstændigheds-tjek (ikke `stage_climbs`), fjern lokal-
-   favorit-logik for historiske sider, vis løbets endelige klassement (ikke
-   `getEffectiveClassification()`s etape-frosne forsøg), render
-   `historic_recap`, geninsæt intern linking, `sitemap.ts`.
+1. **DB-migration:** `stages.historic_recap` (text, nullable) — anvendt via
+   `mcp__supabase__apply_migration` (ikke en fil i repoet, kør
+   `list_migrations` for at bekræfte hvis i tvivl).
+2. **`agents/historic_recap_agent.py`** — bygget og testet på Tour de France
+   2025 etape 10 (skriver ægte, original tekst, verificeret i DB). Kilde-
+   prioritet: TourTracker (`reports`+`plays` via `tourtracker_id_map.json`)
+   når tilgængelig og >= 250 tegn ("full"-tilstand, 3-4 afsnit); ellers vores
+   egen DB (top 3-resultat) alene ("short"-tilstand, 1 afsnit); springer helt
+   over hvis hverken kilde findes. NB: JSON-parsing har et fallback for en
+   ugyldig `\'`-escape, Claude nogle gange sætter om apostroffer i navne
+   (fx "O\'Connor") — ren `json.loads` fejler på det, retter og prøver igen.
+3. **`race_prep_pipeline.py --historic`:** springer nu trin 6-8 (individuelle
+   stigningsprofiler) over og tilføjer trin 10 (`historic_recap_agent.py
+   --all-stages`) efter resultater.
+4. **Frontend genåbnet:**
+   - `[slug]/stage/[n]/page.tsx`: datafuldstændigheds-tjek er
+     `stage.elevation_image_url` (sat af `stage_pcs_agent.py`, trin 2) i
+     stedet for `stage_climbs` — én simpel, konsistent completeness-signal
+     brugt alle steder (se nedenfor). `historic_recap` renderes i en ny
+     "Historisk tilbageblik"-sektion. Klassement bruger nu altid
+     `getFinalClassification()` (løbets endelige, ikke etape-frosset) for
+     historiske sider — titel "Løbets endelige klassement". Lokal-favorit-
+     mærkning og individuelle stigningsprofiler er eksplicit deaktiveret for
+     historiske sider (`effectiveClimbs = isHistoric ? [] : climbs`).
+   - `api.py`: `/races/{slug}/stages/{n}` returnerer nu `historic_recap`.
+     `/races` (bulk) returnerer nyt felt `ready_through_stage` (højeste
+     SAMMENHÆNGENDE etapenummer fra 1 med `elevation_image_url` sat) —
+     bruges af `sitemap.ts` OG af linking-beslutninger på løbs-/rytterside,
+     så vi aldrig linker til en historisk side, der reelt stadig er
+     skeleton-data (samme fejl som SEO-019 oprindeligt fixede).
+   - **Vigtigt fund:** `sitemap.ts` ekskluderede FØR denne session alle løb
+     med `end_date` > 30 dage gammelt — dvs. reelt SAMTLIGE historiske løb
+     var usynlige for Google via sitemappet, uanset om siderne fandtes.
+     Rettet: alle løb er nu med (lavere prioritet/`changeFrequency` for
+     historiske), men etape-URL'er for historiske løb er kun med op til
+     `ready_through_stage`.
+   - Samme linking-gating er også lagt ind i `riders/[slug]/page.tsx`s
+     palmares-sektion (etapesejre) — `api.py`s `/riders/{slug}/palmares` og
+     `/riders/{slug}/stage-wins` returnerer nu også `elevation_image_url` pr.
+     etapesejr til formålet.
+   - Verificeret: `npx tsc --noEmit` grønt, lokal `uvicorn`-test af `/races`,
+     `/races/tour-de-france-2025/stages/10` (historic_recap til stede) og
+     `/riders/pogacar-tadej/palmares` (elevation_image_url til stede).
 
 ## Næste skridt (kør i denne rækkefølge)
 
-1. Migrér `stages.historic_recap` (nyt nullable text-felt).
-2. Byg narrativ-agenten (punkt 2 ovenfor) — test på Tour de France 2025 etape
-   10 (samme etape STG-023 allerede verificerede har komplet stage-data).
-3. Opdater `race_prep_pipeline.py`s `--historic`-gren (punkt 3).
-4. Byg frontend-ændringerne (punkt 4) — test lokalt før deploy.
-5. Kør letvægts-pipelinen for `tour-de-france --year 2025` (fuld etape 1-21),
-   genåbn siderne for det løb først, verificér visuelt/manuelt før resten af
-   køen sættes i gang.
-6. Fortsæt derefter nedad gennem køen (punkt 5 i "Beslutninger truffet").
+1. ~~Migrér `stages.historic_recap`~~ — færdig.
+2. ~~Byg narrativ-agenten~~ — færdig, testet på Tour de France 2025 etape 10.
+3. ~~Opdater `race_prep_pipeline.py`s `--historic`-gren~~ — færdig.
+4. ~~Byg frontend-ændringerne~~ — færdig, `tsc` grønt, deployet (pushet til
+   `master`, commit `2cdad6b`).
+5. **NÆSTE:** kør letvægts-pipelinen for `tour-de-france --year 2025` (fuld
+   etape 1-21): `python race_prep_pipeline.py tour-de-france --year 2025
+   --historic` fra `agents/`. Bemærk: kun 7 af 21 etaper har
+   `elevation_image_url` sat lige nu (`ready_through_stage=7` ved sidste
+   tjek) — resten af etapedata/basisprofilbilleder (pipeline-trin 1-2) skal
+   køres først, før narrativ-trinnet (10) giver fuld dækning. Verificér
+   visuelt/manuelt på klassementet.dk/tour-de-france-2025/stage/N før resten
+   af køen sættes i gang.
+6. Fortsæt derefter nedad gennem køen (punkt 5 i "Beslutninger truffet")
+   — kronologisk baglæns 2025 → 2021, Tour de France → Giro/Vuelta → 5
+   Monuments → øvrige WorldTour → resterende étdagsløb.
 
 ## Færdige løb (historisk backfill, den faktiske kø)
 
-*(ingen endnu — punkt 1-5 ovenfor skal bygges først)*
+*(ingen endnu — pipeline-kørslen i punkt 5 er den faktiske start på køen)*
