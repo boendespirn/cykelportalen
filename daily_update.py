@@ -260,7 +260,9 @@ def run(target_slug: str | None = None, force_stages: bool = False, startlists_o
         if not has_stages or force_stages or missing_img:
             reason = "mangler" if not has_stages else ("mangler billeder" if missing_img else "force")
             print(f"  [Etaper — {reason}]")
-            is_oneday = race.get("race_type") == "oneday"
+            # DB har to inkonsistente vaerdier for etdagsloeb ("one_day" og
+            # "oneday", se DATA-001 i state/issues.md) - tjek begge.
+            is_oneday = race.get("race_type") in ("oneday", "one_day")
             extra_args = ["--oneday"] if is_oneday else []
             ok = run_script("agents/stage_pcs_agent.py", pcs_slug, *extra_args, label=f"stages {slug}")
             if ok:
