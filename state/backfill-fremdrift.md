@@ -206,8 +206,10 @@ løbs PCS-slug ikke ændrer sig over årene. For løb der har skiftet
 officielt navn (fx Paris-Roubaix → "Paris-Roubaix Hauts-de-France")
 producerer den en AFVIGENDE db-slug for historiske år end den, løbet
 allerede er gemt under — hvilket opretter en tom duplikat-løbsrække i
-stedet for at ramme den rigtige. **Afventer ejerens svar (sendt Telegram
-2026-07-15)** om, hvorvidt fremtidige tilfælde af dette må rettes
-automatisk (flyt etaperne over, slet den tomme duplikat — som gjort for
-Paris-Roubaix) eller skal logges og springes over til manuel gennemgang.
-**Gør IKKE flere automatiske duplikat-oprydninger, før dette er afklaret.**
+stedet for at ramme den rigtige. **Ejeren godkendte 2026-07-15 (Telegram)**
+at samme fremgangsmåde bruges automatisk resten af køen: før et
+etape_pcs_agent-kald, tjek om resultatet landede på en ny/anden slug end
+forventet; hvis så, verificér at den nye række er tom (0 resultater/
+startlister/klassementer udover den nyoprettede etape), flyt etaperne til
+den korrekte eksisterende løbsrække, og slet duplikaten. Se DATA-002 i
+`state/issues.md` for den fulde begrundelse.
