@@ -35,6 +35,7 @@ Google er begyndt at indeksere siden bredt. Det betyder, at flaskehalsen skifter
 - **Rækkefølge:** indeværende sæson (2026, alle løb — ikke kun TdF) færdiggøres først; derefter historisk backfill prioriteret Tour de France → Giro/Vuelta → de 5 Monuments → øvrige WorldTour-etapeløb → resterende étdagsløb, jf. §9's trafik-/autoritetsprincip.
 - **Forudsætning, ikke valgfri:** pipeline-scripts (`startlist_agent.py` m.fl.) er i dag hardkodet til `YEAR=2026` og skal årgang-parameteriseres, og etapesidens performance-rod (ucachede backend-kald, `cache: "no-store"` på startliste) skal rettes, FØR nogen historisk side genåbnes — ellers gentages SEO-019-fejlen i 5× skala.
 - Se plan-dokumentet for fuld fase-opdeling (0-4) og data-status pr. årgang.
+- **Revideret 2026-07-15 (samme dag):** historiske etapesider (Fase 2-3) skal ikke have individuelle stigningsprofiler — den reelle flaskehals for hurtig levering. De får i stedet en let overbliksstruktur (hel-etape højdeprofil, startliste, favoritter uden lokal-mærkning, top 10, løbets endelige klassement, og en ny AI-genereret historisk fortælling for kendte/nyhedsværdige etaper). Indeværende/kommende sæsoner beholder fuld dybde. Fuld spec: `docs/superpowers/specs/2026-07-15-historiske-etapesider-letvaegt.md`.
 
 ### 2. Indeksering — den eksistentielle flaskehals
 

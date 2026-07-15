@@ -2,6 +2,17 @@
 
 *Oprettet: 2026-07-15. Ejerens direktiv: Google er begyndt at indeksere siden bredt — nu skal den også have noget at vise frem, ikke 404'er. Se `STRATEGI.md` §1a for det formelle mål.*
 
+> **REVIDERET 2026-07-15 (samme dag):** Ejeren har efterfølgende indsnævret
+> rækkevidden for **historiske** etapesider (år < indeværende sæson, altså
+> hele Fase 2 nedenfor): de skal **ikke** have individuelle stignings-
+> profiler. Det var den reelle flaskehals, og sløjfes helt for historiske
+> sider — de skal give et overblik, ikke fuld dybde. Se
+> `docs/superpowers/specs/2026-07-15-historiske-etapesider-letvaegt.md` for
+> den fulde, reviderede sidestruktur (bl.a. tilføjet: AI-genereret historisk
+> fortælling for kendte/nyhedsværdige etaper). Fase 0's klimapipeline-
+> forudsætning nedenfor gælder derfor **kun** indeværende/kommende sæsoner
+> (Fase 1) — ikke historisk backfill (Fase 2-3).
+
 ## Baggrund
 
 `7daaf30` (2026-07-10, issue SEO-019) fjernede alle historiske etapesider (år < indeværende sæson) og returnerer nu 404 for dem via `isHistoricRaceSlug()` i `lib/historic-stage.ts`. Beslutningen var korrekt givet det, der var kendt på det tidspunkt: Ahrefs fandt 740+ langsomme sider (TTFB op til 4,7 sek, ~10 ucachede backend-kald pr. side, `getStartlist()` brugte `cache: "no-store"`), ingen af dem havde trafik, og de fleste var ikke indekseret.
@@ -53,18 +64,25 @@ Prioriteret efter søgeværdi (CLAUDE.md §9: trafik/autoritet før "kun det vig
 4. **Øvrige WorldTour-etapeløb** (Paris-Nice, Tirreno-Adriatico, Critérium du Dauphiné, Tour de Suisse, Volta a Catalunya, UAE Tour, Tour de Romandie, Tour de Pologne m.fl.) × 5 år.
 5. **Resterende étdagsløb** (Strade Bianche, Amstel Gold, Flèche Wallonne, E3, Gent-Wevelgem, Bretagne Classic, Cyclassics, GP Montréal/Québec, Tour of Guangxi m.fl.) × 5 år.
 
-Pr. løb, kør den (nu årgang-kapable) `race_prep_pipeline.py RACE-SLUG --year YYYY`:
+**Reviderede trin pr. løb (letvægt, jf. spec 2026-07-15-historiske-etapesider-letvaegt.md)** —
+ikke længere alle 9 trin i `race_prep_pipeline.py`, kun de trin der understøtter
+den reviderede sidestruktur:
 1. Startliste (PCS har fulde historiske startlister)
-2. Etapedata + basisprofilbilleder
-3. Høj-kval profilbilleder
-4. Rytterbilleder — lavere prioritet for gamle sæsoner, mange ryttere er stoppet; spring evt. over først, tilføj senere
-5. Rytterstats
-6. Stigningsprofiler: samme 3-lags pipeline som 2026 (ClimbFinder → VeloViewer → GPX-fallback via `climb_profile_generator.py`, som allerede kun dækker giro/TdF/Dauphiné/Tour de Suisse pga. `CYCLINGSTAGE_GPX_PAGES`)
-7. Fulde resultater + klassement
+2. Etapedata + hel-etape-profilbilleder (trin 2-3 i pipelinen — **ikke** trin 4-5
+   [rytterbilleder/-stats] eller 6-8 [individuelle stigningsprofiler] — sløjfes
+   bevidst for historiske sider)
+3. Fulde resultater + endeligt klassement (trin 9, `--all-stages`)
+4. **Nyt:** historisk fortælling — AI-genereret narrativ for kendte/
+   nyhedsværdige etaper, skrevet til nyt felt `stages.historic_recap`.
+   Afventer ejerens svar på kildegrundlag og "kendt/nyhedsværdig"-kriterium
+   (se spec-dokumentet) før dette trin kan bygges.
+
+*(Den oprindelige 9-trins-liste med stigningsprofiler gælder fortsat for
+indeværende/kommende sæsoner, Fase 1 ovenfor — ikke for historisk backfill.)*
 
 ## Fase 3 — Genåbn siderne (kun for løb med reelt komplet data)
 
-- Erstat den blanke årstals-check i `isHistoricRaceSlug()` med et reelt datafuldstændigheds-tjek (fx kræv `elevation_image_url IS NOT NULL` eller en ny `data_complete`-markering pr. løb) — undgå at genåbne en side, der stadig kun har skeleton-data. Et løb bør kun blive linket/indekseret, når det er færdigt.
+- Erstat den blanke årstals-check i `isHistoricRaceSlug()` med et reelt datafuldstændigheds-tjek — for historiske sider nu: `stages.distance_km`/`elevation_image_url` (hel-etape) sat + startliste + resultater til stede (**ikke** `stage_climbs`, som bevidst ikke findes for historiske sider jf. revisionen ovenfor). Undgå at genåbne en side, der stadig kun har skeleton-data. Et løb bør kun blive linket/indekseret, når det er færdigt efter den (reviderede, lettere) definition.
 - Lang `revalidate` for afsluttede løb (de ændrer sig aldrig — ugentlig eller statisk).
 - Geninsæt intern linking, som SEO-019 fjernede: rytter-palmares, løbssidens etapeliste, stignings-søgeresultater.
 - Medtag i `sitemap.ts` igen for løb med verificeret komplet data.
