@@ -115,6 +115,44 @@ historiske etapesider (letvaegt)") og pushet til `master`:
      `/races/tour-de-france-2025/stages/10` (historic_recap til stede) og
      `/riders/pogacar-tadej/palmares` (elevation_image_url til stede).
 
+## Tour de France 2025 — status efter første fulde kørsel (2026-07-15)
+
+Verificeret LIVE på klassementet.dk (WebFetch): `stage/5` viser fuld side
+(Historisk tilbageblik + Løbets endelige klassement), `stage/15` giver
+korrekt 404 (endnu ikke backfillet) — datafuldstændigheds-gaten virker
+som tilsigtet i begge retninger.
+
+- **Resultater + klassement: 21/21 etaper** — var allerede i DB (fandtes
+  formentlig fra en tidligere, uafhængig `results_agent.py`-kørsel, ikke
+  noget denne sessions pipeline-kørsel skulle skaffe).
+- **`historic_recap`: 21/21 etaper** — kørt færdig, inkl. en generaliseret
+  rettelse af `historic_recap_agent.py`s JSON-parsing (Claude sætter
+  ikke-deterministisk ugyldige backslash-escapes ud over kun `\'`,
+  committet `2dcc42e`).
+- **`elevation_image_url` (= sidens "er den klar til visning"-signal):
+  kun 10/21 etaper.** `stage_pcs_agent.py` rammer PCS' Cloudflare-
+  beskyttelse konsekvent — første kørsel (som del af den fulde pipeline)
+  stoppede ved etape 13, en umiddelbar gentagelse bagefter stoppede
+  allerede ved etape 11 (dvs. VÆRRE, ikke bedre — tyder på at gentagne
+  forsøg i hurtig rækkefølge skærper blokeringen i stedet for at
+  bygge videre). Scriptet genscraper altid fra etape 1 (ingen
+  resume-fra-N-mekanik) — hver kørsel spilder derfor forsøg på allerede
+  hentede etaper, før den når de manglende.
+- **Konsekvens for resten af 5-års-køen:** denne Cloudflare-mur er
+  UAFHÆNGIG af hvilket løb der scrapes — den samme ~10-12-etaper-pr-
+  forsøg-grænse vil ramme ethvert løb, ikke kun Tour de France 2025.
+  Fuld backfill af alle ~130+ matchede historiske løb vil derfor kræve
+  MANGE spredte kørsler over tid (køletid mellem forsøg), ikke én
+  sammenhængende session — realistisk et flerdages/-ugers spor, ikke
+  timer. Sitemap/intern linking er allerede korrekt gated til kun at
+  vise færdige etaper undervejs, så dette er ikke blokerende for at
+  fortsætte køen — blot en pacing-realitet at kende.
+- **Baseret på**: `state/issues.md` STG-022's "Kendt driftsbegrænsning"
+  beskrev allerede dette mønster for `stage_pcs_agent.py` — dette er
+  første observation af, at det også rammer historiske løb og at
+  gentagne forsøg tilsyneladende forværrer det, ikke kun begrænser det
+  til et fast loft.
+
 ## Næste skridt (kør i denne rækkefølge)
 
 1. ~~Migrér `stages.historic_recap`~~ — færdig.
