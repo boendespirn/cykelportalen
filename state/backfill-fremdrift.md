@@ -174,4 +174,40 @@ som tilsigtet i begge retninger.
 
 ## Færdige løb (historisk backfill, den faktiske kø)
 
-*(ingen endnu — pipeline-kørslen i punkt 5 er den faktiske start på køen)*
+**2025-sæsonen, `historic_recap` skrevet for (18 løb, verificeret 2026-07-15):**
+Tour de France (21/21), Giro d'Italia (21/21), Vuelta a España (21/21),
+Critérium du Dauphiné (8/8), Tour de Suisse (8/8), Tour de Romandie (5/5),
+Itzulia Basque Country (6/6), Volta Ciclista a Catalunya (7/7),
+Tirreno-Adriatico (7/7), Paris-Nice (8/8), Santos Tour Down Under (6/6),
+Tour of Guangxi (6/6, DB-only "short"-tilstand — ingen TourTracker-mapping),
+Renewi Tour (5/5, DB-only), Tour de Pologne (7/7, DB-only),
+UAE Tour (7/7, DB-only), Milano-Sanremo (1/1), Liège-Bastogne-Liège (1/1),
+Il Lombardia (1/1). Paris-Roubaix (1/1) — se DATA-002-note nedenfor.
+
+**Elevation_image_url / "siden er klar til visning":** kun Tour de France
+har fået opmærksomhed her (10/21, se note ovenfor i filen). De øvrige
+2025-løb har typisk 0 billeder endnu — `stage_pcs_agent.py` skal køres
+(idempotent, kort kørsel pr. løb pga. Cloudflare) for hvert af dem for at
+åbne deres etapesider/synliggøre étdagsløbenes historic_recap.
+
+**Ikke gjort endnu, samme dag:**
+- Ronde van Vlaanderen 2025: forkert PCS-slug gættet manuelt
+  ("ronde-van-vlaanderen-tour-des-flandres-me"), PCS-siden gav "ingen
+  profildata" — ikke undersøgt videre, samme klasse problem som DATA-002.
+- Øvrige 2025 WorldTour étdagsløb (E3, Gent-Wevelgem, Amstel Gold Race,
+  Flèche Wallonne, Strade Bianche, GP Québec/Montréal m.fl.) — laveste
+  2025-prioritet ("resterende étdagsløb" i rækkefølgen), ikke påbegyndt.
+- 2024 → 2021 — slet ikke påbegyndt.
+
+**Ny, vigtig lærdom fra denne kørsel — DATA-002 (se `state/issues.md`):**
+`stage_pcs_agent.py`s PCS-slug-mapping (`PCS_TO_DB_SLUG` i
+`startlist_agent.py`) er bygget til NUVÆRENDE sæson og forudsætter at et
+løbs PCS-slug ikke ændrer sig over årene. For løb der har skiftet
+officielt navn (fx Paris-Roubaix → "Paris-Roubaix Hauts-de-France")
+producerer den en AFVIGENDE db-slug for historiske år end den, løbet
+allerede er gemt under — hvilket opretter en tom duplikat-løbsrække i
+stedet for at ramme den rigtige. **Afventer ejerens svar (sendt Telegram
+2026-07-15)** om, hvorvidt fremtidige tilfælde af dette må rettes
+automatisk (flyt etaperne over, slet den tomme duplikat — som gjort for
+Paris-Roubaix) eller skal logges og springes over til manuel gennemgang.
+**Gør IKKE flere automatiske duplikat-oprydninger, før dette er afklaret.**
