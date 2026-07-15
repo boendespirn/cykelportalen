@@ -187,7 +187,8 @@ SYSTEM = (
     "hændelser, der ikke fremgår af kilderne. Er du i tvivl om en detalje, udelad den. "
     "Kilderne (TourTracker) er andres redaktionelle tekst — omskriv altid til din egen, originale "
     "formulering, kopiér aldrig sætninger direkte. "
-    "Du svarer KUN med ren JSON — ingen markdown-blokke."
+    "Du svarer KUN med selve fortællingsteksten i almindelig prosa — ingen JSON, ingen markdown-blokke, "
+    "ingen indledende eller afsluttende bemærkninger."
 )
 
 
@@ -229,26 +230,19 @@ Top 3 (vores egen verificerede database — brug PRÆCIS disse navne/placeringer
 
 Vinkel (brug den, hvis den passer med de faktiske fakta ovenfor — ellers vælg en naturlig indgang): {angle}
 
-Returner præcis dette JSON-objekt:
-{{
-  "recap": "teksten på dansk, datid, historisk kommentator-sprog"
-}}"""
+Svar KUN med selve fortællingsteksten på dansk, datid, historisk kommentator-sprog.
+Ingen JSON, ingen markdown-kodeblokke, ingen overskrift, ingen indledende
+sætning som "Her er teksten" — start direkte med fortællingen."""
 
 
-def extract_json(text: str) -> dict:
+def clean_recap(text: str) -> str:
     text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"^```\w*\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        # Claude sætter nogle gange en ugyldig backslash-escape ind (typisk om
-        # en apostrof i et navn, fx "O\'Connor" — \' findes ikke i JSON-
-        # spec'en, men optræder ikke-deterministisk afhængig af genereringen).
-        # Fjerner enhver backslash der ikke starter en GYLDIG JSON-escape,
-        # i stedet for kun at fejle hele etapen for en kosmetisk fejl.
-        fixed = re.sub(r'\\(?!["\\/bfnrtu])', "", text)
-        return json.loads(fixed)
+    # Fjern evt. omsluttende anførselstegn, hvis Claude alligevel citerer teksten
+    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        text = text[1:-1]
+    return text.strip()
 
 
 def call_claude(client: Anthropic, race_name: str, stage: dict, top3: list[dict],
@@ -261,8 +255,8 @@ def call_claude(client: Anthropic, race_name: str, stage: dict, top3: list[dict]
             messages=[{"role": "user", "content": build_prompt(race_name, stage, top3, report, plays, mode)}],
             temperature=0.8,
         )
-        result = extract_json(resp.content[0].text)
-        return result.get("recap")
+        recap = clean_recap(resp.content[0].text)
+        return recap or None
     except Exception as e:
         print(f"  [API FEJL] {e}")
         return None
