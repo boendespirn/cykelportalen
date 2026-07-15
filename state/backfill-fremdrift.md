@@ -22,7 +22,27 @@ rytterbilleder over, kører resultater med `--all-stages`)
 
 ---
 
-## Status lige nu (2026-07-15, sat på pause pga. to fund nedenfor)
+## Status lige nu (2026-07-15, opdateret — begge fund rettet og verificeret)
+
+**STG-022 og STG-023 er begge rettet og verificeret mod rigtig 2025-data** (se
+`state/issues.md`, begge LØST). `tour-de-france-2025` har nu reelle etape 1-10
+(distance/højdemeter/type/billede) og en verificeret `stage_climbs`-række
+(etape 10). Pipelinen er nu 9 trin (`gpx_climb_agent.py` tilføjet som 6/9).
+
+**Sat på pause for denne session pga. akkumuleret omkostning (~$33) — afventer
+ejerens go/no-go før videre skalering til resten af køen.** Ingen tekniske
+blokeringer tilbage; dette er en ren prioriterings-/budgetbeslutning.
+
+**Kendt driftsbegrænsning at planlægge efter:** PCS' Cloudflare-beskyttelse
+stopper `stage_pcs_agent.py` efter ca. 10-12 sekventielle etapesider i træk
+(varierer). En fuld grand tour (21 etaper) kræver derfor typisk 2 kørsler af
+`stage_pcs_agent.py` (scriptet er idempotent — allerede gemte etaper gen-
+scrapes bare uskadeligt) for at nå hele vejen igennem. Planlæg tid/kørsler
+derefter, i stedet for at forvente én ubrudt kørsel pr. løb.
+
+---
+
+## Tidligere status (historik, løst)
 
 **Fase:** 0 — testkørsel af `race_prep_pipeline.py tour-de-france --year 2025`
 afslørede to reelle, blokerende huller i pipelinen selv (ikke i årgang-ændringerne).

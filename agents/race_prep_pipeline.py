@@ -14,12 +14,17 @@ Pipeline-trin (i rækkefølge):
   3. Høj-kval profiler  — erstatter lave PCS-profiler med /info/profiles versioner
   4. Rytterbilleder     — opdaterer manglende/brudte fotos fra PCS
   5. Rytterstats        — henter vægt og højde for ryttere der mangler det
-  6. Stigningsprofiler  — ClimbFinder-profiler for individuelle stigninger
-  7. Stigningsprofiler-fallback — climb_profile_generator.py (GPX-baseret) for
+  6. Stigninger (opret) — gpx_climb_agent.py. OPRETTER stage_climbs-rækkerne i
+                          første omgang (klatreinfo + gradient_sections fra PCS).
+                          Uden dette trin har trin 7-8 intet at arbejde på — de
+                          tilføjer kun billeder til allerede eksisterende rækker
+                          (se STG-023, fundet 2026-07-15 under SEO-022-backfillen).
+  7. Stigningsprofiler  — ClimbFinder-profiler for individuelle stigninger
+  8. Stigningsprofiler-fallback — climb_profile_generator.py (GPX-baseret) for
                           stigninger ClimbFinder ikke fandt/verificerede.
                           Springer automatisk og ufarligt over løb uden
                           konfigureret GPX-kilde (se CYCLINGSTAGE_GPX_PAGES).
-  8. Resultater          — results_agent.py --all-stages. For et afsluttet (historisk)
+  9. Resultater          — results_agent.py --all-stages. For et afsluttet (historisk)
                           løb hentes samtlige etapers resultater+klassement i denne
                           kørsel, i modsætning til den løbende opdatering under et
                           igangværende løb (som i stedet kører uden --all-stages,
@@ -27,8 +32,15 @@ Pipeline-trin (i rækkefølge):
 
 Bemærk: `--year` er kun understøttet af trin 1-2 (startlist_agent.py/stage_pcs_agent.py),
 som er de eneste trin, der tager et bart PCS-slug og selv skal udlede DB-slug/PCS-URL.
-Trin 3-8 tager alle `--race DB-SLUG` (som allerede indeholder årstallet, fx
+Trin 3-9 tager alle `--race DB-SLUG` (som allerede indeholder årstallet, fx
 "tour-de-france-2023") og er derfor årgang-agnostiske i sig selv.
+
+Ikke inkluderet endnu (fremtidig forbedring, ikke blokerende): `profile_reader_agent.py`
+(Claude vision-baseret genlæsning af klatredata fra højdeprofil-billedet, mere
+præcis end gpx_climb_agent.py's rå PCS-scrape) og `veloviewer_agent.py`
+(Strava-segment-baseret visuel profil, nu prioritet 1 for 2026 jf. STG-020) —
+begge kan tilføjes som selvstændige forbedringstrin senere uden at blokere
+selve klatre-opret-trinnet (6) ovenfor.
 """
 
 import subprocess
@@ -112,8 +124,8 @@ def main():
     parser.add_argument("--year", type=int, default=None,
                          help="Sæsonår, fx 2023 (default: indeværende sæson, jf. startlist_agent.YEAR)")
     parser.add_argument("--historic", action="store_true",
-                         help="Kør resultat-trinnet (8/8) med --all-stages i stedet for kun seneste etape, "
-                              "og spring rytterbilleder (4/8) over, da de sjældnere er relevante for gamle sæsoner. "
+                         help="Kør resultat-trinnet (9/9) med --all-stages i stedet for kun seneste etape, "
+                              "og spring rytterbilleder (4/9) over, da de sjældnere er relevante for gamle sæsoner. "
                               "Sættes automatisk til True hvis --year peger på en tidligere sæson end indeværende.")
     args = parser.parse_args()
     pcs_slug = args.pcs_slug.lower().strip()
@@ -135,36 +147,40 @@ def main():
     steps = [
         (
             [py, "startlist_agent.py", pcs_slug, *year_args],
-            "1/8 Startliste (PCS)",
+            "1/9 Startliste (PCS)",
         ),
         (
             [py, "stage_pcs_agent.py", pcs_slug, *year_args],
-            "2/8 Etapedata og basisprofilbilleder (PCS)",
+            "2/9 Etapedata og basisprofilbilleder (PCS)",
         ),
         (
             [py, "pcs_profile_image_agent.py", "--race", db_slug, "--overwrite"],
-            "3/8 Høj-kvalitets profilbilleder (/info/profiles)",
+            "3/9 Høj-kvalitets profilbilleder (/info/profiles)",
         ),
         (
             [py, "rider_photo_agent.py", "--race", db_slug],
-            "4/8 Rytterbilleder",
+            "4/9 Rytterbilleder",
         ),
         (
             [py, "rider_stats_agent.py", "--race", db_slug],
-            "5/8 Rytterstats (vægt + højde)",
+            "5/9 Rytterstats (vægt + højde)",
+        ),
+        (
+            [py, "gpx_climb_agent.py", "--race", db_slug],
+            "6/9 Stigninger — opret stage_climbs-rækker (PCS)",
         ),
         (
             [py, "climbfinder_agent.py", "--race", db_slug],
-            "6/8 Stigningsprofiler (ClimbFinder)",
+            "7/9 Stigningsprofiler (ClimbFinder)",
         ),
         (
             [py, "climb_profile_generator.py", "--race", db_slug, "--all",
              "--style", "full", "--write-db"],
-            "7/8 Stigningsprofiler-fallback (GPX-generator)",
+            "8/9 Stigningsprofiler-fallback (GPX-generator)",
         ),
         (
             [py, "results_agent.py", "--race", db_slug, *(["--all-stages"] if historic else [])],
-            "8/8 Resultater + klassement" + (" (alle etaper, historisk)" if historic else " (seneste etape)"),
+            "9/9 Resultater + klassement" + (" (alle etaper, historisk)" if historic else " (seneste etape)"),
         ),
     ]
 
@@ -172,7 +188,7 @@ def main():
     # stoppet, ingen SEO-værdi i friske fotos af en gammel startliste) — spring
     # trinnet over ved --historic i stedet for at bruge tid/PCS-kald på det.
     if historic:
-        steps = [(cmd, label) for cmd, label in steps if not label.startswith("4/8")]
+        steps = [(cmd, label) for cmd, label in steps if not label.startswith("4/9")]
 
     results = []
     for cmd, label in steps:

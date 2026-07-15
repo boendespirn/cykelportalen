@@ -515,9 +515,27 @@ def save_stages(race_id: str, stages: list[dict]) -> None:
         if record.get("elevation_image_url") is None:
             record.pop("elevation_image_url", None)
         records.append(record)
-    ok = sb_upsert("stages", records, "race_id,stage_number")
-    if ok:
-        print(f"  Gemt {len(records)} etaper i DB")
+
+    # PostgREST kræver identisk nøglesæt på tværs af ALLE objekter i én
+    # batch-POST ("All object keys must match", PGRST102) — ellers afvises
+    # HELE batchen, stille, uden at nogen af etaperne bliver gemt (STG-022).
+    # Da nogle rækker mangler elevation_image_url-nøglen (se ovenfor) og
+    # andre ikke, splitter vi i homogene sub-batches efter nøglesæt i stedet
+    # for én blandet batch.
+    saved = 0
+    by_keyset: dict[tuple, list[dict]] = {}
+    for record in records:
+        by_keyset.setdefault(tuple(sorted(record.keys())), []).append(record)
+    all_ok = True
+    for batch in by_keyset.values():
+        ok = sb_upsert("stages", batch, "race_id,stage_number")
+        all_ok = all_ok and ok
+        if ok:
+            saved += len(batch)
+    if all_ok:
+        print(f"  Gemt {saved} etaper i DB")
+    else:
+        print(f"  Gemt {saved}/{len(records)} etaper i DB (én eller flere sub-batches fejlede — se [DB FEJL] ovenfor)")
 
 
 # ── Hovedprogram ──────────────────────────────────────────────────────────────
