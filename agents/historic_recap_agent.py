@@ -242,10 +242,12 @@ def extract_json(text: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Claude sætter nogle gange en ugyldig \' -escape om apostroffer i
-        # navne (fx "O\'Connor") — \' findes ikke i JSON-spec'en. Retter og
-        # prøver igen, i stedet for at fejle hele etapen for en kosmetisk fejl.
-        fixed = text.replace("\\'", "'")
+        # Claude sætter nogle gange en ugyldig backslash-escape ind (typisk om
+        # en apostrof i et navn, fx "O\'Connor" — \' findes ikke i JSON-
+        # spec'en, men optræder ikke-deterministisk afhængig af genereringen).
+        # Fjerner enhver backslash der ikke starter en GYLDIG JSON-escape,
+        # i stedet for kun at fejle hele etapen for en kosmetisk fejl.
+        fixed = re.sub(r'\\(?!["\\/bfnrtu])', "", text)
         return json.loads(fixed)
 
 
