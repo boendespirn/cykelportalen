@@ -91,15 +91,37 @@ def get_races():
     race_ids = [r["id"] for r in races]
     id_list = ",".join(race_ids)
     stage_data = requests.get(
-        f"{SUPABASE_URL}/rest/v1/stages?race_id=in.({id_list})&select=race_id",
+        f"{SUPABASE_URL}/rest/v1/stages?race_id=in.({id_list})&select=race_id,stage_number,elevation_image_url"
+        f"&order=race_id.asc,stage_number.asc",
         headers=get_headers(),
     ).json()
     stage_counts: dict[str, int] = {}
+    # ready_through_stage: højeste SAMMENHÆNGENDE etapenummer fra 1, hvor
+    # elevation_image_url er sat — bruges af sitemap.ts til at afgøre hvilke
+    # historiske etapesider reelt er backfillet (ikke stadig skeleton-data),
+    # så vi ikke genindfører 404'er i sitemappet (jf. SEO-019/SEO-022/SEO-023).
+    stages_by_race: dict[str, list[dict]] = {}
     for row in stage_data:
         rid = row["race_id"]
         stage_counts[rid] = stage_counts.get(rid, 0) + 1
+        stages_by_race.setdefault(rid, []).append(row)
+
+    ready_through: dict[str, int] = {}
+    for rid, rows in stages_by_race.items():
+        rows_sorted = sorted(rows, key=lambda r: r["stage_number"] or 0)
+        ready = 0
+        for i, row in enumerate(rows_sorted, start=1):
+            if row["stage_number"] != i or not row.get("elevation_image_url"):
+                break
+            ready = i
+        ready_through[rid] = ready
+
     return [
-        {**{k: v for k, v in r.items() if k != "id"}, "stage_count": stage_counts.get(r["id"], 0)}
+        {
+            **{k: v for k, v in r.items() if k != "id"},
+            "stage_count": stage_counts.get(r["id"], 0),
+            "ready_through_stage": ready_through.get(r["id"], 0),
+        }
         for r in races
     ]
 
@@ -227,7 +249,7 @@ def get_stage_detail(slug: str, stage_number: int):
         f"?race_id=eq.{race_id}&stage_number=eq.{stage_number}&limit=1"
         f"&select=stage_number,name,date,distance_km,stage_type,start_location,finish_location,"
         f"elevation_gain_m,profile_score,elevation_image_url,pcs_stage_url,"
-        f"description,finish_type,fun_facts,stage_start_time,route_points"
+        f"description,finish_type,fun_facts,stage_start_time,route_points,historic_recap"
     )
     stage_res = requests.get(stage_url, headers=get_headers())
     stage_data = stage_res.json()
@@ -600,7 +622,7 @@ def get_rider_stage_wins(slug: str):
     url = (
         f"{SUPABASE_URL}/rest/v1/results"
         f"?rider_id=eq.{rider_id}&position=eq.1&stage_id=not.is.null"
-        f"&select=stages(stage_number,finish_location,date,races(name,slug))"
+        f"&select=stages(stage_number,finish_location,date,elevation_image_url,races(name,slug))"
     )
     data = requests.get(url, headers=get_headers()).json()
     if not isinstance(data, list):
@@ -659,7 +681,7 @@ def get_rider_palmares(slug: str):
     wins_res = requests.get(
         f"{SUPABASE_URL}/rest/v1/results"
         f"?rider_id=eq.{rider_id}&position=eq.1&stage_id=not.is.null"
-        f"&select=stages(stage_number,date,finish_location,races(name,slug,start_date))"
+        f"&select=stages(stage_number,date,finish_location,elevation_image_url,races(name,slug,start_date))"
         f"&order=stages(date).desc&limit=100",
         headers=get_headers(),
     )

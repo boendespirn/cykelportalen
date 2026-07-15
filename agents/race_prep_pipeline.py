@@ -30,6 +30,16 @@ Pipeline-trin (i rækkefølge):
                           igangværende løb (som i stedet kører uden --all-stages,
                           løbende efter hver etape — se docstring i results_agent.py).
 
+Ved --historic (letvægts-flow, jf. docs/superpowers/specs/2026-07-15-historiske-
+etapesider-letvaegt.md): trin 6-8 (individuelle stigningsprofiler) springes bevidst
+over — det var den reelle flaskehals for at levere historiske sider hurtigt, og
+historiske sider viser kun hel-etape-højdeprofilen (fra trin 2), ikke pr.-stigning-
+nedbrydning. I stedet tilføjes et nyt afsluttende trin:
+ 10. Historisk fortælling — historic_recap_agent.py --all-stages. Kører EFTER
+                          resultater (trin 9), da narrativ-agenten bruger vores
+                          egne verificerede etaperesultater som faktuel grundlag
+                          sammen med TourTracker-kilden (se agents/tourtracker_id_map.json).
+
 Bemærk: `--year` er kun understøttet af trin 1-2 (startlist_agent.py/stage_pcs_agent.py),
 som er de eneste trin, der tager et bart PCS-slug og selv skal udlede DB-slug/PCS-URL.
 Trin 3-9 tager alle `--race DB-SLUG` (som allerede indeholder årstallet, fx
@@ -187,8 +197,16 @@ def main():
     # Rytterbilleder er lavere prioritet for historiske sæsoner (mange ryttere
     # stoppet, ingen SEO-værdi i friske fotos af en gammel startliste) — spring
     # trinnet over ved --historic i stedet for at bruge tid/PCS-kald på det.
+    # Stignings-trinnene (6-8) springes også over ved --historic — historiske
+    # sider viser bevidst ikke individuelle stigningsprofiler (se spec i
+    # docstringen ovenfor); det var den reelle flaskehals for hurtig levering.
     if historic:
-        steps = [(cmd, label) for cmd, label in steps if not label.startswith("4/9")]
+        skip_prefixes = ("4/9", "6/9", "7/9", "8/9")
+        steps = [(cmd, label) for cmd, label in steps if not label.startswith(skip_prefixes)]
+        steps.append((
+            [py, "historic_recap_agent.py", "--race", db_slug, "--all-stages"],
+            "10/9 Historisk fortælling (narrativ-agent)",
+        ))
 
     results = []
     for cmd, label in steps:

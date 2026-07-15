@@ -30,6 +30,7 @@ type Stage = {
   fun_facts: string[] | null;
   stage_start_time: string | null;
   route_points: [number, number][] | null;
+  historic_recap: string | null;
 };
 
 type Race = { id: string; name: string; slug: string };
@@ -185,6 +186,18 @@ async function getEffectiveClassification(
   if (frozen.standings.length > 0) {
     return { standings: frozen.standings, afterStage: parseInt(n) };
   }
+  return fetchClassificationStandings(`${API_BASE}/races/${slug}/classifications/${classifType}`);
+}
+
+// Historiske etapesider viser altid løbets ENDELIGE klassement (som det så ud
+// ved målstregen i sidste etape) — aldrig et etape-frosset øjebliksbillede,
+// da det ville antyde en live-udvikling for et løb, der er afsluttet for år
+// siden (jf. spec: docs/superpowers/specs/2026-07-15-historiske-etapesider-letvaegt.md
+// og CLAUDE.md's regel om ingen live-funktioner).
+async function getFinalClassification(
+  slug: string,
+  classifType: "gc" | "points" | "mountains" | "youth"
+): Promise<ClassificationResult> {
   return fetchClassificationStandings(`${API_BASE}/races/${slug}/classifications/${classifType}`);
 }
 
@@ -371,13 +384,17 @@ export async function generateMetadata(
   props: { params: Promise<{ slug: string; n: string }> }
 ): Promise<Metadata> {
   const { slug, n } = await props.params;
-  if (isHistoricRaceSlug(slug)) return { title: "Etape ikke fundet" };
   const [detail, results] = await Promise.all([
     getStageDetail(slug, n),
     getStageResults(slug, n),
   ]);
   if (!detail) return { title: "Etape ikke fundet" };
   const { stage, race } = detail;
+  // Historisk etape uden backfillet data (samme signal som linking-tjekket
+  // i [slug]/page.tsx og riders/[slug]/page.tsx) — ikke klar til visning endnu.
+  if (isHistoricRaceSlug(slug) && !stage.elevation_image_url) {
+    return { title: "Etape ikke fundet" };
+  }
   const finish = stage.finish_location ?? "";
   const start = stage.start_location ?? "";
   const winner = results[0]?.riders;
@@ -414,12 +431,22 @@ export default async function StagePage(props: {
   params: Promise<{ slug: string; n: string }>;
 }) {
   const { slug, n } = await props.params;
-  if (isHistoricRaceSlug(slug)) {
-    notFound();
-  }
+  const isHistoric = isHistoricRaceSlug(slug);
 
   const result = await getStageDetail(slug, n);
   if (!result) {
+    notFound();
+  }
+
+  const { stage, race } = result;
+
+  // Datafuldstændigheds-tjek for historiske etaper — IKKE et stage_climbs-tjek
+  // (individuelle stigningsprofiler springes bevidst over for historiske sider,
+  // se spec). elevation_image_url sættes af stage_pcs_agent.py (trin 2 i
+  // race_prep_pipeline.py) og er derfor et pålideligt signal for, om
+  // letvægts-pipelinen reelt er kørt for denne etape — samme signal som
+  // linking-tjekket på løbs- og rytterside samt sitemap.ts/api.py.
+  if (isHistoric && !stage.elevation_image_url) {
     notFound();
   }
 
@@ -431,8 +458,6 @@ export default async function StagePage(props: {
       permanentRedirect(`/${slug}`);
     }
   }
-
-  const { stage, race } = result;
 
   const [
     startlist,
@@ -450,10 +475,10 @@ export default async function StagePage(props: {
     getBroadcast(slug),
     getAllStages(slug),
     getStageResults(slug, n),
-    getEffectiveClassification(slug, n, "gc"),
-    getEffectiveClassification(slug, n, "points"),
-    getEffectiveClassification(slug, n, "mountains"),
-    getEffectiveClassification(slug, n, "youth"),
+    isHistoric ? getFinalClassification(slug, "gc") : getEffectiveClassification(slug, n, "gc"),
+    isHistoric ? getFinalClassification(slug, "points") : getEffectiveClassification(slug, n, "points"),
+    isHistoric ? getFinalClassification(slug, "mountains") : getEffectiveClassification(slug, n, "mountains"),
+    isHistoric ? getFinalClassification(slug, "youth") : getEffectiveClassification(slug, n, "youth"),
   ]);
 
   const gcStandings = gcResult.standings;
@@ -470,6 +495,8 @@ export default async function StagePage(props: {
   // Etaperesultater findes altid pr. etape, klassementet kan enten være frosset
   // for netop denne etape eller falde tilbage til det nyeste tilgængelige — så
   // panelets overskrift skal afspejle, hvilken etape dataene reelt er fra.
+  // For historiske etaper er dette altid None (getFinalClassification sætter
+  // aldrig afterStage) — titlen viser i stedet "Løbets endelige klassement".
   const classificationAfterStage =
     gcResult.afterStage ?? pointsResult.afterStage ?? mountainsResult.afterStage ?? youthResult.afterStage;
 
@@ -493,7 +520,12 @@ export default async function StagePage(props: {
   const typeConfig = stage.stage_type
     ? STAGE_TYPE_CONFIG[stage.stage_type]
     : null;
-  const { riders: recommendedRiders, localSlugs } = getRidersForStage(startlist, stage.stage_type, climbs);
+  // Historiske sider viser bevidst hverken individuelle stigningsprofiler
+  // eller "lokal favorit"-mærkning (jf. spec) — climbs tvinges tom her, så
+  // begge dele udebliver uanset evt. tiloversblevne stage_climbs-rækker fra
+  // før letvægts-revisionen.
+  const effectiveClimbs = isHistoric ? [] : climbs;
+  const { riders: recommendedRiders, localSlugs } = getRidersForStage(startlist, stage.stage_type, effectiveClimbs);
   const danishRiders = startlist.filter(
     (e) => e.riders?.nationality === "DK"
   );
@@ -614,11 +646,25 @@ export default async function StagePage(props: {
         )}
       </header>
 
-      {/* Højdeprofil + individuelle stigninger */}
+      {/* Højdeprofil + individuelle stigninger (kun hel-etape-profil for historiske sider) */}
       <ClimbProfile
-        climbs={climbs}
+        climbs={effectiveClimbs}
         elevationImageUrl={stage.elevation_image_url}
       />
+
+      {/* Historisk fortælling — kun historiske sider, kun når narrativ-agenten har skrevet én */}
+      {isHistoric && stage.historic_recap && (
+        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+              Historisk tilbageblik
+            </span>
+          </div>
+          <div className="p-5 text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+            {stage.historic_recap}
+          </div>
+        </div>
+      )}
 
       {/* Etapeinfo */}
       {(stage.description || stage.fun_facts?.length || stage.stage_start_time) && (
@@ -769,7 +815,9 @@ export default async function StagePage(props: {
         {hasClassificationData && (
           <Disclosure
             title={
-              classificationAfterStage !== null
+              isHistoric
+                ? "Løbets endelige klassement"
+                : classificationAfterStage !== null
                 ? `Klassement efter etape ${classificationAfterStage}`
                 : "Klassement"
             }

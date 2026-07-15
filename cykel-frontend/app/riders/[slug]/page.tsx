@@ -45,6 +45,7 @@ type StageWin = {
     stage_number: number;
     finish_location: string;
     date: string;
+    elevation_image_url: string | null;
     races: { name: string; slug: string } | null;
   } | null;
 };
@@ -400,6 +401,9 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
                 const s = win.stages;
                 if (!s || !s.races) return null;
                 const historic = isHistoricRaceSlug(s.races.slug);
+                // Samme backfill-fuldstændigheds-signal som løbssiden/sitemap —
+                // link kun til historiske etapesider der reelt har data.
+                const linkable = !historic || !!s.elevation_image_url;
                 const inner = (
                   <>
                     <span className="text-emerald-400 font-mono font-bold text-sm w-8 flex-shrink-0">
@@ -415,7 +419,7 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
                     </div>
                   </>
                 );
-                if (historic) {
+                if (!linkable) {
                   return (
                     <div
                       key={i}

@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { API_BASE } from "@/lib/api";
+import { isHistoricRaceSlug } from "@/lib/historic-stage";
 
 const BASE = "https://klassementet.dk";
 
@@ -14,41 +15,49 @@ async function safeFetch<T>(url: string): Promise<T[]> {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [allRaces, riders, teams, news] = await Promise.all([
-    safeFetch<{ slug: string; start_date: string; end_date: string | null; stage_count: number; category: string }>(`${API_BASE}/races`),
+  const [races, riders, teams, news] = await Promise.all([
+    safeFetch<{
+      slug: string; start_date: string; end_date: string | null;
+      stage_count: number; ready_through_stage: number; category: string;
+    }>(`${API_BASE}/races`),
     safeFetch<{ slug: string }>(`${API_BASE}/riders`),
     safeFetch<{ slug: string }>(`${API_BASE}/teams`),
     safeFetch<{ slug: string; published_at: string }>(`${API_BASE}/news?limit=500`),
   ]);
 
-  // Prioritér WorldTour-løb og igangværende/kommende løb højere
+  // Alle løb er med (historiske løb er ikke længere udelukket, jf.
+  // SEO-022/SEO-023-backfillen — historiske sider skal kunne findes af
+  // Google), men prioritet/opdateringshyppighed differentierer stadig
+  // igangværende løb højest.
   const today = new Date().toISOString().slice(0, 10);
-  const races = allRaces.filter(
-    (r) => !r.end_date || r.end_date >= new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0, 10)
-  );
 
   const raceUrls: MetadataRoute.Sitemap = races.map((r) => {
     const isOngoing = r.start_date <= today && (!r.end_date || r.end_date >= today);
     return {
       url: `${BASE}/${r.slug}`,
       lastModified: r.start_date,
-      changeFrequency: isOngoing ? "hourly" : "weekly",
-      priority: isOngoing ? 1.0 : 0.9,
+      changeFrequency: isOngoing ? "hourly" : isHistoricRaceSlug(r.slug) ? "monthly" : "weekly",
+      priority: isOngoing ? 1.0 : isHistoricRaceSlug(r.slug) ? 0.5 : 0.9,
     };
   });
 
   // Etsdagsløb (stage_count <= 1) har al deres info på løbssiden selv —
   // /stage/1 redirecter permanent dertil, så den skal ikke i sitemappet.
+  // For historiske løb medtages KUN etaper der reelt er backfillet
+  // (ready_through_stage — se api.py get_races()) — ellers genindfører vi
+  // præcis det 404-i-sitemap-problem SEO-019 oprindeligt fjernede.
   const stageUrls: MetadataRoute.Sitemap = races
     .filter((r) => (r.stage_count ?? 0) > 1)
-    .flatMap((r) =>
-      Array.from({ length: r.stage_count ?? 0 }, (_, i) => ({
+    .flatMap((r) => {
+      const historic = isHistoricRaceSlug(r.slug);
+      const count = historic ? Math.min(r.ready_through_stage ?? 0, r.stage_count ?? 0) : (r.stage_count ?? 0);
+      return Array.from({ length: count }, (_, i) => ({
         url: `${BASE}/${r.slug}/stage/${i + 1}`,
         lastModified: r.start_date,
-        changeFrequency: "daily" as const,
-        priority: 0.8,
-      }))
-    );
+        changeFrequency: historic ? ("monthly" as const) : ("daily" as const),
+        priority: historic ? 0.5 : 0.8,
+      }));
+    });
 
   const riderUrls: MetadataRoute.Sitemap = riders.map((r) => ({
     url: `${BASE}/riders/${r.slug}`,

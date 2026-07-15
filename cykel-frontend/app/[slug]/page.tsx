@@ -982,10 +982,16 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 const isCompleted = status === "completed";
                 const isToday = status === "today";
                 const historic = isHistoricRaceSlug(race.slug);
+                // Historiske etaper linkes kun når de reelt er backfillet
+                // (elevation_image_url sat af stage_pcs_agent.py, trin 2 i
+                // race_prep_pipeline.py) — ellers linker vi til en 404, som
+                // var præcis det, SEO-019 fjernede. Se samme signal i
+                // api.py get_races() (ready_through_stage) for sitemap.ts.
+                const linkable = !historic || !!stage.elevation_image_url;
                 const cardClass = `rounded-xl border overflow-hidden transition-colors ${
-                  isToday     ? "border-emerald-500/40 bg-emerald-500/5" + (historic ? "" : " hover:border-emerald-500/60")
-                  : isCompleted ? "border-slate-800/50 bg-slate-900/20" + (historic ? "" : " hover:border-slate-700/60")
-                  :               "border-slate-800/80 bg-slate-900/40" + (historic ? "" : " hover:border-slate-700")
+                  isToday     ? "border-emerald-500/40 bg-emerald-500/5" + (linkable ? " hover:border-emerald-500/60" : "")
+                  : isCompleted ? "border-slate-800/50 bg-slate-900/20" + (linkable ? " hover:border-slate-700/60" : "")
+                  :               "border-slate-800/80 bg-slate-900/40" + (linkable ? " hover:border-slate-700" : "")
                 }`;
                 const card = (
                     <div className={cardClass}>
@@ -1030,7 +1036,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                       </div>
                     </div>
                 );
-                if (historic) {
+                if (!linkable) {
                   return <div key={stage.stage_number}>{card}</div>;
                 }
                 return (
