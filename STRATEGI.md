@@ -1,6 +1,6 @@
 # klassementet.dk — STRATEGI (bestyrelsens direktiv)
 
-*Sidst opdateret: 2026-07-07*
+*Sidst opdateret: 2026-07-15*
 
 Dette er det foranderlige direktiv. Det læses **hver kørsel** og vægter over generelle antagelser — men **aldrig over de hårde guardrails i `CLAUDE.md`**. Når virkeligheden ændrer sig, opdateres denne fil; `CLAUDE.md` står fast.
 
@@ -26,7 +26,17 @@ Den dobbelte hensigt gælder hele tiden: eksekvér hurtigt på at få **trafik n
 
 ## Aktuelle prioriteter (i rækkefølge)
 
-### 1. Indeksering — den eksistentielle flaskehals
+### 1. Landingssider — indeværende sæson + sidste 5 år (nyt, 2026-07-15)
+
+Google er begyndt at indeksere siden bredt. Det betyder, at flaskehalsen skifter fra "bliver vi fundet?" til "hvad finder Google, når det leder?" — søgeresultater der reelt leverer indhold, ikke 404'er.
+
+- **Mål:** samme fulde landingssidestruktur som Tour de France 2026's allerede-kørte etaper (stigningsprofil, favoritter/startliste, fulde resultater+klassement, TV, kort) skal findes for (a) **alle løb i indeværende sæson**, og (b) **alle løb de sidste 5 afsluttede sæsoner (2021-2025)**.
+- **Baggrund:** `7daaf30`/SEO-019 (2026-07-10) fjernede historiske etapesider (404) som akut fix på et Ahrefs-fund om langsomme sider (TTFB op til 4,7 sek). En data-audit 2026-07-15 viser at problemet stikker dybere end performance: 2021-2025 har reelt **ingen** stigningsprofiler, højdeprofilbilleder eller startlister i databasen — kun skeleton-etapedata. Detaljeret fase-plan i `docs/superpowers/plans/2026-07-15-historiske-landingssider-5-aar.md`.
+- **Rækkefølge:** indeværende sæson (2026, alle løb — ikke kun TdF) færdiggøres først; derefter historisk backfill prioriteret Tour de France → Giro/Vuelta → de 5 Monuments → øvrige WorldTour-etapeløb → resterende étdagsløb, jf. §9's trafik-/autoritetsprincip.
+- **Forudsætning, ikke valgfri:** pipeline-scripts (`startlist_agent.py` m.fl.) er i dag hardkodet til `YEAR=2026` og skal årgang-parameteriseres, og etapesidens performance-rod (ucachede backend-kald, `cache: "no-store"` på startliste) skal rettes, FØR nogen historisk side genåbnes — ellers gentages SEO-019-fejlen i 5× skala.
+- Se plan-dokumentet for fuld fase-opdeling (0-4) og data-status pr. årgang.
+
+### 2. Indeksering — den eksistentielle flaskehals
 
 - Implementér **SEO native i Next.js** (Metadata API, `sitemap.ts`, JSON-LD struktureret data), tilslut Google Search Console, og opsæt IndexNow.
 - Brug AI til at arbejde med **SERP-/meta-tekster** for at maksimere click-through rate, når Google belønner os med eksponeringer.
@@ -39,14 +49,14 @@ Den dobbelte hensigt gælder hele tiden: eksekvér hurtigt på at få **trafik n
 - **Det on-page/tekniske arbejde er nu i praksis gjort** (Metadata API, sitemap, JSON-LD, IndexNow — se `state/issues.md` SEO-003 til SEO-012). Seneste kontrol (2026-07-06, SEO-001) viser dog, at kun 3 af 26 tjekkede URL'er reelt er indekseret, og mønsteret ("Discovered - not indexed" / "unknown to Google") peger på et **autoritets-/intern linking-problem, ikke en teknisk blokering**.
 - **Derfor er dette ikke passiv ventetid:** research-agenten skal løbende undersøge de reelle årsager til, at Google ikke indekserer siderne (autoritetssignaler, linkbuilding-taktikker, hvordan sammenlignelige sites er kommet igennem samme flaskehals), og præsentere konkrete, eksekverbare metoder til at forbedre præcis dette punkt — som et vedvarende forbedringsspor, ikke en engangsopgave.
 
-### 2. Marketing — kvalitet, kvantitet og en AI-eksekverbar strategi
+### 3. Marketing — kvalitet, kvantitet og en AI-eksekverbar strategi
 
 - Byg et marketing-setup, så siden kan vækste med trafik via **Facebook, Instagram og TikTok**.
 - Slå det vigtigste op på de medier på en god måde, der **styrker brandet — aldrig skader det** (jf. brand-afsnittet i `CLAUDE.md`: lækkert, kun det vigtige, ingen clickbait).
-- **Både kvaliteten og kvantiteten af marketing-materialet har i dag reelt forbedringspotentiale.** Mens vi venter på nye Google-rapporter om indekseringen (se punkt 1), skal tiden bruges fornuftigt på at gøre dette spor bedre: en **strømlinet, let eksekverbar strategi** — drevet så vidt muligt af AI (videogenerering, content-formater, automatiserede workflows) — så mængden af godt marketing-materiale kan øges uden at gå på kompromis med kvaliteten eller brandet.
-- Dette hænger sammen med at **geare siden til kommende løb og ekstra trafik** (resten af Tour de France, og løb derefter) — flere velforberedte besøgende via andre kanaler end Google styrker i sidste ende også autoritets-/trafiksignalet, der hjælper indekseringen i punkt 1.
+- **Både kvaliteten og kvantiteten af marketing-materialet har i dag reelt forbedringspotentiale.** Mens vi venter på nye Google-rapporter om indekseringen (se punkt 2), skal tiden bruges fornuftigt på at gøre dette spor bedre: en **strømlinet, let eksekverbar strategi** — drevet så vidt muligt af AI (videogenerering, content-formater, automatiserede workflows) — så mængden af godt marketing-materiale kan øges uden at gå på kompromis med kvaliteten eller brandet.
+- Dette hænger sammen med at **geare siden til kommende løb og ekstra trafik** (resten af Tour de France, og løb derefter) — flere velforberedte besøgende via andre kanaler end Google styrker i sidste ende også autoritets-/trafiksignalet, der hjælper indekseringen i punkt 2.
 
-### 3. Data-korrekthed — stigningsagenten
+### 4. Data-korrekthed — stigningsagenten
 
 - Sikr at al vores data passer — herunder at vi viser de **aktuelle bjergstigninger for Tour de France** korrekt.
 - Opdater **stigningsagenten** med nye metoder til at finde de rigtige stigningsprofiler for de enkelte stigninger, rytterne skal køre op ad i et løb. *Den detaljerede fremgangsmåde ligger i stigningsagentens egen fil.*
