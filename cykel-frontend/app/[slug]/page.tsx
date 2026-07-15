@@ -25,6 +25,7 @@ type Stage = {
   elevation_gain_m: number | null; profile_score: number | null;
   elevation_image_url: string | null; pcs_stage_url: string | null;
   stage_start_time: string | null;
+  historic_recap: string | null;
 };
 
 type StartlistEntry = {
@@ -435,6 +436,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
   const isOngoing   = race.start_date <= today && (!race.end_date || race.end_date >= today);
   const isOneDay    = race.race_type === "oneday";
+  const isHistoric  = isHistoricRaceSlug(race.slug);
   const singleStage = isOneDay && stages.length > 0 ? stages[0] : null;
   const completedStages = stages.filter((s) => stageStatus(s.date, today) === "completed");
   const todayStage  = stages.find((s) => stageStatus(s.date, today) === "today") ?? null;
@@ -585,6 +587,22 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           <div className="mb-8 rounded-2xl overflow-hidden border border-slate-800">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={singleStage.elevation_image_url} alt="Højdeprofil" className="w-full" />
+          </div>
+        )}
+
+        {/* Historisk fortælling — kun for étdagsløb (den eneste "etape" redirecter
+            permanent til denne side, se [slug]/stage/[n]/page.tsx, så det er her,
+            ikke på en etapeside, en étdagsløbs historic_recap skal vises) */}
+        {isOneDay && isHistoric && singleStage?.historic_recap && (
+          <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+                Historisk tilbageblik
+              </span>
+            </div>
+            <div className="p-5 text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+              {singleStage.historic_recap}
+            </div>
           </div>
         )}
 
