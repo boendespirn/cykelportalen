@@ -74,9 +74,41 @@ allerede er begyndt at ranke på søgeord.
   pre-race-beskrivelser af kommende etaper (anden tone og formål: forudsigende
   vs. tilbageskuende).
 
-## Åbne spørgsmål (afventer ejeren — stillet i sessionen 2026-07-15)
+## Kildegrundlag — afklaret 2026-07-15
 
-1. **Kildegrundlag:** hvilken kilde/kilder skal AI'en bruge til at skrive
-   verificerbart om, hvordan en historisk etape forløb?
-2. **"Kendt/nyhedsværdig"-kriterium:** hvornår skrives der en fuld fortælling
-   vs. kun en kort faktuel opsummering?
+Ejeren pegede på `https://live.tourtrackerprocycling.com/` (TourTracker).
+Testet grundigt samme dag mod Tour de France 2024:
+
+- Siden er en SPA uden per-løb-URL'er, men de underliggende data-endpoints kan
+  kaldes direkte (uden om UI'en): `secure.tourtrackerdata.com/tours/{TOUR_ID}/jsonp/...`.
+- **`reports/stage{N}reports.jsonp`** — kort, professionelt skrevet recap
+  (~150 ord) pr. etape. Eksempel (TdF 2024, etape 21): *"Pogacar wins final
+  stage, claims grand tour double... Pogacar made light work of the climbs to
+  La Turbie and Col d'Èze to take the time trial win by a considerable 1'03"
+  margin from Jonas Vingegaard..."*
+- **`plays/stage{N}plays.jsonp`** — rig, tidsstemplet blow-by-blow-kommentering:
+  rutebeskrivelse, historisk kontekst, rytterform, GC/point/bjerg/ungdom ved
+  etapestart, og løbende feltkommentering.
+- **Copyright:** teksten er tydeligvis TourTrackers egen redaktionelle
+  licensindhold — bruges som **faktuel funderingskilde**, aldrig republiceret
+  ordret (jf. `CLAUDE.md` §7). AI'en skriver egen, original tekst informeret
+  af disse fakta.
+- **Løbs-ID-mapping bygget:** `agents/build_tourtracker_id_map.py` matcher
+  vores `races.slug` mod TourTrackers interne tour-ID'er (år + dato ±5 dage +
+  navnelighed, kun herreløb) via deres samlede kalender-endpoint
+  (`apps/cyclingnews/2021/jsonp/tours.jsonp`, ét kald giver hele 2013-2026).
+  **133 af 212 DB-løb matchet** — dækker Tour de France (alle år), Giro,
+  Vuelta, alle 5 Monuments, og stort set alle øvrige WorldTour-etapeløb i
+  planens prioritet 1-4. De ~79 umatchede er primært lavere-prioritets
+  étdagsløb/sprintklassikere (Tour Down Under, UAE Tour, GP Québec/Montréal,
+  Cyclassics, Renewi, Bretagne Classic m.fl.), som TourTracker ikke dækker
+  lige så dybt. Output: `agents/tourtracker_id_map.json`.
+
+## Åbent spørgsmål (afventer stadig ejeren)
+
+1. **"Kendt/nyhedsværdig"-kriterium:** ejeren har allerede valgt "kun hvis
+   kilden reelt har noget at fortælle" som styrende princip (ingen
+   forudbestemt liste — kvaliteten af det fundne i `reports`/`plays` afgør).
+   Næste skridt er at omsætte det til en konkret regel i narrativ-generatoren
+   (fx: skriv fuld fortælling, hvis `reports`-teksten er til stede og har en
+   vis længde/informationstæthed; ellers kort faktuel opsummering).
