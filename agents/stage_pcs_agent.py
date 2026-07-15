@@ -558,5 +558,7 @@ if __name__ == "__main__":
     p = _ap.ArgumentParser()
     p.add_argument("slug", nargs="?", default=None)
     p.add_argument("--oneday", action="store_true", help="Scraper løbets hovedside (endagsløb)")
+    p.add_argument("--year", type=int, default=YEAR, help="Sæsonår, fx 2023 (default: indeværende sæson)")
     args = p.parse_args()
+    YEAR = args.year
     asyncio.run(run(args.slug, oneday=args.oneday))

@@ -6,12 +6,14 @@ Bruger Playwright fordi PCS har Cloudflare-beskyttelse.
 Krav: pip install playwright && playwright install chromium
 
 Kør: python startlist_agent.py
-Eller for ét løb: python startlist_agent.py tour-de-france-2026
+Eller for ét løb: python startlist_agent.py tour-de-france
+Eller for en historisk sæson: python startlist_agent.py tour-de-france --year 2023
 """
 
 import os
 import re
 import sys
+import argparse
 import asyncio
 import requests
 from slugify import slugify
@@ -22,7 +24,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 BASE_URL = "https://www.procyclingstats.com"
-YEAR = 2026
+YEAR = 2026  # overskrives af --year ved kørsel som script (se __main__)
 
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -449,6 +451,14 @@ async def run(target_slug: str | None = None):
     print("\n\nFærdig!")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("pcs_slug", nargs="?", default=None, help="PCS race-slug, fx tour-de-france")
+    parser.add_argument("--year", type=int, default=YEAR, help="Sæsonår, fx 2023 (default: indeværende sæson)")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else None
-    asyncio.run(run(target))
+    args = parse_args()
+    YEAR = args.year
+    asyncio.run(run(args.pcs_slug))

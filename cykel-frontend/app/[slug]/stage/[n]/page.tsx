@@ -113,7 +113,7 @@ async function getStageDetail(
 async function getStartlist(slug: string): Promise<StartlistEntry[]> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/startlist`, {
-      cache: "no-store",
+      next: { revalidate: 300 },
     });
     if (!res.ok) return [];
     return res.json();

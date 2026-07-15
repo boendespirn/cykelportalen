@@ -3,9 +3,10 @@ race_prep_pipeline.py
 Kører alle agenter der er nødvendige for at gøre et løb klar til publikation.
 
 Bruger:
-  python race_prep_pipeline.py tour-de-suisse        # bruger PCS-slug
+  python race_prep_pipeline.py tour-de-suisse                # indeværende sæson, bruger PCS-slug
   python race_prep_pipeline.py tour-de-france
   python race_prep_pipeline.py giro-d-italia
+  python race_prep_pipeline.py tour-de-france --year 2023    # historisk sæson
 
 Pipeline-trin (i rækkefølge):
   1. Startliste         — henter alle ryttere med bib-numre fra PCS
@@ -18,16 +19,31 @@ Pipeline-trin (i rækkefølge):
                           stigninger ClimbFinder ikke fandt/verificerede.
                           Springer automatisk og ufarligt over løb uden
                           konfigureret GPX-kilde (se CYCLINGSTAGE_GPX_PAGES).
+  8. Resultater          — results_agent.py --all-stages. For et afsluttet (historisk)
+                          løb hentes samtlige etapers resultater+klassement i denne
+                          kørsel, i modsætning til den løbende opdatering under et
+                          igangværende løb (som i stedet kører uden --all-stages,
+                          løbende efter hver etape — se docstring i results_agent.py).
 
-Kør resultater separat (løbende under løbet):
-  python giro_results_agent.py --db-slug RACE-SLUG-2026 --pcs-slug PCS-SLUG --stages N
+Bemærk: `--year` er kun understøttet af trin 1-2 (startlist_agent.py/stage_pcs_agent.py),
+som er de eneste trin, der tager et bart PCS-slug og selv skal udlede DB-slug/PCS-URL.
+Trin 3-8 tager alle `--race DB-SLUG` (som allerede indeholder årstallet, fx
+"tour-de-france-2023") og er derfor årgang-agnostiske i sig selv.
 """
 
 import subprocess
 import sys
 import os
+import io
 import requests
 from dotenv import load_dotenv
+
+# Windows' standard konsol-codepage (cp1252) kan ikke encode emoji/pile (▶/✓/✗)
+# i print()-kaldene nedenfor — krasjer med UnicodeEncodeError, når stdout ikke
+# er en interaktiv UTF-8-terminal (fx redirected til en logfil). Samme fix som
+# stage_pcs_agent.py allerede bruger.
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 load_dotenv()
 
@@ -90,55 +106,73 @@ def run(cmd: list[str], label: str) -> bool:
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Brug: python race_prep_pipeline.py <pcs-slug>")
-        print("Eks:  python race_prep_pipeline.py tour-de-suisse")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("pcs_slug", help="PCS race-slug, fx tour-de-suisse")
+    parser.add_argument("--year", type=int, default=None,
+                         help="Sæsonår, fx 2023 (default: indeværende sæson, jf. startlist_agent.YEAR)")
+    parser.add_argument("--historic", action="store_true",
+                         help="Kør resultat-trinnet (8/8) med --all-stages i stedet for kun seneste etape, "
+                              "og spring rytterbilleder (4/8) over, da de sjældnere er relevante for gamle sæsoner. "
+                              "Sættes automatisk til True hvis --year peger på en tidligere sæson end indeværende.")
+    args = parser.parse_args()
+    pcs_slug = args.pcs_slug.lower().strip()
 
-    pcs_slug = sys.argv[1].lower().strip()
-
-    from startlist_agent import PCS_TO_DB_SLUG, YEAR
+    from startlist_agent import PCS_TO_DB_SLUG, YEAR as CURRENT_YEAR
+    year = args.year if args.year is not None else CURRENT_YEAR
+    historic = args.historic or year < CURRENT_YEAR
     db_base = PCS_TO_DB_SLUG.get(pcs_slug, pcs_slug)
-    db_slug = f"{db_base}-{YEAR}"
+    db_slug = f"{db_base}-{year}"
 
     print(f"\nRace Prep Pipeline")
     print(f"PCS-slug : {pcs_slug}")
     print(f"DB-slug  : {db_slug}")
-    print(f"År       : {YEAR}")
+    print(f"År       : {year}{' (historisk)' if historic else ''}")
 
     py = sys.executable
+    year_args = ["--year", str(year)]
 
     steps = [
         (
-            [py, "startlist_agent.py", pcs_slug],
-            "1/7 Startliste (PCS)",
+            [py, "startlist_agent.py", pcs_slug, *year_args],
+            "1/8 Startliste (PCS)",
         ),
         (
-            [py, "stage_pcs_agent.py", pcs_slug],
-            "2/7 Etapedata og basisprofilbilleder (PCS)",
+            [py, "stage_pcs_agent.py", pcs_slug, *year_args],
+            "2/8 Etapedata og basisprofilbilleder (PCS)",
         ),
         (
             [py, "pcs_profile_image_agent.py", "--race", db_slug, "--overwrite"],
-            "3/7 Høj-kvalitets profilbilleder (/info/profiles)",
+            "3/8 Høj-kvalitets profilbilleder (/info/profiles)",
         ),
         (
             [py, "rider_photo_agent.py", "--race", db_slug],
-            "4/7 Rytterbilleder",
+            "4/8 Rytterbilleder",
         ),
         (
             [py, "rider_stats_agent.py", "--race", db_slug],
-            "5/7 Rytterstats (vægt + højde)",
+            "5/8 Rytterstats (vægt + højde)",
         ),
         (
             [py, "climbfinder_agent.py", "--race", db_slug],
-            "6/7 Stigningsprofiler (ClimbFinder)",
+            "6/8 Stigningsprofiler (ClimbFinder)",
         ),
         (
             [py, "climb_profile_generator.py", "--race", db_slug, "--all",
              "--style", "full", "--write-db"],
-            "7/7 Stigningsprofiler-fallback (GPX-generator)",
+            "7/8 Stigningsprofiler-fallback (GPX-generator)",
+        ),
+        (
+            [py, "results_agent.py", "--race", db_slug, *(["--all-stages"] if historic else [])],
+            "8/8 Resultater + klassement" + (" (alle etaper, historisk)" if historic else " (seneste etape)"),
         ),
     ]
+
+    # Rytterbilleder er lavere prioritet for historiske sæsoner (mange ryttere
+    # stoppet, ingen SEO-værdi i friske fotos af en gammel startliste) — spring
+    # trinnet over ved --historic i stedet for at bruge tid/PCS-kald på det.
+    if historic:
+        steps = [(cmd, label) for cmd, label in steps if not label.startswith("4/8")]
 
     results = []
     for cmd, label in steps:
@@ -150,9 +184,10 @@ def main():
     for label, ok in results:
         print(f"  {'✓' if ok else '✗'} {label}")
 
-    print(f"\nNæste trin når løbet kører:")
-    print(f"  python giro_results_agent.py --db-slug {db_slug} --pcs-slug {pcs_slug} --stages N")
-    print(f"  (kør efter hver etape er afsluttet)")
+    if not historic:
+        print(f"\nNæste trin når løbet kører:")
+        print(f"  python results_agent.py --race {db_slug}")
+        print(f"  (kør efter hver etape er afsluttet, uden --all-stages)")
 
     notify_indexnow(db_slug)
 

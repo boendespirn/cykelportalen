@@ -21,6 +21,11 @@ from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
 
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+# Ovenstående alene virker ikke, da stdouts encoding allerede er låst ved
+# interpreter-opstart — samme fix som resten af agents/-scripts bruger.
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -66,6 +71,19 @@ def get_latest_finished_stage(race_id: str) -> dict | None:
     )
     data = res.json()
     return data[0] if res.ok and data else None
+
+
+def get_all_stages(race_id: str) -> list[dict]:
+    """Alle etaper for et løb, ældste først — til historisk backfill (--all-stages),
+    hvor vi vil have resultater for samtlige etaper, ikke kun den seneste."""
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages"
+        f"?race_id=eq.{race_id}"
+        f"&select=id,stage_number,pcs_stage_url,date"
+        f"&order=stage_number.asc",
+        headers=AUTH,
+    )
+    return res.json() if res.ok else []
 
 
 def get_rider_id_by_slug(slug: str) -> str | None:
@@ -457,7 +475,7 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def process(race_slug: str | None, stage_number: int | None) -> None:
+def process(race_slug: str | None, stage_number: int | None, all_stages: bool = False) -> None:
     if race_slug:
         races = [get_race(race_slug)]
         races = [r for r in races if r]
@@ -481,6 +499,8 @@ def process(race_slug: str | None, stage_number: int | None) -> None:
                 headers=AUTH,
             )
             stages = res.json() if res.ok else []
+        elif all_stages:
+            stages = get_all_stages(race_id)
         else:
             stage = get_latest_finished_stage(race_id)
             stages = [stage] if stage else []
@@ -554,5 +574,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--race",  help="Loeb-slug (default: alle igangvaerende)", default=None)
     parser.add_argument("--stage", type=int, help="Specifik etape (default: seneste afsluttede)", default=None)
+    parser.add_argument("--all-stages", action="store_true", help="Alle etaper for løbet (til historisk backfill) i stedet for kun den seneste")
     args = parser.parse_args()
-    process(args.race, args.stage)
+    process(args.race, args.stage, args.all_stages)
