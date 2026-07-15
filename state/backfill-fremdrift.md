@@ -182,7 +182,9 @@ Tirreno-Adriatico (7/7), Paris-Nice (8/8), Santos Tour Down Under (6/6),
 Tour of Guangxi (6/6, DB-only "short"-tilstand — ingen TourTracker-mapping),
 Renewi Tour (5/5, DB-only), Tour de Pologne (7/7, DB-only),
 UAE Tour (7/7, DB-only), Milano-Sanremo (1/1), Liège-Bastogne-Liège (1/1),
-Il Lombardia (1/1). Paris-Roubaix (1/1) — se DATA-002-note nedenfor.
+Il Lombardia (1/1), Paris-Roubaix (1/1), Ronde van Vlaanderen (1/1) —
+**alle 5 Monuments 2025 nu dækket.** De sidste to krævede duplikat-
+oprydning pga. DATA-002 (se nedenfor) — begge løst.
 
 **Elevation_image_url / "siden er klar til visning":** kun Tour de France
 har fået opmærksomhed her (10/21, se note ovenfor i filen). De øvrige
@@ -191,9 +193,6 @@ har fået opmærksomhed her (10/21, se note ovenfor i filen). De øvrige
 åbne deres etapesider/synliggøre étdagsløbenes historic_recap.
 
 **Ikke gjort endnu, samme dag:**
-- Ronde van Vlaanderen 2025: forkert PCS-slug gættet manuelt
-  ("ronde-van-vlaanderen-tour-des-flandres-me"), PCS-siden gav "ingen
-  profildata" — ikke undersøgt videre, samme klasse problem som DATA-002.
 - Øvrige 2025 WorldTour étdagsløb (E3, Gent-Wevelgem, Amstel Gold Race,
   Flèche Wallonne, Strade Bianche, GP Québec/Montréal m.fl.) — laveste
   2025-prioritet ("resterende étdagsløb" i rækkefølgen), ikke påbegyndt.
