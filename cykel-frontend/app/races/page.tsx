@@ -1,6 +1,5 @@
 export const revalidate = 60;
 
-import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { API_BASE } from "@/lib/api";
@@ -183,15 +182,10 @@ export default async function RacesPage() {
                     {ts ? (
                       <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
                         {ts.elevation_image_url && (
-                          <div className="relative h-20">
-                            <Image
-                              src={ts.elevation_image_url}
-                              alt={`Højdeprofil etape ${ts.stage_number}`}
-                              fill
-                              sizes="(max-width: 896px) 100vw, 896px"
-                              className="object-cover object-bottom"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent" />
+                          <div className="h-20 flex items-center justify-center bg-slate-900/60">
+                            <span className="font-display text-xl tracking-widest text-slate-600">
+                              ETAPE {ts.stage_number}
+                            </span>
                           </div>
                         )}
                         <div className="px-4 py-3">

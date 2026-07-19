@@ -15,7 +15,14 @@ type Climb = {
   gradient_sections: GradientSection[] | null;
   profile_image_url: string | null;
   veloviewer_segment_id: number | null;
+  source: string | null;
 };
+
+// Kun Veloviewer-embeds og vores egne genererede profiler vises — aldrig
+// hotlinkede billeder fra tredjepart (fx ClimbFinder, source="vision"). Se LEG-001.
+function hasOwnProfileImage(c: Climb): boolean {
+  return !!c.profile_image_url && c.source === "generated";
+}
 
 function avg4kmBuckets(sections: GradientSection[]): { km: number; gradient: number }[] {
   if (sections.length === 0) return [];
@@ -227,7 +234,7 @@ function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
 function hasVisualProfile(c: Climb): boolean {
   return !!(
     c.veloviewer_segment_id ||
-    c.profile_image_url ||
+    hasOwnProfileImage(c) ||
     (c.gradient_sections && c.gradient_sections.length > 0)
   );
 }
@@ -327,7 +334,7 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
               )}
             </div>
 
-            {/* VeloViewer 3D-embed foretrækkes — derefter ClimbFinder-billede (lightbox), derefter egen graf */}
+            {/* VeloViewer 3D-embed foretrækkes — derefter egen genereret profil (lightbox), derefter egen graf */}
             {activeClimb.veloviewer_segment_id ? (
               <iframe
                 src={`https://veloviewer.com/segments/${activeClimb.veloviewer_segment_id}/embed`}
@@ -335,7 +342,7 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
                 scrolling="no"
                 title={activeClimb.name}
               />
-            ) : activeClimb.profile_image_url ? (
+            ) : hasOwnProfileImage(activeClimb) ? (
               <button
                 className="block w-full text-left cursor-zoom-in"
                 onClick={() => setLightboxUrl(activeClimb.profile_image_url!)}
@@ -343,7 +350,7 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={activeClimb.profile_image_url}
+                  src={activeClimb.profile_image_url!}
                   alt={activeClimb.name}
                   className="w-full rounded-lg"
                 />

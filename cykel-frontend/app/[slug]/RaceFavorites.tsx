@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -71,20 +70,11 @@ function RiderRow({ entry, rank, isPoints }: { entry: Standing; rank: number; is
         {rank}
       </span>
 
-      {/* Foto eller flag */}
+      {/* Flag (rytterfotos vises ikke — se LEG-001) */}
       <div className="relative flex-shrink-0 w-9 h-9">
-        {r.photo_url ? (
-          <Image src={r.photo_url} alt={r.name} fill sizes="36px" className="rounded-full object-cover object-top" />
-        ) : (
-          <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-base">
-            {flagEmoji(r.nationality)}
-          </div>
-        )}
-        {r.nationality && r.photo_url && (
-          <span className="absolute -bottom-0.5 -right-0.5 text-[9px] leading-none">
-            {flagEmoji(r.nationality)}
-          </span>
-        )}
+        <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-base">
+          {flagEmoji(r.nationality)}
+        </div>
       </div>
 
       {/* Navn + hold */}

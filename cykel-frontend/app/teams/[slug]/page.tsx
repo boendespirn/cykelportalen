@@ -2,7 +2,6 @@ export const revalidate = 3600;
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 
@@ -210,19 +209,9 @@ export default async function TeamPage(props: { params: Promise<{ slug: string }
                 href={`/riders/${rider.slug}`}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-800/60 bg-slate-900/30 hover:border-slate-600 hover:bg-slate-900/60 transition-colors group"
               >
-                {/* Photo or flag */}
+                {/* Flag (rytterfoto vises ikke — se LEG-001) */}
                 <div className="relative flex-shrink-0 w-12 h-12 rounded-full overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center">
-                  {rider.photo_url ? (
-                    <Image
-                      src={rider.photo_url}
-                      alt={rider.name}
-                      fill
-                      sizes="48px"
-                      className="object-cover object-top"
-                    />
-                  ) : (
-                    <span className="text-xl">{flagEmoji(rider.nationality)}</span>
-                  )}
+                  <span className="text-xl">{flagEmoji(rider.nationality)}</span>
                 </div>
 
                 {/* Info */}

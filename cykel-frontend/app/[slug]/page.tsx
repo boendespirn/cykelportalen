@@ -2,7 +2,6 @@ export const revalidate = 60;
 
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
@@ -371,7 +370,11 @@ export async function generateMetadata(
       ? `${formatDate(race.start_date)} – ${formatDate(race.end_date)}`
       : formatDate(race.start_date)
     : null;
-  const isOneDay = race.race_type === "oneday";
+  // DB har historisk brugt to forskellige vaerdier for etdagsloeb ("one_day"
+  // hos 101 loeb, "oneday" hos kun 21) - tjek begge i stedet for kun den ene,
+  // saa vi ikke stille behandler 101 etdagsloeb som etapeloeb (fundet under
+  // SEO-023-arbejdet: bl.a. alle 5 Monuments havde "one_day").
+  const isOneDay = race.race_type === "oneday" || race.race_type === "one_day";
   const description = isOneDay
     ? `${race.name} ${year}${dateRange ? ` (${dateRange})` : ""}: favoritter, ruteinfo, højdeprofil og resultat fra dette enkeltdagsløb — se det hele på Klassementet.`
     : `${race.name} ${year}${dateRange ? ` (${dateRange})` : ""}: alle ${stages.length || ""} etaper med startliste, favoritter, højdeprofiler og klassement.`;
@@ -389,7 +392,7 @@ export async function generateMetadata(
       siteName: "Klassementet",
       locale: "da_DK",
       type: "website",
-      images: race.cover_image_url ? [{ url: race.cover_image_url }] : [],
+      images: [],
     },
   };
 }
@@ -522,7 +525,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     sport: "Cycling",
     startDate: race.start_date,
     endDate: race.end_date ?? race.start_date,
-    ...(race.cover_image_url ? { image: race.cover_image_url } : {}),
     location: {
       "@type": "Place",
       name: race.name,
@@ -579,14 +581,6 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 PCS →
               </a>
             )}
-          </div>
-        )}
-
-        {/* Elevation profile — full width, prominent */}
-        {singleStage?.elevation_image_url && (
-          <div className="mb-8 rounded-2xl overflow-hidden border border-slate-800">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={singleStage.elevation_image_url} alt="Højdeprofil" className="w-full" />
           </div>
         )}
 
@@ -726,18 +720,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         Alle løb
       </Link>
 
-      {race.cover_image_url && (
-        <div className="relative mb-8 -mx-6 sm:mx-0 rounded-none sm:rounded-2xl overflow-hidden border-y sm:border border-slate-800 h-64 sm:h-96">
-          <Image
-            src={race.cover_image_url}
-            alt={`${race.name} rutekort`}
-            fill
-            sizes="(max-width: 896px) 100vw, 896px"
-            className="object-cover"
-            priority
-          />
-        </div>
-      )}
+      {/* Rutekort-hero vises ikke (kilde uden brugsret — se LEG-001) */}
 
       {header}
 
@@ -797,12 +780,12 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 )}
               </div>
             </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={heroStage.elevation_image_url}
-              alt={`Højdeprofil etape ${heroStage.stage_number}`}
-              className="w-full"
-            />
+            {/* Højdeprofilbillede vises ikke (se LEG-001) */}
+            <div className="w-full py-10 flex items-center justify-center bg-slate-900/60">
+              <span className="font-display text-4xl sm:text-5xl tracking-widest text-slate-600">
+                ETAPE {heroStage.stage_number}
+              </span>
+            </div>
             {heroStage.start_location && heroStage.finish_location && (
               <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-800">
                 <span className="text-sm text-slate-400">{heroStage.start_location}</span>
@@ -838,13 +821,9 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                   <Link key={r.slug} href={`/riders/${r.slug}`}
                     className="group flex flex-col items-center gap-1.5 text-center">
                     <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-slate-800 group-hover:border-slate-600 transition-colors">
-                      {r.photo_url ? (
-                        <Image src={r.photo_url} alt={r.name} fill sizes="(max-width: 896px) 20vw, 140px" className="object-cover object-top" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-2xl">
-                          {flagEmoji(r.nationality)}
-                        </div>
-                      )}
+                      <div className="w-full h-full flex items-center justify-center text-2xl">
+                        {flagEmoji(r.nationality)}
+                      </div>
                       <span className="absolute top-1 left-1 text-[10px] font-mono font-bold text-white/90 bg-black/50 px-1 rounded leading-4">
                         #{r.uci_ranking}
                       </span>
@@ -881,11 +860,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                   <Link key={r.slug} href={`/riders/${r.slug}`}
                     className="group flex flex-col items-center gap-1.5 text-center">
                     <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-red-900/40 group-hover:border-red-700/40 transition-colors">
-                      {r.photo_url ? (
-                        <Image src={r.photo_url} alt={r.name} fill sizes="(max-width: 896px) 20vw, 140px" className="object-cover object-top" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-2xl">🇩🇰</div>
-                      )}
+                      <div className="w-full h-full flex items-center justify-center text-2xl">🇩🇰</div>
                       {r.uci_ranking != null && (
                         <span className="absolute top-1 left-1 text-[10px] font-mono font-bold text-white/90 bg-black/50 px-1 rounded leading-4">
                           #{r.uci_ranking}
@@ -1014,8 +989,10 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 const card = (
                     <div className={cardClass}>
                       {stage.elevation_image_url && (
-                        <div className={`relative w-full h-28 bg-slate-950 border-b border-slate-800/60 ${isCompleted ? "opacity-50" : ""}`}>
-                          <Image src={stage.elevation_image_url} alt="" fill sizes="(max-width: 640px) 100vw, 33vw" className="object-cover" />
+                        <div className={`relative w-full h-28 bg-slate-950 border-b border-slate-800/60 flex items-center justify-center ${isCompleted ? "opacity-50" : ""}`}>
+                          <span className="font-display text-2xl tracking-widest text-slate-700">
+                            ETAPE {stage.stage_number}
+                          </span>
                           {isCompleted && (
                             <div className="absolute inset-0 flex items-center justify-center">
                               <svg className="w-5 h-5 text-emerald-500 drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

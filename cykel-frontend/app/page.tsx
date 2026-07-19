@@ -247,12 +247,11 @@ export default async function Home() {
                     {ts ? (
                       <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
                         {ts.elevation_image_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={ts.elevation_image_url}
-                            alt={`Højdeprofil etape ${ts.stage_number}`}
-                            className="w-full"
-                          />
+                          <div className="w-full py-6 flex items-center justify-center bg-slate-900/60">
+                            <span className="font-display text-xl tracking-widest text-slate-600">
+                              ETAPE {ts.stage_number}
+                            </span>
+                          </div>
                         )}
                         <div className="px-4 py-3">
                           <div className="flex items-center justify-between">

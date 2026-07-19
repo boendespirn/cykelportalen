@@ -588,7 +588,7 @@ def get_stage_climbs(slug: str, stage_number: int):
     url = (
         f"{SUPABASE_URL}/rest/v1/stage_climbs"
         f"?stage_id=eq.{stage_id}"
-        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,gradient_sections,profile_image_url,veloviewer_segment_id,region"
+        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,gradient_sections,profile_image_url,veloviewer_segment_id,region,source"
         f"&order=sort_order.asc"
     )
     return requests.get(url, headers=get_headers()).json()

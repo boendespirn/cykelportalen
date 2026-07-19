@@ -2,7 +2,6 @@ export const revalidate = 3600;
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
@@ -227,7 +226,6 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
     jobTitle: rider.speciality ?? "Professionel cykelrytter",
     memberOf: rider.teams ? { "@type": "SportsTeam", name: rider.teams.name } : undefined,
     nationality: rider.nationality ?? undefined,
-    image: rider.photo_url ?? undefined,
     url: `https://klassementet.dk/riders/${slug}`,
   };
 
@@ -246,22 +244,11 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
 
       {/* Hero: photo + name */}
       <div className="flex flex-col sm:flex-row gap-6 sm:gap-8 mb-8">
-        {/* Photo */}
+        {/* Foto vises ikke — se LEG-001 */}
         <div className="flex-shrink-0">
-          {rider.photo_url ? (
-            <Image
-              src={rider.photo_url}
-              alt={rider.name}
-              width={192}
-              height={192}
-              className="w-40 h-40 sm:w-48 sm:h-48 object-cover object-top rounded-2xl border border-slate-800 bg-slate-900"
-              priority
-            />
-          ) : (
-            <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-2xl border border-slate-800 bg-slate-900 flex items-center justify-center">
-              <span className="text-5xl">{flagEmoji(rider.nationality)}</span>
-            </div>
-          )}
+          <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-2xl border border-slate-800 bg-slate-900 flex items-center justify-center">
+            <span className="text-5xl">{flagEmoji(rider.nationality)}</span>
+          </div>
         </div>
 
         {/* Name + badges */}

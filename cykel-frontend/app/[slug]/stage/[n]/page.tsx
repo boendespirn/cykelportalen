@@ -2,7 +2,6 @@ export const revalidate = 300;
 
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
 import ClimbProfile from "./ClimbProfile";
@@ -66,6 +65,7 @@ type Climb = {
   profile_image_url: string | null;
   veloviewer_segment_id: number | null;
   region: string | null;
+  source: string | null;
 };
 
 type Broadcast = {
@@ -420,7 +420,7 @@ export async function generateMetadata(
       siteName: "Klassementet",
       locale: "da_DK",
       type: "website",
-      images: stage.elevation_image_url ? [{ url: stage.elevation_image_url }] : [],
+      images: [],
     },
   };
 }
@@ -541,7 +541,6 @@ export default async function StagePage(props: {
     description: stageDesc,
     sport: "Cycling",
     startDate: stage.date,
-    ...(stage.elevation_image_url ? { image: stage.elevation_image_url } : {}),
     location: {
       "@type": "Place",
       name: stage.finish_location ?? stage.start_location ?? race.name,
@@ -646,10 +645,11 @@ export default async function StagePage(props: {
         )}
       </header>
 
-      {/* Højdeprofil + individuelle stigninger (kun hel-etape-profil for historiske sider) */}
+      {/* Individuelle stigninger — hel-etape-billedet fra PCS vises ikke (se LEG-001),
+          kun Veloviewer-embeds og vores egne genererede profiler */}
       <ClimbProfile
         climbs={effectiveClimbs}
-        elevationImageUrl={stage.elevation_image_url}
+        elevationImageUrl={null}
       />
 
       {/* Historisk fortælling — kun historiske sider, kun når narrativ-agenten har skrevet én */}
@@ -787,11 +787,6 @@ export default async function StagePage(props: {
                     <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${podiumColors[r.position] ?? "text-slate-600"}`}>
                       {r.position}.
                     </span>
-                    {rider.photo_url && (
-                      <div className="relative w-7 h-7 flex-shrink-0">
-                        <Image src={rider.photo_url} alt="" fill sizes="28px" className="rounded-full object-cover object-top opacity-90" />
-                      </div>
-                    )}
                     <span className="text-sm flex-shrink-0">{flag}</span>
                     <Link
                       href={`/riders/${rider.slug}`}
@@ -934,26 +929,11 @@ export default async function StagePage(props: {
                       : "border-slate-800/60 bg-slate-900/30"
                   }`}
                 >
-                  {/* Foto eller flag */}
+                  {/* Flag (rytterfoto vises ikke — se LEG-001) */}
                   <div className="relative flex-shrink-0 w-10 h-10">
-                    {rider.photo_url ? (
-                      <Image
-                        src={rider.photo_url}
-                        alt={rider.name}
-                        fill
-                        sizes="40px"
-                        className="rounded-full object-cover object-top bg-slate-800"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-lg">
-                        {flagEmoji(rider.nationality)}
-                      </div>
-                    )}
-                    {rider.nationality && (
-                      <span className="absolute -bottom-0.5 -right-0.5 text-[10px] leading-none">
-                        {flagEmoji(rider.nationality)}
-                      </span>
-                    )}
+                    <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-lg">
+                      {flagEmoji(rider.nationality)}
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
@@ -1026,20 +1006,9 @@ export default async function StagePage(props: {
                   className="flex items-center gap-3 px-4 py-3 rounded-xl border border-red-800/40 bg-red-950/15 hover:border-red-700/50 hover:bg-red-950/25 transition-colors"
                 >
                   <div className="relative flex-shrink-0 w-10 h-10">
-                    {rider.photo_url ? (
-                      <Image
-                        src={rider.photo_url}
-                        alt={rider.name}
-                        fill
-                        sizes="40px"
-                        className="rounded-full object-cover object-top bg-slate-800"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-red-950/60 flex items-center justify-center text-lg">
-                        🇩🇰
-                      </div>
-                    )}
-                    <span className="absolute -bottom-0.5 -right-0.5 text-[10px] leading-none">🇩🇰</span>
+                    <div className="w-10 h-10 rounded-full bg-red-950/60 flex items-center justify-center text-lg">
+                      🇩🇰
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
