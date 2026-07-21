@@ -589,7 +589,10 @@ def get_stage_climbs(slug: str, stage_number: int):
         f"{SUPABASE_URL}/rest/v1/stage_climbs"
         f"?stage_id=eq.{stage_id}"
         f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,category,gradient_sections,profile_image_url,veloviewer_segment_id,region,source"
-        f"&order=sort_order.asc,km_from_start.asc"
+        # Kronologisk rækkefølge langs ruten (OPT-005). sort_order er 0 for
+        # samtlige rækker i DB og bærer derfor ingen information — den kan ikke
+        # bruges som primær nøgle uden at rækkefølgen bliver vilkårlig igen.
+        f"&order=km_from_start.asc.nullslast,id.asc"
     )
     return requests.get(url, headers=get_headers()).json()
 
