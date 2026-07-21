@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type GradientSection = { km: number; gradient: number };
 
@@ -242,6 +242,16 @@ function hasVisualProfile(c: Climb): boolean {
 export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
   const [activeIdx, setActiveIdx] = useState<number>(elevationImageUrl ? -1 : 0);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Venstre-til-højre-reveal må først starte når billedet er indlæst,
+  // ellers afspilles animationen over et tomt/halvindlæst billede.
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const profileImgRef = useRef<HTMLImageElement | null>(null);
+  // Cachede billeder kan være færdigindlæst FØR hydreringen når at montere
+  // onLoad-handleren — tjek derfor .complete ved mount, ellers forbliver
+  // billedet skjult (opacity-0).
+  useEffect(() => {
+    if (profileImgRef.current?.complete) setProfileLoaded(true);
+  }, []);
 
   const visibleClimbs = climbs.filter(hasVisualProfile);
 
@@ -293,7 +303,13 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
             aria-label="Åbn højdeprofil i fuld størrelse"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={elevationImageUrl} alt="Højdeprofil" className="w-full rounded" />
+            <img
+              ref={profileImgRef}
+              src={elevationImageUrl}
+              alt="Højdeprofil"
+              onLoad={() => setProfileLoaded(true)}
+              className={`w-full rounded ${profileLoaded ? "animate-profile-reveal" : "opacity-0"}`}
+            />
           </button>
         )}
 

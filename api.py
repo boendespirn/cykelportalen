@@ -248,8 +248,8 @@ def get_stage_detail(slug: str, stage_number: int):
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}&stage_number=eq.{stage_number}&limit=1"
         f"&select=stage_number,name,date,distance_km,stage_type,start_location,finish_location,"
-        f"elevation_gain_m,profile_score,elevation_image_url,pcs_stage_url,"
-        f"description,finish_type,fun_facts,stage_start_time,route_points,historic_recap"
+        f"elevation_gain_m,profile_score,elevation_image_url,elevation_image_source,sprints,"
+        f"pcs_stage_url,description,finish_type,fun_facts,stage_start_time,route_points,historic_recap"
     )
     stage_res = requests.get(stage_url, headers=get_headers())
     stage_data = stage_res.json()
@@ -588,8 +588,8 @@ def get_stage_climbs(slug: str, stage_number: int):
     url = (
         f"{SUPABASE_URL}/rest/v1/stage_climbs"
         f"?stage_id=eq.{stage_id}"
-        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,gradient_sections,profile_image_url,veloviewer_segment_id,region,source"
-        f"&order=sort_order.asc"
+        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,max_gradient,category,gradient_sections,profile_image_url,veloviewer_segment_id,region,source"
+        f"&order=sort_order.asc,km_from_start.asc"
     )
     return requests.get(url, headers=get_headers()).json()
 

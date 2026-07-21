@@ -189,6 +189,14 @@ def main():
             "8/9 Stigningsprofiler-fallback (GPX-generator)",
         ),
         (
+            [py, "aso_roadbook_agent.py", "--race", db_slug, "--write"],
+            "8b/9 Roadbook-fakta: stigningskategorier + mellemsprints (kun ASO-løb, ellers no-op)",
+        ),
+        (
+            [py, "stage_profile_generator.py", "--race", db_slug, "--all", "--write-db"],
+            "8c/9 Hel-etape-højdeprofil i eget design (GPX-generator, LEG-001-erstatning)",
+        ),
+        (
             [py, "results_agent.py", "--race", db_slug, *(["--all-stages"] if historic else [])],
             "9/9 Resultater + klassement" + (" (alle etaper, historisk)" if historic else " (seneste etape)"),
         ),

@@ -49,10 +49,11 @@ BUCKET = "stage-profiles"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 CYCLINGSTAGE_GPX_PAGES: dict[str, str] = {
-    "giro-d-italia-2026":         "https://www.cyclingstage.com/giro-2026-gpx",
-    "tour-de-france-2026":        "https://www.cyclingstage.com/tour-de-france-2026-gpx",
-    "criterium-du-dauphine-2026": "https://www.cyclingstage.com/criterium-du-dauphine-2026-gpx",
-    "tour-de-suisse-2026":        "https://www.cyclingstage.com/tour-de-suisse-2026-gpx",
+    "giro-d-italia-2026":              "https://www.cyclingstage.com/giro-2026-gpx",
+    "tour-de-france-2026":             "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "criterium-du-dauphine-2026":      "https://www.cyclingstage.com/criterium-du-dauphine-2026-gpx",
+    "tour-de-suisse-2026":             "https://www.cyclingstage.com/tour-de-suisse-2026-gpx",
+    "la-vuelta-ciclista-a-espana-2026": "https://www.cyclingstage.com/vuelta-2026-gpx/",
 }
 
 
@@ -123,18 +124,33 @@ def get_gpx_url_for_stage(race_slug: str, stage_number: int) -> str | None:
 
 
 def download_stage_gpx(race_slug: str, stage_number: int) -> list[tuple[float, float, float]] | None:
-    """Henter og parser den rå GPX-fil for en etape. None hvis ikke fundet/fejl."""
+    """Henter og parser den rå GPX-fil for en etape. None hvis ikke fundet/fejl.
+
+    Sidens link kan pege på en død filnavns-variant (bekræftet 2026-07-21:
+    tour-de-france-2026-gpx-siden linker etape 3-5 til "stage-N-parcours.gpx",
+    som 404'er på CDN'et, mens filerne reelt ligger som "stage-N-route.gpx") —
+    prøv derfor de kendte suffiks-varianter, før der gives op.
+    """
     gpx_url = get_gpx_url_for_stage(race_slug, stage_number)
     if not gpx_url:
         return None
-    res = requests.get(gpx_url, headers={"User-Agent": UA}, timeout=20)
-    if not res.ok:
-        return None
-    try:
-        return parse_gpx_with_elevation(res.text)
-    except ValueError as e:
-        print(f"    [GPX parse-fejl: {e}]")
-        return None
+    candidates = [gpx_url]
+    m = re.fullmatch(r"(.*stage-\d+)(?:-route|-parcours)?\.gpx", gpx_url)
+    if m:
+        for suffix in ("-parcours", "-route", ""):
+            alt = f"{m.group(1)}{suffix}.gpx"
+            if alt not in candidates:
+                candidates.append(alt)
+    for url in candidates:
+        res = requests.get(url, headers={"User-Agent": UA}, timeout=20)
+        if not res.ok:
+            continue
+        try:
+            return parse_gpx_with_elevation(res.text)
+        except ValueError as e:
+            print(f"    [GPX parse-fejl: {e}]")
+            return None
+    return None
 
 
 # ── Geometri ────────────────────────────────────────────────────────────────
@@ -199,6 +215,11 @@ def locate_climb_segment(
     """
     if stage_distance_km <= 0:
         raise ValueError("Ugyldig etapedistance")
+    if km_from_start < 0 or km_from_start > stage_distance_km:
+        raise ValueError(
+            f"km_from_start ({km_from_start} km) ligger uden for etapens distance "
+            f"({stage_distance_km} km) — sandsynligvis fejlaflæst kildedata"
+        )
 
     gpx_total = cum_dist[-1]
     scale = gpx_total / stage_distance_km

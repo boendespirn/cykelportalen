@@ -18,3 +18,24 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Hel-etape-højdeprofilen afsløres venstre-til-højre ved indlæsning
+   ("etapen køres") — bruges af ClimbProfile.tsx */
+@keyframes profile-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.animate-profile-reveal {
+  animation: profile-reveal 1.6s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-profile-reveal {
+    animation: none;
+  }
+}

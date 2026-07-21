@@ -23,6 +23,7 @@ type Stage = {
   elevation_gain_m: number | null;
   profile_score: number | null;
   elevation_image_url: string | null;
+  elevation_image_source: string | null;
   pcs_stage_url: string | null;
   description: string | null;
   finish_type: string | null;
@@ -420,7 +421,11 @@ export async function generateMetadata(
       siteName: "Klassementet",
       locale: "da_DK",
       type: "website",
-      images: [],
+      // Kun egengenererede profilbilleder må eksponeres (LEG-001)
+      images:
+        stage.elevation_image_source === "generated" && stage.elevation_image_url
+          ? [stage.elevation_image_url]
+          : [],
     },
   };
 }
@@ -532,6 +537,11 @@ export default async function StagePage(props: {
 
   const showMap = startCoords && finishCoords;
 
+  // Kun egengenererede hel-etape-profiler må vises (LEG-001) — samme
+  // gate-mønster som stage_climbs.source for de enkelte stigninger.
+  const generatedProfileUrl =
+    stage.elevation_image_source === "generated" ? stage.elevation_image_url : null;
+
   const winner = stageResults[0]?.riders;
   const stageDesc = `Etaperesultat og klassement for etape ${n} i ${race.name}: ${stage.start_location ?? ""}${stage.finish_location ? ` — ${stage.finish_location}` : ""}. Vinder: ${winner?.name ?? "ukendt"}.${stage.distance_km ? ` ${stage.distance_km} km.` : ""}`.trim();
   const jsonLd = winner ? {
@@ -540,6 +550,7 @@ export default async function StagePage(props: {
     name: `${race.name} – Etape ${stage.stage_number}`,
     description: stageDesc,
     sport: "Cycling",
+    ...(generatedProfileUrl ? { image: generatedProfileUrl } : {}),
     startDate: stage.date,
     location: {
       "@type": "Place",
@@ -645,11 +656,11 @@ export default async function StagePage(props: {
         )}
       </header>
 
-      {/* Individuelle stigninger — hel-etape-billedet fra PCS vises ikke (se LEG-001),
-          kun Veloviewer-embeds og vores egne genererede profiler */}
+      {/* Hel-etape-profil: kun vores egne genererede billeder (source="generated")
+          vises — gamle PCS-billeder (source=null) forbliver skjulte (LEG-001) */}
       <ClimbProfile
         climbs={effectiveClimbs}
-        elevationImageUrl={null}
+        elevationImageUrl={generatedProfileUrl}
       />
 
       {/* Historisk fortælling — kun historiske sider, kun når narrativ-agenten har skrevet én */}

@@ -112,6 +112,19 @@ class TestLocateClimbSegment(unittest.TestCase):
             locate_climb_segment(self.points, self.cum, stage_distance_km=0,
                                   km_from_start=1.0, length_km=2.0, db_climb=self.db_climb)
 
+    def test_raises_when_km_from_start_exceeds_stage_distance(self):
+        # Set fejlaflaest kildedata (fx vision-laesning der har blandet
+        # kumulativ etapeafstand ind) skal afvises frem for at crashe
+        # array-indekseringen laengere nede (STG-024).
+        with self.assertRaises(ValueError):
+            locate_climb_segment(self.points, self.cum, stage_distance_km=100.0,
+                                  km_from_start=469.0, length_km=8.3, db_climb=self.db_climb)
+
+    def test_raises_when_km_from_start_negative(self):
+        with self.assertRaises(ValueError):
+            locate_climb_segment(self.points, self.cum, stage_distance_km=100.0,
+                                  km_from_start=-5.0, length_km=8.3, db_climb=self.db_climb)
+
 
 class TestDeriveClimbStats(unittest.TestCase):
     def test_computes_elevation_gain_and_gradient(self):
