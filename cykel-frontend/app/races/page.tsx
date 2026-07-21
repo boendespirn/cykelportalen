@@ -38,6 +38,7 @@ type TodayStage = {
   finish_location: string | null;
   distance_km: string | null;
   elevation_image_url: string | null;
+  elevation_image_source: string | null;
 };
 
 type OngoingRace = Race & {
@@ -181,13 +182,27 @@ export default async function RacesPage() {
 
                     {ts ? (
                       <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
-                        {ts.elevation_image_url && (
+                        {/* Kun egengenererede højdeprofiler vises (LEG-001) */}
+                        {ts.elevation_image_source === "generated" && ts.elevation_image_url ? (
+                          <div className="w-full bg-slate-950">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={ts.elevation_image_url}
+                              alt={`Højdeprofil for etape ${ts.stage_number}`}
+                              width={3000}
+                              height={1000}
+                              loading="lazy"
+                              decoding="async"
+                              className="w-full h-auto"
+                            />
+                          </div>
+                        ) : ts.elevation_image_url ? (
                           <div className="h-20 flex items-center justify-center bg-slate-900/60">
                             <span className="font-display text-xl tracking-widest text-slate-600">
                               ETAPE {ts.stage_number}
                             </span>
                           </div>
-                        )}
+                        ) : null}
                         <div className="px-4 py-3">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 mb-1.5">
@@ -204,7 +219,7 @@ export default async function RacesPage() {
                               )}
                             </div>
                             <span className="text-[10px] text-emerald-400 font-medium mb-1.5">
-                              Se etapen →
+                              Læs mere om {race.name} →
                             </span>
                           </div>
                           <p className="text-sm text-slate-200">

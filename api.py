@@ -187,7 +187,7 @@ def get_ongoing_races():
         stages_url = (
             f"{SUPABASE_URL}/rest/v1/stages"
             f"?race_id=eq.{race['id']}"
-            f"&select=stage_number,date,stage_type,start_location,finish_location,distance_km,elevation_image_url,stage_start_time"
+            f"&select=stage_number,date,stage_type,start_location,finish_location,distance_km,elevation_image_url,elevation_image_source,stage_start_time"
             f"&order=stage_number.asc"
         )
         stages = requests.get(stages_url, headers=get_headers()).json()
@@ -227,7 +227,7 @@ def get_stages_for_race(slug: str):
     stages_url = (
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}"
-        f"&select=stage_number,name,date,distance_km,stage_type,start_location,finish_location,elevation_gain_m,profile_score,elevation_image_url,pcs_stage_url,stage_start_time,historic_recap"
+        f"&select=stage_number,name,date,distance_km,stage_type,start_location,finish_location,elevation_gain_m,profile_score,elevation_image_url,elevation_image_source,pcs_stage_url,stage_start_time,historic_recap"
         f"&order=stage_number.asc"
     )
     stages_res = requests.get(stages_url, headers=get_headers())

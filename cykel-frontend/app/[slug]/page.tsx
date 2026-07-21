@@ -22,10 +22,20 @@ type Stage = {
   distance_km: number | null; stage_type: string | null;
   start_location: string | null; finish_location: string | null;
   elevation_gain_m: number | null; profile_score: number | null;
-  elevation_image_url: string | null; pcs_stage_url: string | null;
+  elevation_image_url: string | null; elevation_image_source: string | null;
+  pcs_stage_url: string | null;
   stage_start_time: string | null;
   historic_recap: string | null;
 };
+
+/** Kun vores egengenererede højdeprofiler må vises (LEG-001) — gamle
+ *  PCS-billeder har elevation_image_source = null og forbliver skjulte. */
+function generatedProfileUrl(stage: {
+  elevation_image_url: string | null;
+  elevation_image_source: string | null;
+}): string | null {
+  return stage.elevation_image_source === "generated" ? stage.elevation_image_url : null;
+}
 
 type StartlistEntry = {
   bib_number: number | null; is_gc_captain: boolean; is_sprint_captain: boolean;
@@ -780,12 +790,26 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 )}
               </div>
             </div>
-            {/* Højdeprofilbillede vises ikke (se LEG-001) */}
-            <div className="w-full py-10 flex items-center justify-center bg-slate-900/60">
-              <span className="font-display text-4xl sm:text-5xl tracking-widest text-slate-600">
-                ETAPE {heroStage.stage_number}
-              </span>
-            </div>
+            {/* Egengenereret højdeprofil (LEG-001) — ellers tekstplaceholder */}
+            {generatedProfileUrl(heroStage) ? (
+              <div className="w-full bg-slate-950">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={generatedProfileUrl(heroStage)!}
+                  alt={`Højdeprofil for etape ${heroStage.stage_number}`}
+                  width={3000}
+                  height={1000}
+                  fetchPriority="high"
+                  className="w-full h-auto"
+                />
+              </div>
+            ) : (
+              <div className="w-full py-10 flex items-center justify-center bg-slate-900/60">
+                <span className="font-display text-4xl sm:text-5xl tracking-widest text-slate-600">
+                  ETAPE {heroStage.stage_number}
+                </span>
+              </div>
+            )}
             {heroStage.start_location && heroStage.finish_location && (
               <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-800">
                 <span className="text-sm text-slate-400">{heroStage.start_location}</span>
@@ -800,6 +824,13 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 )}
               </div>
             )}
+            <div className="px-5 py-3 border-t border-slate-800 bg-slate-900/40">
+              <span className="text-sm font-medium text-emerald-400 group-hover:text-emerald-300 transition-colors">
+                {todayStage && todayStage.stage_number === heroStage.stage_number
+                  ? "Læs mere om dagens etape"
+                  : `Læs mere om etape ${heroStage.stage_number}`} →
+              </span>
+            </div>
           </div>
         </Link>
       )}
@@ -989,10 +1020,27 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 const card = (
                     <div className={cardClass}>
                       {stage.elevation_image_url && (
-                        <div className={`relative w-full h-28 bg-slate-950 border-b border-slate-800/60 flex items-center justify-center ${isCompleted ? "opacity-50" : ""}`}>
-                          <span className="font-display text-2xl tracking-widest text-slate-700">
-                            ETAPE {stage.stage_number}
-                          </span>
+                        <div className={`relative w-full bg-slate-950 border-b border-slate-800/60 ${isCompleted ? "opacity-50" : ""}`}>
+                          {generatedProfileUrl(stage) ? (
+                            /* Lazy: en etapeliste har op til 21 profiler à ~340 KB —
+                               width/height holder pladsen, så der ikke sker layoutspring.
+                               eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={generatedProfileUrl(stage)!}
+                              alt={`Højdeprofil for etape ${stage.stage_number}`}
+                              width={3000}
+                              height={1000}
+                              loading="lazy"
+                              decoding="async"
+                              className="w-full h-auto"
+                            />
+                          ) : (
+                            <div className="h-28 flex items-center justify-center">
+                              <span className="font-display text-2xl tracking-widest text-slate-700">
+                                ETAPE {stage.stage_number}
+                              </span>
+                            </div>
+                          )}
                           {isCompleted && (
                             <div className="absolute inset-0 flex items-center justify-center">
                               <svg className="w-5 h-5 text-emerald-500 drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
