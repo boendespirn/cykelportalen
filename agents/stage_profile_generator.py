@@ -46,6 +46,7 @@ from climb_profile_generator import (  # noqa: E402
     resample_elevation_profile,
     _interp_at,
 )
+from profile_image_digitizer import digitize_stage_profile  # noqa: E402
 # Bemaerk: climb_profile_generator.py wrapper allerede sys.stdout til UTF-8 ved
 # import — wrapper det ikke igen her (dobbelt-wrapping lukker strommen).
 load_dotenv()
@@ -509,27 +510,40 @@ def process_stage(race_slug: str, stage_number: int, write_db: bool, overwrite: 
         return
 
     print(f"stage_profile_generator.py — {race_slug} etape {stage_number}")
+    distance_km_official = float(stage["distance_km"])
+
     print("Henter GPX...")
     points = download_stage_gpx(race_slug, stage_number)
-    if not points:
-        print("Kunne ikke hente/parse GPX-fil for denne etape — ingen kilde tilgængelig")
-        return
 
-    cum_dist = cumulative_distances_km(points)
-    gpx_total = cum_dist[-1]
-    distance_km_official = float(stage["distance_km"])
-    km_scale = gpx_total / distance_km_official
-    print(f"GPX: {len(points)} punkter, {gpx_total:.1f} km (officiel distance: {distance_km_official} km, "
-          f"skalafaktor {km_scale:.3f})")
-    # Vagt mod forkerte/foraeldede GPX-rutevarianter: normal afvigelse er op til
-    # ~5% (kurve-udjaevning; relativt stoerre paa korte etaper, derfor 3 km-gulv).
-    # Stoerre afvigelse tyder paa en anden rute — publicér ikke (korrekthed foer alt).
-    if abs(gpx_total - distance_km_official) > max(0.06 * distance_km_official, 3.0):
-        print(f"✗ GPX-distancen afviger {abs(gpx_total - distance_km_official):.1f} km fra officiel "
-              f"({distance_km_official} km) — ruten kan ikke verificeres, springer over")
-        return
-
-    resampled = resample_elevation_profile(points, n=1200)
+    if points:
+        cum_dist = cumulative_distances_km(points)
+        gpx_total = cum_dist[-1]
+        km_scale = gpx_total / distance_km_official
+        print(f"GPX: {len(points)} punkter, {gpx_total:.1f} km (officiel distance: {distance_km_official} km, "
+              f"skalafaktor {km_scale:.3f})")
+        # Vagt mod forkerte/foraeldede GPX-rutevarianter: normal afvigelse er op til
+        # ~5% (kurve-udjaevning; relativt stoerre paa korte etaper, derfor 3 km-gulv).
+        # Stoerre afvigelse tyder paa en anden rute — publicér ikke (korrekthed foer alt).
+        if abs(gpx_total - distance_km_official) > max(0.06 * distance_km_official, 3.0):
+            print(f"✗ GPX-distancen afviger {abs(gpx_total - distance_km_official):.1f} km fra officiel "
+                  f"({distance_km_official} km) — ruten kan ikke verificeres, springer over")
+            return
+        resampled = resample_elevation_profile(points, n=1200)
+    else:
+        # Ingen GPX-kilde (fx Tour de Pologne — hverken cyclingstage, PCS eller
+        # arrangoeren udstiller GPX, verificeret raat 2026-08-02). Fald tilbage
+        # til at digitalisere hoejdekurven fra arrangoerens OFFICIELLE
+        # profilbillede. Digitizeren validerer selv mod de officielle
+        # tophoejder og returnerer None, hvis kurven ikke kan verificeres.
+        print("Ingen GPX-kilde — prøver digitalisering af officielt profilbillede...")
+        resampled, dig_report = digitize_stage_profile(race_slug, stage_number)
+        if not resampled:
+            print(f"✗ {dig_report.get('error', 'digitalisering ikke mulig')} "
+                  f"— ingen kilde tilgængelig, springer over")
+            return
+        km_scale = 1.0   # digitaliserede km er allerede officielle km
+        print(f"Digitaliseret: {len(resampled)} punkter, max afvigelse "
+              f"{dig_report['max_deviation_m']:.0f} m mod officielle højder")
 
     # Alle stigninger med i billedet: kategoriserede som fremhaevede badges,
     # ukategoriserede (del-stigninger m.m.) som diskrete navnemarkoerer, saa

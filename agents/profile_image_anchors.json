@@ -1,0 +1,95 @@
+{
+  "_doc": [
+    "Kalibrerings- og valideringsankre til profile_image_digitizer.py.",
+    "Bruges KUN for løb uden GPX-kilde (se CYCLINGSTAGE_GPX_PAGES i",
+    "climb_profile_generator.py). Hvert anker er en OFFICIEL (km, højde i meter)",
+    "aflæst fra arrangørens eget profilbillede/roadbook — altså fakta, ikke billede.",
+    "De indre ankre kalibrerer pixel->meter; start/finish sættes direkte og",
+    "bruges sammen med de øvrige som uafhængig validering (max_deviation_m).",
+    "Kilde og aflæsningsdato står pr. løb, jf. CLAUDE.md §6 om sporbarhed."
+  ],
+  "tour-de-pologne-2026": {
+    "source_url_pattern": "https://www.tourdepologne.pl/wp-content/uploads/2026/mapy/{stage}-2.jpg",
+    "source_note": "Arrangørens officielle etapeprofil. Krydstjekket mod roadbook-2026.pdf (rutebogens km + kategori + tophøjde). Aflæst 2026-08-02.",
+    "max_deviation_m": 60,
+    "stages": {
+      "1": {
+        "total_km": 234.2,
+        "start_m": 53,
+        "finish_m": 36,
+        "anchors": [
+          [13.4, 155], [19.7, 197], [25.6, 220], [35.5, 207], [43.9, 177],
+          [57.5, 178], [63.2, 223], [71.8, 162], [87.2, 180], [98.4, 123],
+          [105.2, 119], [113.5, 116], [117.8, 130], [138.7, 116], [157.5, 52],
+          [166.2, 54], [189.0, 78], [206.5, 87], [216.2, 33], [227.9, 120]
+        ],
+        "summit_anchors": [227.9]
+      },
+      "2": {
+        "total_km": 150.1,
+        "start_m": 22,
+        "finish_m": 18,
+        "anchors": [
+          [12.1, 6], [20.2, 6], [38.8, 9], [60.6, 14], [71.2, 30],
+          [83.9, 54], [92.6, 50], [110.3, 9], [123.5, 0], [133.1, 3]
+        ],
+        "summit_anchors": []
+      },
+      "3": {
+        "total_km": 193.5,
+        "start_m": 66,
+        "finish_m": 137,
+        "anchors": [
+          [14.7, 65], [19.7, 43], [32.3, 75], [39.1, 45], [53.6, 29],
+          [79.8, 31], [86.6, 59], [99.0, 59], [103.0, 65], [112.5, 73],
+          [124.0, 80], [133.8, 102], [143.7, 87], [151.0, 67], [165.1, 58],
+          [172.5, 78], [181.6, 145]
+        ],
+        "summit_anchors": [181.6]
+      },
+      "4": {
+        "total_km": 176.0,
+        "start_m": 116,
+        "finish_m": 815,
+        "anchors": [
+          [15.1, 139], [32.0, 187], [45.4, 194], [55.2, 214], [67.6, 226],
+          [95.5, 367], [102.1, 378], [118.2, 573], [122.7, 534], [132.3, 422],
+          [142.5, 344], [154.5, 631], [168.2, 625], [171.7, 824]
+        ],
+        "summit_anchors": [118.2, 154.5, 171.7]
+      },
+      "5": {
+        "total_km": 218.9,
+        "start_m": 152,
+        "finish_m": 738,
+        "anchors": [
+          [8.7, 182], [21.0, 164], [33.0, 179], [40.4, 366], [59.1, 194],
+          [65.0, 189], [81.9, 283], [113.0, 262], [122.0, 287], [137.0, 257],
+          [146.0, 254], [155.5, 260], [166.5, 291], [179.9, 317], [190.4, 666],
+          [201.5, 332]
+        ],
+        "summit_anchors": [40.4, 190.4]
+      },
+      "6": {
+        "total_km": 125.5,
+        "start_m": 719,
+        "finish_m": 945,
+        "anchors": [
+          [2.6, 696], [6.2, 682], [13.8, 994], [22.9, 1082], [30.3, 813],
+          [40.3, 689], [52.0, 852], [64.9, 943], [74.0, 731], [83.5, 682],
+          [89.0, 943], [98.8, 709], [108.3, 683], [113.2, 943]
+        ],
+        "summit_anchors": [13.8, 22.9, 52.0, 64.9, 89.0, 113.2]
+      },
+      "7": {
+        "total_km": 12.5,
+        "start_m": 235,
+        "finish_m": 228,
+        "anchors": [
+          [2.2, 332], [5.7, 317], [9.0, 261]
+        ],
+        "summit_anchors": [2.2]
+      }
+    }
+  }
+}

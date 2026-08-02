@@ -34,8 +34,8 @@ SB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-CF_EMAIL    = "jonasb409@gmail.com"
-CF_PASSWORD = "luksusclimb123"
+CF_EMAIL    = os.getenv("CF_EMAIL", "")
+CF_PASSWORD = os.getenv("CF_PASSWORD", "")
 CF_BASE     = "https://uphill.climbfinder.com/v2"
 
 DELAY = 1.2
