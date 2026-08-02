@@ -156,6 +156,23 @@ def _despike(surface: dict[int, int]) -> dict[int, int]:
 
 # ── digitalisering ────────────────────────────────────────────────────────────
 
+def _interp(points: list[tuple[float, float]], x: float) -> float:
+    """Lineaer interpolation i en stigende (x, y)-liste, fladt uden for enderne."""
+    if not points:
+        return 0.0
+    if x <= points[0][0]:
+        return points[0][1]
+    if x >= points[-1][0]:
+        return points[-1][1]
+    for i in range(1, len(points)):
+        x1, y1 = points[i]
+        if x1 >= x:
+            x0, y0 = points[i - 1]
+            t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
+            return y0 + (y1 - y0) * t
+    return points[-1][1]
+
+
 def load_config(race_slug: str) -> dict | None:
     data = json.loads(ANCHOR_FILE.read_text(encoding="utf-8"))
     return data.get(race_slug)
@@ -283,21 +300,26 @@ def digitize_stage_profile(
         report["error"] = "for få punkter kunne udtrækkes"
         return None, report
 
-    # Yderpunkterne er klippet af plotrammen — brug de officielle hoejder.
-    # Blend over de foerste/sidste 2% saa der ikke opstaar et kunstigt spring.
-    edge = max(2, int(len(resampled) * 0.02))
-    start_m, finish_m = float(st["start_m"]), float(st["finish_m"])
-    d_start = start_m - resampled[0][1]
-    d_finish = finish_m - resampled[-1][1]
-    for i in range(edge):
-        w = 1.0 - i / edge
-        km, m = resampled[i]
-        resampled[i] = (km, m + d_start * w)
-        j = len(resampled) - 1 - i
-        km, m = resampled[j]
-        resampled[j] = (km, m + d_finish * w)
+    # Stykvis residual-korrektion mod de officielle hoejder ("rubber sheeting").
+    # Den lineaere kalibrering rammer i gennemsnit godt, men afviger stedvis
+    # (Slodyczki laa 57 m under officiel tophoejde og blev vist saadan paa
+    # etapesiden). Her tvinges kurven til at gaa PRAECIS gennem hvert officielt
+    # anker, og residualet interpoleres jaevnt derimellem. Det retter samtidig
+    # yderpunkterne, hvor kurven er klippet af plotrammen.
+    # Kvalitetsmaalet i rapporten er bevidst residualet FOER korrektionen —
+    # ellers ville valideringen maale sig selv.
+    fix_pts: list[tuple[float, float]] = [(0.0, float(st["start_m"]) - _interp(resampled, 0.0))]
+    for km, m in ((float(a), float(b)) for a, b in st["anchors"]):
+        py = py_at_km(km, snap=round(km, 1) in summits)
+        if py is not None:
+            fix_pts.append((km, m - to_m(py)))
+    fix_pts.append((total_km, float(st["finish_m"]) - _interp(resampled, total_km)))
+    fix_pts.sort(key=lambda p: p[0])
+
+    resampled = [(km, m + _interp(fix_pts, km)) for km, m in resampled]
 
     report["points"] = len(resampled)
+    report["anchor_corrected"] = len(fix_pts)
     if verbose:
         _print_report(report)
     return resampled, report
