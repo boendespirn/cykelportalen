@@ -217,65 +217,19 @@ def scrape_pcs_climbs(pcs_url: str) -> list[dict]:
         return []
 
 
-def generate_climbs_from_stage(stage: dict) -> list[dict]:
-    """
-    Genererer et syntetisk klatreafsnit for bjerg-etaper baseret på kendte stage-stats.
-    Bruges som fallback når PCS ikke har climb-data.
-    """
-    stage_type = stage.get("stage_type", "")
-    elevation  = stage.get("elevation_gain_m") or 0
-    distance   = stage.get("distance_km") or 100
-    finish     = stage.get("finish_location") or "Mål"
-
-    if stage_type not in ("mountain", "hilly") or elevation < 500:
-        return []
-
-    climbs = []
-
-    if stage_type == "mountain" and elevation > 2000:
-        # Bjerg-etape: opfind 2-3 klatringer
-        total_climb = elevation
-        main_climb_elev = int(total_climb * 0.55)
-        main_climb_len  = round(main_climb_elev / 800 * 10, 1)  # ~8% gennemsnit
-        main_climb_avg  = round(main_climb_elev / (main_climb_len * 10), 1)
-        main_climb_max  = round(main_climb_avg * 1.6, 1)
-
-        climbs.append({
-            "name":          f"Afslutningsstigningen mod {finish}",
-            "km_from_start": round(distance - main_climb_len - 2, 1),
-            "length_km":     main_climb_len,
-            "elevation_m":   main_climb_elev,
-            "avg_gradient":  main_climb_avg,
-            "max_gradient":  main_climb_max,
-        })
-
-        if total_climb > 3000:
-            mid_climb_elev = int(total_climb * 0.3)
-            mid_climb_len  = round(mid_climb_elev / 750 * 10, 1)
-            mid_climb_avg  = round(mid_climb_elev / (mid_climb_len * 10), 1)
-            climbs.append({
-                "name":          "Mellemliggende stigning",
-                "km_from_start": round(distance * 0.45, 1),
-                "length_km":     mid_climb_len,
-                "elevation_m":   mid_climb_elev,
-                "avg_gradient":  mid_climb_avg,
-                "max_gradient":  round(mid_climb_avg * 1.5, 1),
-            })
-
-    elif stage_type == "hilly" and elevation > 1000:
-        climb_elev = int(elevation * 0.4)
-        climb_len  = round(climb_elev / 600 * 10, 1)
-        climb_avg  = round(climb_elev / (climb_len * 10), 1)
-        climbs.append({
-            "name":          f"Afgørende bakke mod {finish}",
-            "km_from_start": round(distance - climb_len - 1.5, 1),
-            "length_km":     climb_len,
-            "elevation_m":   climb_elev,
-            "avg_gradient":  climb_avg,
-            "max_gradient":  round(climb_avg * 1.8, 1),
-        })
-
-    return climbs
+# FJERNET 2026-08-03: generate_climbs_from_stage().
+#
+# Funktionen opfandt 1-3 stigninger ud fra etapens samlede hoejdemeter alene —
+# navne som "Afslutningsstigningen mod {maalby}" og "Afgoerende bakke mod
+# {maalby}", laengder udledt af en antaget 8%/6%-hoeldning, og gradient_sections
+# ovenpaa det. Intet af det var maalt; det var plausibelt udseende fyld, der gik
+# direkte i produktion og var svaert at skelne fra ægte data (source blev
+# oveni koebet sat til "pcs").
+#
+# Konsekvenserne er dokumenteret i STG-027 (Vuelta 2026: bl.a. en "stigning" paa
+# 34,6 km @ 8,0% = 2772 hoejdemeter) og STG-028 (Tour de Pologne 2026).
+# Genindfoer den ikke. Mangler en etape stigninger, skal de aflaeses fra en
+# rigtig kilde — se kommentaren i process_race().
 
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
@@ -319,14 +273,23 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
                 print(f"  -> Fandt {len(climbs)} klatringer fra PCS")
             time.sleep(DELAY)
 
-        # Fallback: generer syntetiske klatringer
+        # INGEN syntetisk fallback. Frem til 2026-08-03 opfandt agenten her
+        # stigninger ud fra etapens samlede hoejdemeter — med pladsholdernavne
+        # ("Afgoerende bakke mod Karpacz") og en fast 6,0%-hoeldning. Det er
+        # fabrikeret data i produktion og bryder CLAUDE.md §6: kan noget ikke
+        # verificeres, publicerer vi det ikke. Konstateret paa Tour de Pologne
+        # 2026 (STG-028) og tidligere paa Vuelta 2026 (STG-027).
+        #
+        # PCS' klatredata staar i OEVRIGT ikke som tekst nogen steder — hverken
+        # paa etapens hovedside eller paa /info/profiles (verificeret raat
+        # 2026-08-03). Den ligger udelukkende i BILLEDERNE paa /info/profiles,
+        # som har én profil pr. stigning med gradient-tabel pr. delstraekning.
+        # Den rigtige vej er derfor et vision-pass, ikke mere regex.
         if not climbs:
-            climbs = generate_climbs_from_stage(stage)
-            if climbs:
-                print(f"  -> Genererede {len(climbs)} syntetiske klatringer")
-
-        if not climbs:
-            print("  -> Ingen klatredata fundet")
+            print("  -> Ingen klatredata i PCS' HTML. Etapen efterlades UDEN "
+                  "stigninger (aldrig gaettet data). Aflæs dem i stedet fra "
+                  f"{pcs_url}/info/profiles — billederne dér har navn, længde, "
+                  "hældning og gradient-tabel pr. stigning.")
             continue
 
         # Gem til Supabase
@@ -345,7 +308,11 @@ def process_race(race_slug: str, stage_number: int | None, overwrite: bool) -> N
                 "avg_gradient":     climb["avg_gradient"],
                 "max_gradient":     climb.get("max_gradient"),
                 "gradient_sections": gradient_sections,
-                "source":           "pcs" if pcs_url and len(climbs) > 0 else "synthetic",
+                # Var tidligere `"pcs" if pcs_url and len(climbs) > 0 else "synthetic"`
+                # — altid sand naar pcs_url fandtes, saa de syntetiske stigninger
+                # blev stemplet "pcs" og saa aegte ud i databasen. Naar vi naar
+                # hertil, ER dataen fra PCS' HTML.
+                "source":           "pcs",
             }
             if upsert_climb(record):
                 print(f"  -> Gemt: {climb['name']} ({climb['length_km']} km, {climb['avg_gradient']}%)")

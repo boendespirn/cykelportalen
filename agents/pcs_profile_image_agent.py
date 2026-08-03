@@ -36,31 +36,40 @@ SB_HEADERS = {
 
 # Forsøger at finde profilbilledet fra PCS /info/profiles siden.
 # PCS-profilsider har typisk en stor <img> med profilbilledet i .content eller lignende.
+# Filtreringen SKAL ske paa FILNAVNET, ikke paa hele URL'en. PCS lægger ogsaa
+# rutekort under stien /images/profiles/, saa et test paa s.includes('profile')
+# er sandt for `…-stage-6-map-….png`. Kombineret med "vaelg den bredeste"
+# vandt rutekortet altid, fordi det er det stoerste billede paa siden — det
+# skete for Tour de Pologne 2026 etape 1, 6 og 7 (STG-028).
+#
+# /info/profiles indeholder typisk: -profile- (hel etape), -map- (rutekort),
+# -finish- (maalstregskort) og -climb / -climb-n2… (én pr. stigning).
+# Kun hel-etape-profilen hoerer til her.
 EXTRACT_JS = """() => {
-    const imgs = Array.from(document.querySelectorAll('img'));
-    // Prioritér officielle race-billeder (ASO, RCS, etc.) og PCS's egne profiler
-    const candidates = imgs
-        .map(i => i.src || '')
-        .filter(s => s && (
-            s.includes('profile') ||
-            s.includes('altimetri') ||
-            s.includes('letour') ||
-            s.includes('tdf') ||
-            s.includes('procyclingstats.com/images')
-        ))
-        .filter(s => !s.includes('icon') && !s.includes('logo') && !s.includes('thumb'));
+    const fileOf = (s) => (s.split('?')[0].split('/').pop() || '');
 
-    // Foretruk den største: check naturalWidth hvis muligt
-    let best = null;
-    let bestW = 0;
+    const isWanted = (s) => {
+        if (!s) return false;
+        if (/icon|logo|thumb/i.test(s)) return false;
+        const f = fileOf(s);
+        // Rutekort, maalstregskort og enkeltstigninger er ikke hel-etape-profilen
+        if (/-map-|-finish-|-climb/i.test(f)) return false;
+        // PCS' egne: kraev 'profile'/'sprint' i FILNAVNET
+        if (/-(profile|sprint)-/i.test(f)) return true;
+        // Officielle arrangoerbilleder (ASO/RCS) foelger ikke PCS' navngivning
+        return /altimetri/i.test(s) || /letour/i.test(s) || /tdf/i.test(s);
+    };
+
+    const imgs = Array.from(document.querySelectorAll('img'));
+    let best = null, bestW = 0;
     for (const img of imgs) {
         const s = img.src || '';
-        if (!candidates.includes(s)) continue;
+        if (!isWanted(s)) continue;
         const w = img.naturalWidth || 0;
         if (w > bestW) { bestW = w; best = s; }
     }
     if (best) return best;
-    return candidates[0] || null;
+    return imgs.map(i => i.src || '').filter(isWanted)[0] || null;
 }"""
 
 
@@ -76,15 +85,26 @@ def get_stages(race_slug: str, overwrite: bool) -> list[dict]:
     stages = requests.get(
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}&pcs_stage_url=not.is.null"
-        f"&select=id,stage_number,pcs_stage_url,elevation_image_url"
+        f"&select=id,stage_number,pcs_stage_url,elevation_image_url,elevation_image_source"
         f"&order=stage_number.asc",
         headers=SB_AUTH,
     ).json()
-    if not overwrite:
-        # Kun etaper der ikke allerede har et high-res billede (> 500px bredde i URL typisk)
-        # Vi kører altid overwrite for at opdatere til bedste version
-        pass
-    return stages if isinstance(stages, list) else []
+    if not isinstance(stages, list):
+        return []
+
+    # Roer ALDRIG en etape, hvis profil vi selv har genereret. Agenten patcher
+    # kun elevation_image_url og lader elevation_image_source staa — saa en
+    # koersel af pipelinens trin 3 ville ellers erstatte vores eget PNG med en
+    # PCS-URL, mens source stadig sagde "generated". Frontenden gater netop paa
+    # source === "generated" (LEG-001), saa resultatet ville vaere et PCS-billede
+    # vist som vores eget. Gaelder ogsaa ved --overwrite, som kun er ment til at
+    # opdatere PCS-billeder indbyrdes.
+    kept = [s for s in stages if s.get("elevation_image_source") != "generated"]
+    skipped = len(stages) - len(kept)
+    if skipped:
+        print(f"  Springer {skipped} etape(r) over med egengenereret profil "
+              f"(elevation_image_source='generated')")
+    return kept
 
 
 async def scrape_one(browser, stage: dict, sem: asyncio.Semaphore) -> tuple[str, int, str | None]:
