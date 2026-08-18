@@ -245,12 +245,22 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
   // Venstre-til-højre-reveal må først starte når billedet er indlæst,
   // ellers afspilles animationen over et tomt/halvindlæst billede.
   const [profileLoaded, setProfileLoaded] = useState(false);
+  // Uden dette ville et billede, der ikke kan hentes, blive hængende i
+  // opacity-0 for evigt: onLoad fyrer aldrig, så brugeren fik en tom kasse
+  // uden reveal-animation og uden nogen antydning af, at noget var galt.
+  // Præcis sådan viste STG-030 sig (Vuelta 2026 pegede på PCS-hotlinks, som
+  // svarer 403). En fejl skal være synlig, ikke usynlig.
+  const [profileFailed, setProfileFailed] = useState(false);
   const profileImgRef = useRef<HTMLImageElement | null>(null);
   // Cachede billeder kan være færdigindlæst FØR hydreringen når at montere
   // onLoad-handleren — tjek derfor .complete ved mount, ellers forbliver
-  // billedet skjult (opacity-0).
+  // billedet skjult (opacity-0). naturalWidth === 0 på et "complete" billede
+  // betyder, at indlæsningen fejlede.
   useEffect(() => {
-    if (profileImgRef.current?.complete) setProfileLoaded(true);
+    const img = profileImgRef.current;
+    if (!img?.complete) return;
+    if (img.naturalWidth === 0) setProfileFailed(true);
+    else setProfileLoaded(true);
   }, []);
 
   const visibleClimbs = climbs.filter(hasVisualProfile);
@@ -297,20 +307,27 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
 
         {/* Fuld profil — klik åbner lightbox (samme URL, ingen ny tab) */}
         {activeIdx === -1 && elevationImageUrl && (
-          <button
-            className="block w-full text-left cursor-zoom-in"
-            onClick={() => setLightboxUrl(elevationImageUrl)}
-            aria-label="Åbn højdeprofil i fuld størrelse"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              ref={profileImgRef}
-              src={elevationImageUrl}
-              alt="Højdeprofil"
-              onLoad={() => setProfileLoaded(true)}
-              className={`w-full rounded ${profileLoaded ? "animate-profile-reveal" : "opacity-0"}`}
-            />
-          </button>
+          profileFailed ? (
+            <div className="w-full py-10 flex items-center justify-center bg-slate-900/60">
+              <span className="text-sm text-slate-500">Højdeprofilen kunne ikke indlæses</span>
+            </div>
+          ) : (
+            <button
+              className="block w-full text-left cursor-zoom-in"
+              onClick={() => setLightboxUrl(elevationImageUrl)}
+              aria-label="Åbn højdeprofil i fuld størrelse"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                ref={profileImgRef}
+                src={elevationImageUrl}
+                alt="Højdeprofil"
+                onLoad={() => setProfileLoaded(true)}
+                onError={() => setProfileFailed(true)}
+                className={`w-full rounded ${profileLoaded ? "animate-profile-reveal" : "opacity-0"}`}
+              />
+            </button>
+          )
         )}
 
         {/* Enkelt stigning */}

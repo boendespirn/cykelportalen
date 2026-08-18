@@ -503,6 +503,39 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
 
 # ── Gem til DB ────────────────────────────────────────────────────────────────
 
+def get_generated_stage_numbers(race_id: str) -> set[int]:
+    """Etapenumre hvis højdeprofil VI selv har genereret (stage_profile_generator.py)."""
+    rows = sb_get(
+        "stages",
+        f"race_id=eq.{race_id}&elevation_image_source=eq.generated&select=stage_number",
+    )
+    return {r["stage_number"] for r in rows if r.get("stage_number") is not None}
+
+
+def strip_generated_image_urls(records: list[dict], protected: set[int]) -> int:
+    """Fjern elevation_image_url fra etaper med egengenereret profil (in-place).
+
+    Rør ALDRIG en etape, hvis profil vi selv har genereret. Upserten skriver
+    kun elevation_image_url og lader elevation_image_source stå — uden dette
+    filter ville en genkørsel erstatte vores eget PNG med en PCS-URL, mens
+    source stadig sagde "generated". Frontenden gater netop på
+    source === "generated" (LEG-001), så resultatet blev et PCS-billede vist
+    som vores eget — og da PCS svarer 403 på hotlinks, kunne det slet ikke
+    indlæses (STG-030, ramte 20 af 21 Vuelta 2026-etaper).
+
+    Samme beskyttelse som pcs_profile_image_agent.py's get_stages() allerede
+    har; den manglede kun her i trin 2 af race_prep_pipeline.py.
+
+    Returnerer antal rækker der blev beskyttet.
+    """
+    stripped = 0
+    for record in records:
+        if record.get("stage_number") in protected and "elevation_image_url" in record:
+            record.pop("elevation_image_url")
+            stripped += 1
+    return stripped
+
+
 def save_stages(race_id: str, stages: list[dict]) -> None:
     records = []
     for s in stages:
@@ -517,6 +550,14 @@ def save_stages(race_id: str, stages: list[dict]) -> None:
         if record.get("elevation_image_url") is None:
             record.pop("elevation_image_url", None)
         records.append(record)
+
+    # ...og udelad den ligeledes for etaper, hvor VI selv har genereret
+    # profilen — ellers overskriver PCS-URL'en vores eget billede, mens
+    # elevation_image_source stadig siger "generated" (STG-030).
+    protected = strip_generated_image_urls(records, get_generated_stage_numbers(race_id))
+    if protected:
+        print(f"  Bevarer {protected} egengenereret profilbillede(r) "
+              f"(elevation_image_source='generated')")
 
     # PostgREST kræver identisk nøglesæt på tværs af ALLE objekter i én
     # batch-POST ("All object keys must match", PGRST102) — ellers afvises
