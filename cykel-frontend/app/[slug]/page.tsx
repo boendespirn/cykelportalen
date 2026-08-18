@@ -288,14 +288,24 @@ const SPECIALITY_ICON: Record<string, string> = {
   Classics:        "🏛️",
 };
 
+/** Rytterens speciale i databasen for en enkeltstartsspecialist (riders.speciality). */
+const TIME_TRIALIST = "Time trialist";
+
+/** TT-badgen er indtil videre kun slået til på Vueltaen (ejer-beslutning 2026-08-18).
+ *  Matcher hele løbsfamilien, så kommende udgaver er dækket uden kodeændring. */
+function showsTimeTrialBadge(raceSlug: string): boolean {
+  return raceSlug.startsWith("la-vuelta-ciclista-a-espana");
+}
+
 // ── Shared: Startlist block ────────────────────────────────────────────────
 
 function StartlistBlock({
-  teamGroups, totalRiders, gcData,
+  teamGroups, totalRiders, gcData, showTimeTrialBadge = false,
 }: {
   teamGroups: Map<string, StartlistEntry[]>;
   totalRiders: number;
   gcData: { after_stage: number; standings: GCEntry[] } | null;
+  showTimeTrialBadge?: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -343,6 +353,9 @@ function StartlistBlock({
                     <div className="flex gap-1 flex-shrink-0">
                       {entry.is_gc_captain && <span className="text-xs bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-medium">GC</span>}
                       {entry.is_sprint_captain && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">Sprint</span>}
+                      {showTimeTrialBadge && rider.speciality === TIME_TRIALIST && (
+                        <span className="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded font-medium" title="Enkeltstartsspecialist">TT</span>
+                      )}
                       {gcEntry?.position != null && <span className="text-xs font-mono text-pink-400">#{gcEntry.position}</span>}
                     </div>
                     {rider.date_of_birth && (
@@ -641,7 +654,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                 Startliste ikke tilgængelig endnu.
               </div>
             ) : (
-              <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} />
+              <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} showTimeTrialBadge={showsTimeTrialBadge(race.slug)} />
             )}
           </section>
         </div>
@@ -987,7 +1000,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
               Startliste ikke tilgængelig endnu.
             </div>
           ) : (
-            <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} />
+            <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} showTimeTrialBadge={showsTimeTrialBadge(race.slug)} />
           )}
         </section>
 
