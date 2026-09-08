@@ -88,6 +88,19 @@ Begrundelsen er strategisk, ikke kosmetisk: ujævn dækning giver tynde landings
 - **IndexNow** — `submit_indexnow()` i `api.py` POST'er til `api.indexnow.org` som baggrundsopgave. Trigges to steder: (1) når en artikel godkendes (`/admin/articles/{id}/approve`), (2) i `daily_update.py`s `notify_indexnow()` for løbets side + alle dens etapesider, hver gang startliste eller etapedata er blevet oprettet/opdateret for løbet i den kørsel (SEO-010). Nøglefil: `cykel-frontend/public/1a5a3688cfd86781c40cef01ce453403.txt` (offentlig, ikke hemmelig). **Vigtigt:** Google understøtter ikke IndexNow-protokollen (kun Bing, Yandex, Naver, Seznam, Yep) — det er et billigt supplement til crawl-signalet for de søgemaskiner, aldrig en genvej til Google-indeksering. Google-indeksering afhænger af sitemap.xml, intern linking og webstedets opfattede autoritet/vigtighed, ikke IndexNow.
 - **`GET /admin/issues`** (i `api.py`) — parser `state/issues.md` til JSON. Bruges af opgave-dashboardet på `/admin/opgaver` i frontenden.
 
+## Pipeline-dashboard (`/admin/pipelines`)
+
+Overblik over hvad der er kørt, hvor gammelt det er, hvor fuldstændigt et løbs data er — og knapper til at starte en agent eller en hel pipeline.
+
+- **Hvorfor en runner på ejerens PC:** agenterne kræver Playwright/Chromium, ClimbFinder-login og lokale GPX-kilder. Railway kører kun `uvicorn api:app`. Knappen i browseren udfører derfor intet selv — den lægger en række i `agent_runs` med `status='queued'`, som `runner.py` henter og udfører. **PC'en skal være tændt, for at en knap gør noget**; ellers ligger jobbet i køen, til runneren starter.
+- **`agent_catalog.py`** — det autoritative katalog over, hvad der må køres, og hvilken kommando hvert `job_key` svarer til. Ligger i kode, ikke i databasen: runneren skal alligevel have en hardkodet allowlist, og to kilder til sandhed ville komme ud af trit. **Fra nettet kan man kun vælge hvilket forudgodkendt job og hvilket løb — aldrig hvad der køres.** Indfør aldrig et felt, hvor kommandoen kommer udefra.
+- **`runner.py`** — startes med `python runner.py` og poller køen hvert 15. sekund. Ét job ad gangen (to tunge Playwright-kørsler samtidig løb tør for hukommelse 2026-09-08). Sender hjerteslag til `runner_status`, så dashboardet kan vise, om et klik reelt bliver udført. Nulstiller ved opstart kørsler, der hang i `running` efter et nedbrud.
+- **`race_completeness.py`** — beregner fuldstændighed pr. løb ud fra databasen. Hvert tjek svarer `ok`, `mangler` eller **`ikke_muligt`**. Den tredje tilstand er afgørende: uden den ville en aflyst etape stå som et permanent rødt kryds, man lærer at ignorere. `ikke_muligt` trækker ikke ned i procenten. Kolonnen `stages.data_status` markerer de etaper (`cancelled`/`shortened`/`no_result`), og `results_agent.py` sætter den selv, når PCS skriver, at etapen er aflyst.
+- **`run_validator.py`** — efter hver kørsel: tag før/efter-billede af de tjek, jobbet skulle udbedre, og lad Claude (haiku) dømme `ok`/`advarsel`/`fejl` med én sætning. **Exitkode 0 betyder ikke, at data er rigtigt** — `tv_agent.py` sluttede 2026-09-09 med exit 0 efter at have fundet 11 programmer og gemt nul. Deterministiske signaler (exitkode, traceback) afgøres i koden; modellen må skærpe dommen, aldrig blødgøre den.
+- **Endpoints:** `/admin/pipelines/{jobs,runner,races,races/{slug},run,runs,runs/{id}}` i `api.py`, alle bag `x-admin-key`.
+
+---
+
 ## Etapereferater (PCS LiveStats)
 
 - **`agents/stage_recap_agent.py`** — skriver `stages.stage_recap`: et kort dansk referat af, hvordan en kørt etape forløb. Kilde er PCS' LiveStats-tidslinje på `…/race/<løb>/<år>/stage-N/live`.

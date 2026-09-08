@@ -150,6 +150,17 @@ def mark_dnf(race_id: str, rider: dict, stage_number: int) -> None:
     )
 
 
+def mark_stage_data_status(stage_id: str, status: str | None) -> None:
+    """Markerer, at en etape af faktiske grunde aldrig får fuldstændige data
+    (fx aflyst). Læses af race_completeness.py, så admin-dashboardet viser
+    "ikke muligt" i stedet for "mangler"."""
+    requests.patch(
+        f"{SUPABASE_URL}/rest/v1/stages?id=eq.{stage_id}",
+        json={"data_status": status},
+        headers=DB,
+    )
+
+
 def upsert_stage_results(race_id: str, stage_id: str, top10: list[dict]) -> None:
     """Gemmer etaperesultater (top10) i results-tabellen."""
     rows = []
@@ -417,7 +428,8 @@ def scrape_stage_result(pcs_stage_url: str, is_final_stage: bool = False) -> dic
     `is_final_stage` aktiverer løbs-niveau-fallback for klassementerne — se
     _fetch_classification_table().
     """
-    result = {"top10": [], "dnf": [], "gc": [], "points": [], "mountains": [], "youth": []}
+    result = {"top10": [], "dnf": [], "gc": [], "points": [], "mountains": [],
+              "youth": [], "cancelled": False}
     base_url = pcs_stage_url[: -len("/result")] if pcs_stage_url.endswith("/result") else pcs_stage_url
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
@@ -426,6 +438,15 @@ def scrape_stage_result(pcs_stage_url: str, is_final_stage: bool = False) -> dic
             browser = p.chromium.launch(headless=True)
 
             soup = _fetch_soup(browser, headers, pcs_stage_url)
+
+            # En aflyst etape har ingen rangliste og får den aldrig. Uden dette
+            # ville den for evigt stå som "mangler resultat" i admin-dashboardet
+            # — en advarsel, man lærer at ignorere. PCS skriver det ordret på
+            # siden (Vuelta 2026 E3: "Race/stage is cancelled." efter at etapen
+            # blev afbrudt i hagl på Col de Mont-Louis).
+            page_text = soup.get_text(" ", strip=True)
+            result["cancelled"] = "stage is cancelled" in page_text.lower()
+
             tagged = _find_resultscont_tables(soup)
             if not tagged:
                 browser.close()
@@ -616,12 +637,17 @@ def process(race_slug: str | None, stage_number: int | None, all_stages: bool = 
             print(f"  E{sn}: Scraper {pcs_url}" + (" (sidste etape)" if is_final else ""))
             data = scrape_stage_result(pcs_url, is_final_stage=is_final)
 
+            if data["cancelled"]:
+                print("  -> AFLYST etape ifoelge PCS — markeret, saa den ikke tael"
+                      "ler som manglende data")
+                mark_stage_data_status(stage["id"], "cancelled")
+
             if data["top10"]:
                 print(f"  -> Top 3: " + " | ".join(
                     f"{r['position']}. {r['name'].split()[-1]}" for r in data["top10"][:3]
                 ))
                 upsert_stage_results(race_id, stage["id"], data["top10"])
-            else:
+            elif not data["cancelled"]:
                 print("  -> Ingen etaperesultat fundet (muligvis ikke koert endnu)")
 
             if data["dnf"]:

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 import ast
 import os
@@ -1127,3 +1127,225 @@ def search(q: str = ""):
             "name,stage_id,stages(stage_number,race_id,races(name,slug))",
         ),
     }
+
+# --- Admin: pipeline-dashboard -----------------------------------------------
+# Knapperne her udfører intet selv. De lægger en række i agent_runs, som
+# runner.py på ejerens PC henter og kører. Agenterne kræver Playwright,
+# ClimbFinder-login og lokale GPX-kilder — det miljø findes ikke på Railway.
+
+import agent_catalog
+from race_completeness import race_completeness
+
+RUNS_TABLE = f"{SUPABASE_URL}/rest/v1/agent_runs"
+
+# Hvor gammelt et hjerteslag må være, før runneren regnes som nede. Den slår
+# hvert 15. sekund, så 90 sekunder rummer et par tabte kald uden falsk alarm.
+RUNNER_STALE_SECONDS = 90
+
+
+def _runs_for(race_slug: str | None, limit: int = 200) -> list:
+    """Seneste kørsler, nyeste først. Uden race_slug: alle."""
+    race_filter = f"&race_slug=eq.{race_slug}" if race_slug else ""
+    res = requests.get(
+        f"{RUNS_TABLE}?select=id,job_key,race_slug,status,trigger,queued_at,"
+        f"started_at,finished_at,exit_code,validation_verdict,validation_note"
+        f"{race_filter}&order=queued_at.desc&limit={limit}",
+        headers=get_headers(),
+    )
+    return res.json() if res.ok and isinstance(res.json(), list) else []
+
+
+def _last_run_by_job(runs: list) -> dict:
+    """Nyeste koersel pr. job_key. Listen kommer sorteret nyest foerst, saa den
+    foerste forekomst af et job_key er den seneste."""
+    latest = {}
+    for run in runs:
+        latest.setdefault(run["job_key"], run)
+    return latest
+
+
+@app.get("/admin/pipelines/jobs")
+def admin_pipeline_jobs(request: Request):
+    """Kataloget over, hvad der kan koeres — kilden til knapperne i dashboardet."""
+    _require_admin(request)
+    return {
+        "jobs": agent_catalog.list_jobs(),
+        "phase_labels": agent_catalog.PHASE_LABELS,
+    }
+
+
+@app.get("/admin/pipelines/runner")
+def admin_pipeline_runner(request: Request):
+    """Er runneren i live? Uden den bliver et klik liggende i koeen."""
+    _require_admin(request)
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/runner_status?select=host,last_seen"
+        f"&order=last_seen.desc&limit=1",
+        headers=get_headers(),
+    )
+    rows = res.json() if res.ok and isinstance(res.json(), list) else []
+    if not rows:
+        return {"online": False, "host": None, "last_seen": None,
+                "message": "Runneren har aldrig meldt sig. Start den med: python runner.py"}
+
+    row = rows[0]
+    seen = datetime.fromisoformat(row["last_seen"].replace("Z", "+00:00"))
+    age = (datetime.now(seen.tzinfo) - seen).total_seconds()
+    online = age < RUNNER_STALE_SECONDS
+    return {
+        "online": online,
+        "host": row["host"],
+        "last_seen": row["last_seen"],
+        "seconds_since": int(age),
+        "message": None if online else
+                   "Runneren svarer ikke. Job lægges i kø og køres, når du starter: python runner.py",
+    }
+
+
+@app.get("/admin/pipelines/races")
+def admin_pipeline_races(request: Request, window_days: int = 120):
+    """Loeb der er relevante at arbejde med lige nu: i gang, lige afsluttet
+    eller paa vej. Fuldstaendigheden beregnes IKKE her — den kraever et snes
+    forespoergsler pr. loeb og hentes derfor pr. loeb, naar du klikker ind."""
+    _require_admin(request)
+    today = today_dk()
+    frm = (today - timedelta(days=window_days)).isoformat()
+    til = (today + timedelta(days=window_days)).isoformat()
+
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?select=name,slug,start_date,end_date,category"
+        f"&end_date=gte.{frm}&start_date=lte.{til}&order=start_date.asc",
+        headers=get_headers(),
+    )
+    races = res.json() if res.ok and isinstance(res.json(), list) else []
+
+    runs = _runs_for(None, limit=500)
+    by_race: dict = {}
+    for run in runs:
+        by_race.setdefault(run.get("race_slug"), []).append(run)
+
+    today_iso = today.isoformat()
+    out = []
+    for race in races:
+        race_runs = by_race.get(race["slug"], [])
+        failed = [r for r in race_runs if r["status"] == "failed"]
+        active = [r for r in race_runs if r["status"] in ("queued", "running")]
+        end_date = race.get("end_date") or race["start_date"]
+        if race["start_date"] <= today_iso <= end_date:
+            phase = "i_gang"
+        elif race["start_date"] > today_iso:
+            phase = "kommende"
+        else:
+            phase = "afsluttet"
+        out.append({
+            **race,
+            "phase": phase,
+            "last_run": race_runs[0] if race_runs else None,
+            "run_count": len(race_runs),
+            "failed_count": len(failed),
+            "active_count": len(active),
+        })
+    return {"races": out, "today": today_iso}
+
+
+@app.get("/admin/pipelines/races/{race_slug}")
+def admin_pipeline_race_detail(request: Request, race_slug: str):
+    """Alt om eet loeb: hvor fuldstaendigt data er, og hvornaar hvert job sidst koerte."""
+    _require_admin(request)
+    data = race_completeness(race_slug)
+    if not data:
+        raise HTTPException(status_code=404, detail="Løb ikke fundet")
+
+    runs = _runs_for(race_slug)
+    latest = _last_run_by_job(runs)
+
+    # Hvert tjek peger paa de job, der kan udbedre det (check["fixed_by"]).
+    # Her vender vi det om, saa hvert job ved, hvilke mangler det ville lukke —
+    # det er dét, der goer en knap forstaaelig frem for bare en etiket.
+    missing_by_job: dict = {}
+    for check in data["checks"]:
+        if check["status"] != "mangler":
+            continue
+        for job_key in check["fixed_by"]:
+            missing_by_job.setdefault(job_key, []).append(check["label"])
+
+    jobs = []
+    for job in agent_catalog.list_jobs():
+        if not job["needs_race"]:
+            continue
+        jobs.append({
+            **job,
+            "last_run": latest.get(job["key"]),
+            "would_fix": missing_by_job.get(job["key"], []),
+        })
+
+    return {
+        **data,
+        "jobs": jobs,
+        "recent_runs": runs[:20],
+        "phase_labels": agent_catalog.PHASE_LABELS,
+    }
+
+
+class PipelineRunRequest(BaseModel):
+    job_key: str
+    race_slug: str | None = None
+
+
+@app.post("/admin/pipelines/run")
+def admin_pipeline_run(request: Request, body: PipelineRunRequest):
+    """Laegger et job i koe. Koerer ikke noget her — det goer runner.py.
+
+    Kun job_key og loeb kommer udefra; kommandoen bygges af agent_catalog paa
+    ejerens maskine. build_command() kaldes allerede her for at afvise et
+    ugyldigt job eller slug med det samme i stedet for at lade en doed raekke
+    ligge i koeen.
+    """
+    _require_admin(request)
+    try:
+        agent_catalog.build_command(body.job_key, body.race_slug)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Samme job for samme loeb maa ikke staa i koe to gange — et dobbeltklik
+    # ville ellers sende to tunge Playwright-koersler mod PCS samtidig.
+    race_filter = f"&race_slug=eq.{body.race_slug}" if body.race_slug else "&race_slug=is.null"
+    dupes = requests.get(
+        f"{RUNS_TABLE}?select=id,status&job_key=eq.{body.job_key}{race_filter}"
+        f"&status=in.(queued,running)&limit=1",
+        headers=get_headers(),
+    )
+    if dupes.ok and dupes.json():
+        existing = dupes.json()[0]
+        return {"queued": False, "run_id": existing["id"], "status": existing["status"],
+                "message": "Jobbet ligger allerede i køen"}
+
+    res = requests.post(
+        RUNS_TABLE,
+        json={"job_key": body.job_key, "race_slug": body.race_slug, "trigger": "button"},
+        headers={**get_headers(), "Content-Type": "application/json",
+                 "Prefer": "return=representation"},
+    )
+    if not res.ok:
+        raise HTTPException(status_code=500, detail=f"Kunne ikke lægge i kø: {res.text[:200]}")
+    return {"queued": True, "run_id": res.json()[0]["id"], "status": "queued", "message": None}
+
+
+@app.get("/admin/pipelines/runs")
+def admin_pipeline_runs(request: Request, race: str | None = None, limit: int = 50):
+    _require_admin(request)
+    return {"runs": _runs_for(race, limit=limit)}
+
+
+@app.get("/admin/pipelines/runs/{run_id}")
+def admin_pipeline_run_detail(request: Request, run_id: str):
+    """Een koersel med hele den gemte log — det er her, du laeser fejlen."""
+    _require_admin(request)
+    res = requests.get(f"{RUNS_TABLE}?id=eq.{run_id}&select=*&limit=1", headers=get_headers())
+    rows = res.json() if res.ok and isinstance(res.json(), list) else []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Kørsel ikke fundet")
+    run = rows[0]
+    job = agent_catalog.JOBS.get(run["job_key"])
+    run["job_label"] = job["label"] if job else run["job_key"]
+    return run
