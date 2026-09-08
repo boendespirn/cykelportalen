@@ -29,6 +29,12 @@ Pipeline-trin (i rækkefølge):
                           kørsel, i modsætning til den løbende opdatering under et
                           igangværende løb (som i stedet kører uden --all-stages,
                           løbende efter hver etape — se docstring i results_agent.py).
+ 9b. Etapereferater     — stage_recap_agent.py --all-stages. Skriver stages.stage_recap
+                          ud fra PCS' LiveStats-tidslinje. Kører EFTER trin 9, fordi
+                          referatet grundfæstes i vores egne verificerede resultater og
+                          klassement. Etaper uden LiveStats-tidslinje (typisk ældre
+                          årgange) springes automatisk over — trinnet er derfor
+                          ufarligt at køre for ethvert løb.
 
 Ved --historic (letvægts-flow, jf. docs/superpowers/specs/2026-07-15-historiske-
 etapesider-letvaegt.md): trin 6-8 (individuelle stigningsprofiler) springes bevidst
@@ -199,6 +205,10 @@ def main():
         (
             [py, "results_agent.py", "--race", db_slug, *(["--all-stages"] if historic else [])],
             "9/9 Resultater + klassement" + (" (alle etaper, historisk)" if historic else " (seneste etape)"),
+        ),
+        (
+            [py, "stage_recap_agent.py", "--race", db_slug, "--all-stages"],
+            "9b/9 Etapereferater (PCS LiveStats)",
         ),
     ]
 

@@ -50,6 +50,7 @@ import re
 import time
 import argparse
 import requests
+from datetime import date
 from bs4 import BeautifulSoup
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -255,11 +256,28 @@ def get_race(slug: str) -> dict | None:
     return data[0] if data else None
 
 
+def get_ongoing_races() -> list[dict]:
+    """Løb der kører i dag — samme udvælgelse som results_agent.get_ongoing_races(),
+    så den daglige pipeline kan køre referat-trinnet uden at kende løbets slug."""
+    today = date.today().isoformat()
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races"
+        f"?start_date=lte.{today}&end_date=gte.{today}"
+        f"&select=id,name,slug&order=start_date.desc&limit=5",
+        headers=READ_HEADERS,
+    )
+    return r.json() if r.ok else []
+
+
 def get_stages(race_id: str, stage_numbers: list[int] | None, force: bool) -> list[dict]:
     recap_filter = "" if force or stage_numbers else "&stage_recap=is.null"
     stage_filter = ""
     if stage_numbers:
         stage_filter = "&stage_number=in.(" + ",".join(str(n) for n in stage_numbers) + ")"
+    else:
+        # Uden eksplicitte etapenumre: kun etaper der ER kørt. En kommende etape
+        # har ingen tidslinje, så et opslag på den er et spildt PCS-kald.
+        stage_filter = f"&date=lte.{date.today().isoformat()}"
     r = requests.get(
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}"
@@ -408,17 +426,32 @@ def call_claude(client: Anthropic, race_name: str, stage: dict, top5: list[dict]
 
 # ── Hoved ─────────────────────────────────────────────────────────────────────
 
-def run(race_slug: str, stage_numbers: list[int] | None, force: bool,
+def run(race_slug: str | None, stage_numbers: list[int] | None, force: bool,
         dry_run: bool, dump_dir: str | None) -> None:
+    """Uden --race behandles alle igangværende løb — så den daglige pipeline kan
+    køre referat-trinnet lige efter results_agent.py uden at kende slug'en."""
     if not dry_run and not ANTHROPIC_KEY:
         print("FEJL: ANTHROPIC_API_KEY mangler i .env")
         sys.exit(1)
 
-    race = get_race(race_slug)
-    if not race:
-        print(f"FEJL: løb '{race_slug}' ikke fundet i databasen")
-        sys.exit(1)
+    if race_slug:
+        race = get_race(race_slug)
+        if not race:
+            print(f"FEJL: løb '{race_slug}' ikke fundet i databasen")
+            sys.exit(1)
+        races = [race]
+    else:
+        races = get_ongoing_races()
+        if not races:
+            print("stage_recap_agent.py — ingen igangværende løb i dag")
+            return
 
+    for race in races:
+        run_race(race, stage_numbers, force, dry_run, dump_dir)
+
+
+def run_race(race: dict, stage_numbers: list[int] | None, force: bool,
+             dry_run: bool, dump_dir: str | None) -> None:
     stages = get_stages(race["id"], stage_numbers, force)
     print(f"stage_recap_agent.py — {race['name']}")
     print(f"{len(stages)} etape(r) at behandle\n")
@@ -513,7 +546,9 @@ def parse_stage_arg(stage: int | None, stages: str | None, all_stages: bool) -> 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--race", required=True, help="DB-slug, fx la-vuelta-ciclista-a-espana-2026")
+    parser.add_argument("--race", default=None,
+                        help="DB-slug, fx la-vuelta-ciclista-a-espana-2026 "
+                             "(default: alle igangværende løb)")
     parser.add_argument("--stage", type=int, default=None, help="Kun denne etape")
     parser.add_argument("--stages", default=None, help="Interval eller liste, fx 1-16 eller 3,7,9")
     parser.add_argument("--all-stages", dest="all_stages", action="store_true",
@@ -525,7 +560,10 @@ if __name__ == "__main__":
                         help="Gem den filtrerede tidslinje pr. etape som tekstfil (fejlsøgning)")
     args = parser.parse_args()
 
-    if not (args.stage or args.stages or args.all_stages):
+    # Med --race skal etapevalget være eksplicit, så en enkeltkørsel ikke uforvarende
+    # rammer hele løbet. Uden --race (pipeline-tilstand) er standarden netop "alle
+    # kørte etaper uden referat" — så kræves der intet etapeflag.
+    if args.race and not (args.stage or args.stages or args.all_stages):
         print("FEJL: angiv --stage N, --stages 1-16 eller --all-stages")
         sys.exit(1)
 

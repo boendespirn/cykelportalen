@@ -19,29 +19,38 @@ function Log($msg) {
 Log "=== Klassementet daglig pipeline startet ==="
 
 # 1. RSS-nyheder
-Log "[1/4] Scraper RSS-nyheder..."
+Log "[1/6] Scraper RSS-nyheder..."
 python "$ROOT\agents\rss_news_scraper.py" 2>&1 | Tee-Object -Append $LOG
-Log "[1/4] Faerdig."
+Log "[1/6] Faerdig."
 
 # 2. AI-nyhedsbehandling (max 15 scores, max 4/uge publiceret)
-Log "[2/4] AI-nyhedsbehandling..."
+Log "[2/6] AI-nyhedsbehandling..."
 python "$ROOT\ai_news_processor.py" --limit 15 2>&1 | Tee-Object -Append $LOG
-Log "[2/4] Faerdig."
+Log "[2/6] Faerdig."
 
 # 3. Resultater (seneste etape for igangvaerende loeb)
-Log "[3/5] Scraper etaperesultater..."
+Log "[3/6] Scraper etaperesultater..."
 python "$ROOT\agents\results_agent.py" 2>&1 | Tee-Object -Append $LOG
-Log "[3/5] Faerdig."
+Log "[3/6] Faerdig."
 
-# 4. TV-tider (ugentlig opdatering)
-Log "[4/5] Opdaterer TV-tider..."
+# 4. Etapereferater (PCS LiveStats -> stages.stage_recap)
+#    SKAL koere EFTER trin 3: referatet grundfaestes i vores egne verificerede
+#    etaperesultater og klassement, saa agenten ikke kan finde paa en vinder.
+#    Uden --race tages alle igangvaerende loeb og kun koerte etaper uden
+#    referat, saa trinnet er en no-op paa dage uden loeb.
+Log "[4/6] Skriver etapereferater..."
+python "$ROOT\agents\stage_recap_agent.py" 2>&1 | Tee-Object -Append $LOG
+Log "[4/6] Faerdig."
+
+# 5. TV-tider (ugentlig opdatering)
+Log "[5/6] Opdaterer TV-tider..."
 python "$ROOT\agents\tv_agent.py" 2>&1 | Tee-Object -Append $LOG
-Log "[4/5] Faerdig."
+Log "[5/6] Faerdig."
 
-# 5. Social media posting (poster artikler med social_posted=false)
-Log "[5/5] Social media posting..."
+# 6. Social media posting (poster artikler med social_posted=false)
+Log "[6/6] Social media posting..."
 python "$ROOT\agents\social_agent.py" 2>&1 | Tee-Object -Append $LOG
-Log "[5/5] Faerdig."
+Log "[6/6] Faerdig."
 
 Log "=== Pipeline faerdig ==="
 
