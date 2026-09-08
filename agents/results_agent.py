@@ -73,6 +73,20 @@ def get_latest_finished_stage(race_id: str) -> dict | None:
     return data[0] if res.ok and data else None
 
 
+def get_final_stage_number(race_id: str) -> int | None:
+    """Højeste stage_number for løbet — bruges til at afgøre, om en etape er
+    den afsluttende, hvilket alene åbner for løbs-niveau-fallback på
+    klassementerne (se _fetch_classification_table())."""
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages"
+        f"?race_id=eq.{race_id}&select=stage_number"
+        f"&order=stage_number.desc&limit=1",
+        headers=AUTH,
+    )
+    data = res.json() if res.ok else []
+    return data[0]["stage_number"] if data else None
+
+
 def get_all_stages(race_id: str) -> list[dict]:
     """Alle etaper for et løb, ældste først — til historisk backfill (--all-stages),
     hvor vi vil have resultater for samtlige etaper, ikke kun den seneste."""
@@ -158,11 +172,19 @@ def upsert_stage_results(race_id: str, stage_id: str, top10: list[dict]) -> None
             "time_gap_seconds": gap,
         })
     if rows:
-        requests.post(
-            f"{SUPABASE_URL}/rest/v1/results",
+        # PostgREST's "resolution="-direktiv virker KUN sammen med on_conflict.
+        # Uden den svarer et gensendt resultat 409 og HELE batchen ryger — så en
+        # genkørsel kunne aldrig tilføje en manglende eller rette en forkert
+        # placering (Vuelta 2026 E5 blev hængende på 9 rækker af netop den grund).
+        # merge-duplicates gør det til en ægte upsert: eksisterende rækker
+        # opdateres, når PCS retter et resultat efter en nedrykning.
+        res = requests.post(
+            f"{SUPABASE_URL}/rest/v1/results?on_conflict=race_id,stage_id,rider_id",
             json=rows,
-            headers={**DB, "Prefer": "resolution=ignore-duplicates,return=minimal"},
+            headers={**DB, "Prefer": "resolution=merge-duplicates,return=minimal"},
         )
+        if not res.ok:
+            print(f"    [DB FEJL etaperesultat] {res.status_code}: {res.text[:200]}")
 
 
 def upsert_classification(race_id: str, stage_number: int, classif_type: str, standings: list[dict]) -> None:
@@ -339,10 +361,61 @@ def _fetch_soup(browser, headers: dict, url: str) -> BeautifulSoup:
         page.close()
 
 
-def scrape_stage_result(pcs_stage_url: str) -> dict:
+def _race_level_url(base_url: str) -> str | None:
+    """
+    '…/race/tour-de-france/2026/stage-21' → '…/race/tour-de-france/2026'.
+
+    Returnerer None for URL'er uden et /stage-N-led (fx endagsløb), så kalderen
+    ikke får en løbs-URL, der peger et helt andet sted hen.
+    """
+    m = re.match(r"^(.*/race/[^/]+/[^/]+)/stage-[^/]+$", base_url)
+    return m.group(1) if m else None
+
+
+def _fetch_classification_table(browser, headers: dict, base_url: str,
+                                suffix: str, is_final_stage: bool):
+    """
+    Henter tabellen for ét klassement (gc/points/kom/youth).
+
+    PCS' per-etape-URL (…/stage-21-gc) svarer **HTTP 500** for den AFSLUTTENDE
+    etape i et etapeløb — der ligger det endelige klassement i stedet på
+    løbs-niveau (…/2026/gc). Vi prøver derfor per-etape-URL'en først og falder
+    kun tilbage til løbs-URL'en, når dette faktisk ER sidste etape (se RES-005).
+
+    Fallbacken må ALDRIG gælde en vilkårlig etape: løbs-URL'en indeholder det
+    ENDELIGE klassement, så en forbigående timeout på fx etape 10 ville ellers
+    skrive slutstillingen ind som "efter etape 10" — en tavs datafejl af præcis
+    samme slags som den, denne funktion blev skrevet for at fjerne.
+
+    Returnerer None hvis ingen af URL'erne gav en tabel. Kalderen skal så lade
+    klassementet stå tomt — aldrig substituere en anden tabel.
+    """
+    urls = [f"{base_url}-{suffix}"]
+    if is_final_stage:
+        race_url = _race_level_url(base_url)
+        if race_url:
+            urls.append(f"{race_url}/{suffix}")
+
+    for url in urls:
+        try:
+            soup = _fetch_soup(browser, headers, url)
+        except Exception as e:
+            print(f"    [{suffix}: {url} fejlede — {type(e).__name__}]")
+            continue
+        table = _find_first_visible_table(soup)
+        if table is not None:
+            return table
+        print(f"    [{suffix}: ingen tabel på {url}]")
+    return None
+
+
+def scrape_stage_result(pcs_stage_url: str, is_final_stage: bool = False) -> dict:
     """
     Scraper etaperesultat + alle 4 klassementer fra PCS med BeautifulSoup.
     Returnerer: {top10, dnf, gc, points, mountains, youth}
+
+    `is_final_stage` aktiverer løbs-niveau-fallback for klassementerne — se
+    _fetch_classification_table().
     """
     result = {"top10": [], "dnf": [], "gc": [], "points": [], "mountains": [], "youth": []}
     base_url = pcs_stage_url[: -len("/result")] if pcs_stage_url.endswith("/result") else pcs_stage_url
@@ -364,20 +437,31 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
             # (samme URL'er som faneblade-navigationen selv peger på), da
             # klassementstypen ikke pålideligt kan skelnes på samme side som
             # etaperesultatet — se _find_first_visible_table().
-            gc_soup        = _fetch_soup(browser, headers, f"{base_url}-gc")
-            points_soup    = _fetch_soup(browser, headers, f"{base_url}-points")
-            mountains_soup = _fetch_soup(browser, headers, f"{base_url}-kom")
-            youth_soup     = _fetch_soup(browser, headers, f"{base_url}-youth")
+            #
+            # Tidligere faldt gc_table tilbage på `stage_table`, når GC-siden
+            # ikke kunne parses. Det skrev ETAPERESULTATET ind som GC-klassement
+            # — TdF 2026 E21 fik således Van der Poel som samlet vinder i stedet
+            # for Pogačar (RES-005). Ingen af de fire klassementer må nogensinde
+            # substitueres med en anden tabel: hellere tomt end forkert
+            # (CLAUDE.md §6 — kan data ikke verificeres, publicér det ikke).
+            gc_table        = _fetch_classification_table(browser, headers, base_url, "gc", is_final_stage)
+            points_table    = _fetch_classification_table(browser, headers, base_url, "points", is_final_stage)
+            mountains_table = _fetch_classification_table(browser, headers, base_url, "kom", is_final_stage)
+            youth_table     = _fetch_classification_table(browser, headers, base_url, "youth", is_final_stage)
 
             browser.close()
 
-        gc_table        = _find_first_visible_table(gc_soup) or stage_table
-        points_table    = _find_first_visible_table(points_soup)
-        mountains_table = _find_first_visible_table(mountains_soup)
-        youth_table     = _find_first_visible_table(youth_soup)
-
         # ── Etaperesultat (sorteret efter etapeplacering) ────────────────────
-        for row in stage_table.find_all("tr")[1:11]:
+        # Vi læser videre, indtil der er 10 GYLDIGE placeringer — ikke bare de
+        # 10 første rækker. PCS indsætter rækker, der ikke er en placering
+        # (nedrykkede/diskvalificerede ryttere, mellemoverskrifter), og et fast
+        # vindue på 10 rækker koster så en rigtig rytter i bunden af top 10:
+        # Vuelta 2026 E5 fik kun 9 rækker, fordi en nedrykning skubbede Wout
+        # van Aert ud af vinduet. DNF-rækker har ikke et tal i positionsfeltet
+        # og bliver sprunget over af _parse_pcs_row.
+        for row in stage_table.find_all("tr")[1:]:
+            if len(result["top10"]) >= 10:
+                break
             parsed = _parse_pcs_row(row)
             if not parsed:
                 continue
@@ -407,18 +491,19 @@ def scrape_stage_result(pcs_stage_url: str) -> dict:
                     result["dnf"].append({"slug": parsed["slug"], "name": parsed["name"]})
 
         # ── GC-klassement ─────────────────────────────────────────────────────
-        last_gap = 0
-        for row in gc_table.find_all("tr")[1:21]:
-            parsed = _parse_pcs_row(row)
-            if not parsed:
-                continue
-            time_str = _extract_time(row.find("td", class_="time"))
-            gap = _resolve_gap(parsed["pos"] == 1, time_str, last_gap)
-            last_gap = gap
-            result["gc"].append({
-                "position": parsed["pos"], "slug": parsed["slug"],
-                "name": parsed["name"], "time_gap_seconds": gap,
-            })
+        if gc_table is not None:
+            last_gap = 0
+            for row in gc_table.find_all("tr")[1:21]:
+                parsed = _parse_pcs_row(row)
+                if not parsed:
+                    continue
+                time_str = _extract_time(row.find("td", class_="time"))
+                gap = _resolve_gap(parsed["pos"] == 1, time_str, last_gap)
+                last_gap = gap
+                result["gc"].append({
+                    "position": parsed["pos"], "slug": parsed["slug"],
+                    "name": parsed["name"], "time_gap_seconds": gap,
+                })
 
         # ── Pointsklassement (pnt-kolonne = td[9]) ────────────────────────────
         if points_table is not None:
@@ -509,6 +594,8 @@ def process(race_slug: str | None, stage_number: int | None, all_stages: bool = 
             print("  Ingen etaper at opdatere")
             continue
 
+        final_sn = get_final_stage_number(race_id)
+
         for stage in stages:
             sn       = stage["stage_number"]
             pcs_url  = stage.get("pcs_stage_url")
@@ -525,8 +612,9 @@ def process(race_slug: str | None, stage_number: int | None, all_stages: bool = 
             if not pcs_url.endswith("/result"):
                 pcs_url = pcs_url.rstrip("/") + "/result"
 
-            print(f"  E{sn}: Scraper {pcs_url}")
-            data = scrape_stage_result(pcs_url)
+            is_final = final_sn is not None and sn == final_sn
+            print(f"  E{sn}: Scraper {pcs_url}" + (" (sidste etape)" if is_final else ""))
+            data = scrape_stage_result(pcs_url, is_final_stage=is_final)
 
             if data["top10"]:
                 print(f"  -> Top 3: " + " | ".join(

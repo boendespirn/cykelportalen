@@ -88,10 +88,21 @@ Begrundelsen er strategisk, ikke kosmetisk: ujævn dækning giver tynde landings
 - **IndexNow** — `submit_indexnow()` i `api.py` POST'er til `api.indexnow.org` som baggrundsopgave. Trigges to steder: (1) når en artikel godkendes (`/admin/articles/{id}/approve`), (2) i `daily_update.py`s `notify_indexnow()` for løbets side + alle dens etapesider, hver gang startliste eller etapedata er blevet oprettet/opdateret for løbet i den kørsel (SEO-010). Nøglefil: `cykel-frontend/public/1a5a3688cfd86781c40cef01ce453403.txt` (offentlig, ikke hemmelig). **Vigtigt:** Google understøtter ikke IndexNow-protokollen (kun Bing, Yandex, Naver, Seznam, Yep) — det er et billigt supplement til crawl-signalet for de søgemaskiner, aldrig en genvej til Google-indeksering. Google-indeksering afhænger af sitemap.xml, intern linking og webstedets opfattede autoritet/vigtighed, ikke IndexNow.
 - **`GET /admin/issues`** (i `api.py`) — parser `state/issues.md` til JSON. Bruges af opgave-dashboardet på `/admin/opgaver` i frontenden.
 
+## Etapereferater (PCS LiveStats)
+
+- **`agents/stage_recap_agent.py`** — skriver `stages.stage_recap`: et kort dansk referat af, hvordan en kørt etape forløb. Kilde er PCS' LiveStats-tidslinje på `…/race/<løb>/<år>/stage-N/live`.
+- **Hele tidslinjen:** live-siden viser kun de ~30 nyeste hændelser. Knappen "view more events" (`a.ViewFullTimeline[data-last_seqnr]`) kalder `POST /rce/livestats_viewmore5b.php` med `{action: timeline, race: <var id på siden>, seqnr: <last_seqnr>}` og får resten som rå `<li>`-HTML. Agenten kalder samme endpoint direkte — ingen browser nødvendig.
+- **Støjfiltrering:** ~80% af tidslinjen er PCS-statistikwidgets. De kendes strukturelt på `<table>`, `div.chartCont`, `div.bar-cont` eller `div.infoSnippet`; rene løbshændelser har kun tekst. Kun fire tabeltyper slipper igennem (gruppesammensætning, spurtresultater, foreløbigt resultat, klassement efter etapen).
+- **Copyright (`CLAUDE.md` §7):** PCS-teksten bruges kun som faktagrundlag. Referatet skrives på ny på dansk via Anthropic API, og kildeteksten gemmes aldrig i databasen.
+- **Aflyste etaper:** mangler etaperesultat (fx Vuelta 2026 E3, afbrudt i uvejr) skrives referatet alligevel, med eksplicit besked til modellen om ikke at nævne en vinder.
+
+---
+
 ## Øvrige domæner (indeks ud fra filnavne — bekræft gerne detaljer)
 
 - **Ryttere:** `startlist_agent.py`, `rider_photo_agent.py`, `fix_rider_photos.py`, `rider_stats_agent.py`, `rider_speciality_agent.py`, `hometown_agent.py`, `local_favorite_agent.py`.
 - **Resultater:** `results_agent.py`, `giro_results_agent.py`, `historical_results_agent.py`, `run_results.py`.
+- **Etapereferater:** `agents/stage_recap_agent.py` (kørte etaper, PCS LiveStats → `stages.stage_recap`), `agents/historic_recap_agent.py` (historiske løb, TourTracker → `stages.historic_recap`).
 - **Løb:** `race_agent.py`, `race_description_agent.py`, `historical_race_agent.py`, `read_races.py`.
 - **Nyheder:** `news_agent.py`, `news_publisher_agent.py`, `ai_news_processor.py`, `rss_news_scraper.py`.
 - **Social/marketing:** `social_agent.py`, `facebook_auth.py`, `fb_article_image.py`, `fb_branding.py`, `instagram_*` (auth, carousel, pinned, image, post), `brand_logo.py`, `image_generator.py`, `intro_content.py`.

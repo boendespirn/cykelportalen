@@ -31,6 +31,9 @@ type Stage = {
   stage_start_time: string | null;
   route_points: [number, number][] | null;
   historic_recap: string | null;
+  // Referat af hvordan etapen forløb — skrevet af agents/stage_recap_agent.py
+  // ud fra PCS' LiveStats-tidslinje. Findes kun for etaper, der ER kørt.
+  stage_recap: string | null;
 };
 
 type Race = { id: string; name: string; slug: string };
@@ -379,6 +382,18 @@ function getRidersForStage(
   return { riders: combined, localSlugs };
 }
 
+/** Referatets første sætning, klippet til SERP-længde — uden halve ord. */
+function firstSentence(text: string | null, maxChars: number): string | null {
+  if (!text) return null;
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  if (!trimmed) return null;
+  const match = trimmed.match(/^.*?[.!?](?=\s|$)/);
+  const sentence = match ? match[0] : trimmed;
+  if (sentence.length <= maxChars) return sentence;
+  const cut = sentence.slice(0, maxChars);
+  return cut.slice(0, cut.lastIndexOf(" ")).trimEnd() + "…";
+}
+
 // ── Metadata ──────────────────────────────────────────────────────────────────
 
 export async function generateMetadata(
@@ -406,7 +421,13 @@ export async function generateMetadata(
   const routeText = route ? `: ${route}` : "";
   const typeLabel = stage.stage_type ? STAGE_TYPE_CONFIG[stage.stage_type]?.label : null;
   const typeText = typeLabel ? ` (${typeLabel})` : "";
-  const desc = `Etaperesultat og klassement for etape ${n} i ${race.name}${routeText}${typeText}.${winnerText} ${stage.distance_km ? `${stage.distance_km} km.` : ""}`.trim();
+  // Findes der et referat, er DET svaret på det, folk søger på ("hvordan gik
+  // etapen"), så SERP-teksten åbner med referatets første sætning i stedet for
+  // den generiske rute-remse. Uden referat bevares den hidtidige beskrivelse.
+  const recapLead = firstSentence(stage.stage_recap, 130);
+  const desc = recapLead
+    ? `Sådan forløb etape ${n} i ${race.name}${routeText}.${winnerText} ${recapLead}`.trim()
+    : `Etaperesultat og klassement for etape ${n} i ${race.name}${routeText}${typeText}.${winnerText} ${stage.distance_km ? `${stage.distance_km} km.` : ""}`.trim();
   return {
     title,
     description: desc,
@@ -543,7 +564,11 @@ export default async function StagePage(props: {
     stage.elevation_image_source === "generated" ? stage.elevation_image_url : null;
 
   const winner = stageResults[0]?.riders;
-  const stageDesc = `Etaperesultat og klassement for etape ${n} i ${race.name}: ${stage.start_location ?? ""}${stage.finish_location ? ` — ${stage.finish_location}` : ""}. Vinder: ${winner?.name ?? "ukendt"}.${stage.distance_km ? ` ${stage.distance_km} km.` : ""}`.trim();
+  // Structured data beskriver etapen med referatet, når vi har ét — det er den
+  // mest retvisende opsummering af, hvad der faktisk skete på etapen.
+  const stageDesc = stage.stage_recap?.trim()
+    ? stage.stage_recap.trim()
+    : `Etaperesultat og klassement for etape ${n} i ${race.name}: ${stage.start_location ?? ""}${stage.finish_location ? ` — ${stage.finish_location}` : ""}. Vinder: ${winner?.name ?? "ukendt"}.${stage.distance_km ? ` ${stage.distance_km} km.` : ""}`.trim();
   const jsonLd = winner ? {
     "@context": "https://schema.org",
     "@type": "SportsEvent",
@@ -662,6 +687,23 @@ export default async function StagePage(props: {
         climbs={effectiveClimbs}
         elevationImageUrl={generatedProfileUrl}
       />
+
+      {/* Sådan forløb etapen — referat af den faktiske løbsudvikling. Ligger
+          højt på siden, fordi det er dét, en bruger der googler "hvad skete der
+          på etapen" kom efter. Vises kun for kørte etaper (agenten skriver
+          først feltet, når etapen har en tidslinje og et resultat). */}
+      {!isHistoric && stage.stage_recap && (
+        <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+              Sådan forløb etapen
+            </h2>
+          </div>
+          <div className="p-5 text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+            {stage.stage_recap}
+          </div>
+        </section>
+      )}
 
       {/* Historisk fortælling — kun historiske sider, kun når narrativ-agenten har skrevet én */}
       {isHistoric && stage.historic_recap && (
