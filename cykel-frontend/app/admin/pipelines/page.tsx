@@ -204,6 +204,7 @@ export default function PipelinesPage() {
                   key={job.key}
                   job={job}
                   run={globalRuns[job.key] ?? null}
+                  runnerOnline={runner?.online ?? true}
                   busy={busy === job.key || busy === globalRuns[job.key]?.id}
                   clock={clock}
                   onRun={() => runGlobal(job.key)}
@@ -221,8 +222,8 @@ export default function PipelinesPage() {
   );
 }
 
-function GlobalJobRow({ job, run, busy, clock, onRun, onCancel }: {
-  job: Job; run: Run | null; busy: boolean; clock: number;
+function GlobalJobRow({ job, run, runnerOnline, busy, clock, onRun, onCancel }: {
+  job: Job; run: Run | null; runnerOnline: boolean; busy: boolean; clock: number;
   onRun: () => void; onCancel: () => void;
 }) {
   const active = isActive(run);
@@ -241,11 +242,14 @@ function GlobalJobRow({ job, run, busy, clock, onRun, onCancel }: {
         {active ? (
           <button
             onClick={onCancel}
-            disabled={busy || run?.cancel_requested}
+            disabled={busy}
+            title={run?.cancel_requested && !runnerOnline
+              ? "Runneren svarer ikke — tryk igen for at frigive kørslen"
+              : undefined}
             className="text-xs px-3 py-1.5 rounded-lg border border-red-500/50 text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 w-28"
           >
             {run?.cancel_requested
-              ? "Stopper …"
+              ? (runnerOnline ? "Stopper …" : "Frigiv")
               : undoLeft > 0
                 ? `Afbryd (${undoLeft}s)`
                 : run?.status === "running" ? "Afbryd kørsel" : "Afbryd"}
@@ -261,12 +265,16 @@ function GlobalJobRow({ job, run, busy, clock, onRun, onCancel }: {
         )}
       </div>
       {active && (
-        <p className="text-xs mt-1.5 text-slate-500">
-          {run?.status === "queued"
-            ? undoLeft > 0
-              ? `I kø — starter om ${undoLeft} sek. Afbryder du nu, bliver intet ændret.`
-              : "I kø — venter på runneren. Afbryder du nu, bliver intet ændret."
-            : "Kører nu. Afbryder du, stopper processen, men det, der allerede er gemt, bliver stående."}
+        <p className={`text-xs mt-1.5 ${run?.cancel_requested && !runnerOnline ? "text-amber-400" : "text-slate-500"}`}>
+          {run?.cancel_requested
+            ? runnerOnline
+              ? "Stopper kørslen — runneren læser beskeden inden for få sekunder."
+              : "Runneren svarer ikke. Tryk “Frigiv” for at lukke kørslen her."
+            : run?.status === "queued"
+              ? undoLeft > 0
+                ? `I kø — starter om ${undoLeft} sek. Afbryder du nu, bliver intet ændret.`
+                : "I kø — venter på runneren. Afbryder du nu, bliver intet ændret."
+              : "Kører nu. Afbryder du, stopper processen, men det, der allerede er gemt, bliver stående."}
         </p>
       )}
     </div>

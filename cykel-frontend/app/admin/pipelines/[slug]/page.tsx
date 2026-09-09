@@ -229,6 +229,7 @@ export default function RacePipelinePage(
                   key={job.key}
                   job={job}
                   stages={data.stages}
+                  runnerOnline={runner?.online ?? true}
                   scope={scopes[job.key] ?? ""}
                   onScope={(v) => setScopes((s) => ({ ...s, [job.key]: v }))}
                   busy={busy === job.key || busy === job.last_run?.id}
@@ -312,9 +313,10 @@ function CheckRow({ check }: { check: Check }) {
   );
 }
 
-function JobRow({ job, stages, scope, onScope, busy, clock, onRun, onCancel }: {
+function JobRow({ job, stages, runnerOnline, scope, onScope, busy, clock, onRun, onCancel }: {
   job: Job;
   stages: Stage[];
+  runnerOnline: boolean;
   scope: string;
   onScope: (v: string) => void;
   busy: boolean;
@@ -393,11 +395,14 @@ function JobRow({ job, stages, scope, onScope, busy, clock, onRun, onCancel }: {
           {running && (
             <button
               onClick={onCancel}
-              disabled={busy || last?.cancel_requested}
+              disabled={busy}
+              title={last?.cancel_requested && !runnerOnline
+                ? "Runneren svarer ikke — tryk igen for at frigive kørslen"
+                : undefined}
               className="text-xs px-3 py-1.5 rounded-lg border border-red-500/50 text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 w-28"
             >
               {last?.cancel_requested
-                ? "Stopper …"
+                ? (runnerOnline ? "Stopper …" : "Frigiv")
                 : undoLeft > 0
                   ? `Afbryd (${undoLeft}s)`
                   : last?.status === "running" ? "Afbryd kørsel" : "Afbryd"}
@@ -414,12 +419,17 @@ function JobRow({ job, stages, scope, onScope, busy, clock, onRun, onCancel }: {
       </div>
 
       {running && (
-        <p className="text-xs mt-2 text-slate-500">
-          {last?.status === "queued"
-            ? undoLeft > 0
-              ? `I kø — starter om ${undoLeft} sek. Afbryder du nu, bliver intet ændret.`
-              : "I kø — venter på runneren. Afbryder du nu, bliver intet ændret."
-            : "Kører nu. Afbryder du, stopper processen, men det, der allerede er gemt, bliver stående."}
+        <p className={`text-xs mt-2 ${last?.cancel_requested && !runnerOnline ? "text-amber-400" : "text-slate-500"}`}>
+          {last?.cancel_requested
+            ? runnerOnline
+              ? "Stopper kørslen — runneren læser beskeden inden for få sekunder."
+              : "Runneren svarer ikke, så ingen kan bekræfte at processen er stoppet. "
+                + "Tryk “Frigiv” for at lukke kørslen her, og kontrollér på PC'en at den faktisk er stoppet."
+            : last?.status === "queued"
+              ? undoLeft > 0
+                ? `I kø — starter om ${undoLeft} sek. Afbryder du nu, bliver intet ændret.`
+                : "I kø — venter på runneren. Afbryder du nu, bliver intet ændret."
+              : "Kører nu. Afbryder du, stopper processen, men det, der allerede er gemt, bliver stående."}
         </p>
       )}
     </div>
@@ -495,7 +505,7 @@ function RunRow({ run, adminKey, open, busy, clock, onToggle, onCancel }: {
         {isActive(run) && (
           <button
             onClick={onCancel}
-            disabled={busy || run.cancel_requested}
+            disabled={busy}
             className="text-xs px-2.5 py-1 rounded-lg border border-red-500/50 text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 flex-shrink-0"
           >
             {run.cancel_requested ? "Stopper …" : undoLeft > 0 ? `Afbryd (${undoLeft}s)` : "Afbryd"}

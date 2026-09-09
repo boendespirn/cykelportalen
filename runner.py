@@ -184,25 +184,38 @@ def finish_job(run_id: str, exit_code: int, log_tail: str,
 
 
 def reset_stale_runs() -> None:
-    """Rækker, der stod som 'running', da runneren sidst stoppede, kan ikke
-    genoptages — processen er væk. Markér dem som fejlet, så dashboardet ikke
-    viser et job, der tilsyneladende kører i al evighed."""
-    res = requests.get(f"{RUNS_URL}?status=eq.running&select=id,job_key",
+    """Raekker, der stod som 'running', da runneren sidst stoppede, kan ikke
+    genoptages — processen er vaek.
+
+    Der skelnes mellem to slags: dem, hvor Afbryd var trykket, og dem, der bare
+    doede med runneren. Foer 2026-09-09 blev begge kaldt 'failed', saa en
+    koersel, ejeren selv havde afbrudt, dukkede op som en fejl, der skulle
+    undersoeges. En knap, der lyver om hvad der skete, er vaerre end ingen knap.
+    """
+    res = requests.get(f"{RUNS_URL}?status=eq.running&select=id,job_key,cancel_requested",
                        headers=READ_HEADERS, timeout=30)
     if not res.ok or not res.json():
         return
     stale = res.json()
-    requests.patch(
-        f"{RUNS_URL}?status=eq.running",
-        json={
-            "status": "failed",
-            "finished_at": now(),
-            "log_tail": "Kørslen blev afbrudt, da runneren stoppede. Start jobbet igen.",
-        },
-        headers={**DB_HEADERS, "Prefer": "return=minimal"}, timeout=30,
-    )
-    log(f"[opstart] nulstillede {len(stale)} afbrudt(e) kørsel/kørsler: "
-        + ", ".join(s["job_key"] for s in stale))
+
+    grupper = [
+        ([r for r in stale if r.get("cancel_requested")], "cancelled",
+         "Afbrudt fra dashboardet. Runneren blev stoppet, foer den naaede at "
+         "melde tilbage, saa koerslen er markeret som afbrudt ved opstart."),
+        ([r for r in stale if not r.get("cancel_requested")], "failed",
+         "Koerslen blev afbrudt, da runneren stoppede. Start jobbet igen."),
+    ]
+    for raekker, status, besked in grupper:
+        if not raekker:
+            continue
+        ids = ",".join(r["id"] for r in raekker)
+        requests.patch(
+            f"{RUNS_URL}?id=in.({ids})",
+            json={"status": status, "finished_at": now(), "log_tail": besked},
+            headers={**DB_HEADERS, "Prefer": "return=minimal"}, timeout=30,
+        )
+        log(f"[opstart] {len(raekker)} koersel/koersler markeret som {status}: "
+            + ", ".join(r["job_key"] for r in raekker))
 
 
 def heartbeat() -> None:
@@ -218,6 +231,23 @@ def heartbeat() -> None:
         )
     except requests.RequestException:
         pass      # et manglende hjerteslag må aldrig stoppe en kørsel
+
+
+def start_heartbeat() -> None:
+    """Sender hjerteslaget i sin egen traad.
+
+    Foer 2026-09-09 blev heartbeat() kun kaldt oeverst i poll-loekken, altsaa
+    IKKE mens et job koerte. En koersel paa en time betoed derfor en time uden
+    livstegn: dashboardet skrev "Runner koerer ikke" praecis mens runneren
+    arbejdede haardest, og et Afbryd kunne ikke skelne en travl runner fra en
+    doed. Traaden er daemon, saa den aldrig holder processen i live.
+    """
+    def slaa() -> None:
+        while True:
+            heartbeat()
+            time.sleep(POLL_SECONDS)
+
+    threading.Thread(target=slaa, daemon=True).start()
 
 
 def enqueue(job_key: str, race_slug: str | None, stage_number: int | None = None,
@@ -420,7 +450,6 @@ def loop(once: bool) -> None:
     reset_stale_runs()
     idle_notified = False
     while True:
-        heartbeat()
         try:
             run = claim_next_job()
         except requests.RequestException as e:
@@ -456,6 +485,11 @@ def main() -> None:
                         help="Koer kun for denne etape (default: hele loebet)")
     parser.add_argument("--list", action="store_true", help="Vis kataloget og stop")
     args = parser.parse_args()
+
+    # Hjerteslaget startes for begge veje (koe og --job), saa dashboardet kan
+    # se, at maskinen er i live, ogsaa under en direkte koersel.
+    if not args.list:
+        start_heartbeat()
 
     if args.list:
         for job in agent_catalog.list_jobs():

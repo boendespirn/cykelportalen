@@ -1182,10 +1182,14 @@ def admin_pipeline_jobs(request: Request):
     }
 
 
-@app.get("/admin/pipelines/runner")
-def admin_pipeline_runner(request: Request):
-    """Er runneren i live? Uden den bliver et klik liggende i koeen."""
-    _require_admin(request)
+def _runner_health() -> dict:
+    """Er runneren i live? Bruges baade af status-endpointet og af Afbryd.
+
+    Ligger i en delt funktion, fordi Afbryd traeffer en beslutning paa den:
+    svarer runneren ikke, er der ingen til at draebe processen, og koerslen skal
+    kunne frigives fra dashboardet i stedet for at staa som "Stopper ..." for
+    evigt.
+    """
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/runner_status?select=host,last_seen"
         f"&order=last_seen.desc&limit=1",
@@ -1193,7 +1197,7 @@ def admin_pipeline_runner(request: Request):
     )
     rows = res.json() if res.ok and isinstance(res.json(), list) else []
     if not rows:
-        return {"online": False, "host": None, "last_seen": None,
+        return {"online": False, "host": None, "last_seen": None, "seconds_since": None,
                 "message": "Runneren har aldrig meldt sig. Start den med: python runner.py"}
 
     row = rows[0]
@@ -1208,6 +1212,13 @@ def admin_pipeline_runner(request: Request):
         "message": None if online else
                    "Runneren svarer ikke. Job lægges i kø og køres, når du starter: python runner.py",
     }
+
+
+@app.get("/admin/pipelines/runner")
+def admin_pipeline_runner(request: Request):
+    """Er runneren i live? Uden den bliver et klik liggende i koeen."""
+    _require_admin(request)
+    return _runner_health()
 
 
 @app.get("/admin/pipelines/races")
@@ -1395,6 +1406,47 @@ def admin_pipeline_run(request: Request, body: PipelineRunRequest):
             "message": None}
 
 
+# En koersel kan ikke vare laengere end runnerens egen timeout (JOB_TIMEOUT_S
+# i runner.py). Staar den stadig som 'running' bagefter, er processen vaek.
+MAX_RUN_HOURS = 3
+
+
+def _forced_cancel_reason(run: dict) -> dict | None:
+    """Tor vi markere en 'running'-koersel som afbrudt uden at have hoert fra
+    runneren? Kun naar der beviseligt ikke er nogen til at goere det:
+
+      * runneren har ikke sendt hjerteslag i RUNNER_STALE_SECONDS, eller
+      * koerslen har staaet som 'running' laengere end runnerens egen timeout.
+
+    Ellers svarer vi None: en travl runner er i gang med at draebe processen og
+    melder tilbage inden for faa sekunder, og en raekke, vi lukkede for tidligt,
+    ville paastaa at noget var stoppet, mens det stadig skrev i databasen.
+    """
+    health = _runner_health()
+    if not health["online"]:
+        siden = health.get("seconds_since")
+        hvor_laenge = f" (sidste livstegn for {siden // 60} min siden)" if siden else ""
+        return {
+            "besked": f"Runneren svarer ikke{hvor_laenge} — kørslen er frigivet og "
+                      "markeret som afbrudt. Tjek at processen faktisk er stoppet på PC'en.",
+            "log": "Afbrudt fra dashboardet. Runneren svarede ikke, så kørslen blev "
+                   "frigivet uden bekræftelse på, at processen nåede at stoppe.",
+        }
+
+    started = run.get("started_at")
+    if started:
+        alder = (datetime.now(timezone.utc)
+                 - datetime.fromisoformat(started.replace("Z", "+00:00"))).total_seconds()
+        if alder > MAX_RUN_HOURS * 3600:
+            return {
+                "besked": f"Kørslen har stået som i gang i over {MAX_RUN_HOURS} timer — "
+                          "længere end runneren selv tillader. Den er frigivet.",
+                "log": f"Afbrudt fra dashboardet efter mere end {MAX_RUN_HOURS} timer "
+                       "som 'running'. Runnerens egen timeout burde have lukket den.",
+            }
+    return None
+
+
 @app.post("/admin/pipelines/runs/{run_id}/cancel")
 def admin_pipeline_cancel(request: Request, run_id: str):
     """Afbryder en koersel.
@@ -1413,7 +1465,8 @@ def admin_pipeline_cancel(request: Request, run_id: str):
     """
     _require_admin(request)
     res = requests.get(
-        f"{RUNS_TABLE}?id=eq.{run_id}&select=id,job_key,status&limit=1",
+        f"{RUNS_TABLE}?id=eq.{run_id}&select=id,job_key,status,started_at,"
+        f"cancel_requested&limit=1",
         headers=get_headers(),
     )
     rows = res.json() if res.ok and isinstance(res.json(), list) else []
@@ -1450,6 +1503,27 @@ def admin_pipeline_cancel(request: Request, run_id: str):
             headers={**get_headers(), "Content-Type": "application/json",
                      "Prefer": "return=minimal"},
         )
+
+        # Flaget alene er nok, saa laenge der ER en runner til at laese det. Er
+        # der ikke, ville raekken staa som "Stopper ..." for evigt — det skete
+        # 2026-09-09, da runneren blev lukket midt i en koersel. Derfor:
+        # svarer runneren ikke, frigiver vi raekken her i stedet.
+        grund = _forced_cancel_reason(run)
+        if grund:
+            requests.patch(
+                f"{RUNS_TABLE}?id=eq.{run_id}&status=eq.running",
+                json={
+                    "status": "cancelled",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "log_tail": grund["log"],
+                    "validation_verdict": "skipped",
+                    "validation_note": "Afbrudt — kørslen kunne ikke bekræftes stoppet.",
+                },
+                headers={**get_headers(), "Content-Type": "application/json",
+                         "Prefer": "return=minimal"},
+            )
+            return {"cancelled": True, "status": "cancelled", "message": grund["besked"]}
+
         return {"cancelled": False, "status": "running",
                 "message": "Kørslen er i gang — stopper den nu. "
                            "Det, den allerede har nået at gemme, bliver stående."}
