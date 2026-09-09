@@ -171,6 +171,64 @@ def get_upcoming_races():
     return races
 
 
+@app.get("/finished-races")
+def get_finished_races():
+    """Loeb i indevaerende saeson, der er koert faerdigt — nyeste foerst.
+
+    Findes for at give de afsluttede loeb en vej ind fra kalendersiden. Uden den
+    kunne man kun naa dem via soegning eller et direkte link, og en side, der kun
+    viser fremtiden, smider hele saesonens indhold vaek hver gang et loeb slutter.
+
+    Vinderen tages med, fordi det er det foerste man vil vide om et overstaaet
+    loeb. Den findes ved at tage gc-klassementets foersteplads efter den HOEJESTE
+    etape, vi har et klassement for — sorteringen er faldende, saa hvis svaret
+    skulle blive afkortet, er det de tidlige etaper der falder ud, ikke de sidste.
+    """
+    today = today_dk()
+    aarets_start = today.replace(month=1, day=1).isoformat()
+    races = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races"
+        f"?select=id,name,slug,start_date,end_date,country_code,category"
+        f"&start_date=gte.{aarets_start}&end_date=lt.{today.isoformat()}"
+        f"&order=end_date.desc",
+        headers=get_headers(),
+    ).json()
+    if not races or not isinstance(races, list):
+        return []
+
+    id_list = ",".join(r["id"] for r in races)
+
+    stage_data = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages?race_id=in.({id_list})&select=race_id",
+        headers=get_headers(),
+    ).json()
+    stage_counts: dict[str, int] = {}
+    for row in stage_data if isinstance(stage_data, list) else []:
+        stage_counts[row["race_id"]] = stage_counts.get(row["race_id"], 0) + 1
+
+    gc = requests.get(
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?race_id=in.({id_list})&classification_type=eq.gc&position=eq.1"
+        f"&select=race_id,after_stage_number,riders(name,slug,nationality)"
+        f"&order=after_stage_number.desc&limit=1000",
+        headers=get_headers(),
+    ).json()
+    vindere: dict[str, dict] = {}
+    for row in gc if isinstance(gc, list) else []:
+        # Listen er sorteret faldende, saa den foerste raekke pr. loeb er den
+        # efter den sidste etape — altsaa den endelige vinder.
+        vindere.setdefault(row["race_id"], row.get("riders") or {})
+
+    return [
+        {
+            **{k: v for k, v in r.items() if k != "id"},
+            "stage_count": stage_counts.get(r["id"], 0),
+            "winner": vindere.get(r["id"]) or None,
+        }
+        for r in races
+    ]
+
+
 @app.get("/ongoing-races")
 def get_ongoing_races():
     today = today_dk().isoformat()

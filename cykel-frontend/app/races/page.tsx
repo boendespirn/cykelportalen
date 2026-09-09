@@ -47,6 +47,12 @@ type OngoingRace = Race & {
   today_stage: TodayStage | null;
 };
 
+// Afsluttet løb i indeværende sæson. `startlist_count` er udeladt med vilje:
+// på et overstået løb er det vinderen, man leder efter, ikke feltets størrelse.
+type FinishedRace = Omit<Race, "startlist_count"> & {
+  winner: { name: string; slug: string; nationality: string | null } | null;
+};
+
 async function getOngoingRaces(): Promise<OngoingRace[]> {
   try {
     const res = await fetch(`${API_BASE}/ongoing-races`, { next: { revalidate: 60 } });
@@ -65,6 +71,32 @@ async function getUpcomingRaces(): Promise<Race[]> {
   } catch {
     return [];
   }
+}
+
+async function getFinishedRaces(): Promise<FinishedRace[]> {
+  try {
+    // Længere revalidate end de kommende løb: et afsluttet løb ændrer sig ikke.
+    const res = await fetch(`${API_BASE}/finished-races`, { next: { revalidate: 300 } });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+/** "POGAČAR Tadej" → "Tadej Pogačar". Kilden skriver efternavnet med versaler
+ *  forrest; resten af sitet viser fornavn først, og et navn i VERSALER ville
+ *  skrige på en side, hvor alt andet er sat i almindelig skrift. */
+function formatRiderName(name: string): string {
+  const dele = name.trim().split(/\s+/);
+  if (dele.length < 2) return name;
+  const fornavn = dele[dele.length - 1];
+  const efternavn = dele
+    .slice(0, -1)
+    .join(" ")
+    .toLowerCase()
+    .replace(/(^|[\s-])(\p{L})/gu, (_, foer: string, bogstav: string) => foer + bogstav.toUpperCase());
+  return `${fornavn} ${efternavn}`;
 }
 
 function flagEmoji(code: string | null): string {
@@ -124,11 +156,13 @@ const STAGE_TYPE_COLORS: Record<string, string> = {
 };
 
 export default async function RacesPage() {
-  const [ongoingRaces, upcomingRaces] = await Promise.all([
+  const [ongoingRaces, upcomingRaces, finishedRaces] = await Promise.all([
     getOngoingRaces(),
     getUpcomingRaces(),
+    getFinishedRaces(),
   ]);
   const months = groupByMonth(upcomingRaces);
+  const saeson = new Date().getFullYear();
 
   return (
     <div className="px-6 py-12">
@@ -362,6 +396,77 @@ export default async function RacesPage() {
               </section>
             ))}
           </div>
+        )}
+
+        {/* ── Allerede kørt i år ─────────────────────────────────────────────
+            Uden denne sektion forsvandt hele sæsonens indhold fra kalenderen,
+            efterhånden som løbene blev kørt: man kunne kun nå et afsluttet løb
+            via søgning eller et direkte link. Nyeste først, for det er dem, man
+            typisk leder efter. */}
+        {finishedRaces.length > 0 && (
+          <section className="mt-16 pt-12 border-t border-slate-800/60">
+            <h2 className="font-display text-xl tracking-[0.2em] text-slate-600 uppercase mb-1">
+              Kørt i {saeson}
+            </h2>
+            <p className="text-xs text-slate-600 mb-5">
+              {finishedRaces.length} afsluttede løb — resultater, klassementer og etaper
+            </p>
+
+            <div className="space-y-1.5">
+              {finishedRaces.map((race) => (
+                <Link
+                  key={race.slug}
+                  href={`/${race.slug}`}
+                  className="group flex items-center gap-4 rounded-xl border border-slate-800/60 bg-slate-900/20 px-5 py-3.5 hover:border-slate-600 hover:bg-slate-900/60 transition-all duration-150"
+                >
+                  <span className="text-xl w-8 text-center flex-shrink-0 leading-none opacity-70 group-hover:opacity-100 transition-opacity">
+                    {flagEmoji(race.country_code)}
+                  </span>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-300 group-hover:text-emerald-400 transition-colors truncate">
+                      {race.name}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="text-xs text-slate-600">
+                        {formatDate(race.start_date)}
+                        {race.end_date && race.end_date !== race.start_date
+                          ? ` – ${formatDate(race.end_date)}`
+                          : ""}
+                      </span>
+                      {race.stage_count > 1 && (
+                        <span className="text-[10px] font-medium text-slate-500 bg-slate-800/80 px-1.5 py-0.5 rounded">
+                          {race.stage_count} etaper
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Vinderen er det første, man vil vide om et overstået løb.
+                      Mangler klassementet, vises feltet slet ikke — hellere
+                      ingenting end en tom plads, der ligner en fejl. */}
+                  {race.winner && (
+                    <span className="hidden sm:flex items-center gap-1.5 flex-shrink-0 text-xs text-slate-500">
+                      <span className="text-amber-400/80">🏆</span>
+                      <span className="text-slate-400 group-hover:text-slate-300 transition-colors">
+                        {formatRiderName(race.winner.name)}
+                      </span>
+                    </span>
+                  )}
+
+                  <svg
+                    className="w-4 h-4 text-slate-800 group-hover:text-emerald-500 transition-colors flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+              ))}
+            </div>
+          </section>
         )}
       </div>
     </div>
