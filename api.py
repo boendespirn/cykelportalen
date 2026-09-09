@@ -1280,14 +1280,28 @@ def admin_pipeline_runner(request: Request):
 
 
 @app.get("/admin/pipelines/races")
-def admin_pipeline_races(request: Request, window_days: int = 120):
-    """Loeb der er relevante at arbejde med lige nu: i gang, lige afsluttet
-    eller paa vej. Fuldstaendigheden beregnes IKKE her — den kraever et snes
-    forespoergsler pr. loeb og hentes derfor pr. loeb, naar du klikker ind."""
+def admin_pipeline_races(request: Request, season: int | None = None,
+                         window_days: int = 120):
+    """Alle loeb i saesonen — i gang, afsluttede og kommende.
+
+    Vinduet var foer 2026-09-09 paa +/-120 dage omkring i dag, og det skar
+    stille og roligt saesonen fra: 9. september kunne man ikke laengere se noget,
+    der sluttede foer 12. maj, altsaa hverken Giroen, Roubaix eller Flandern.
+    De loeb har stadig data, der kan mangle og hentes, saa de skal kunne vaelges.
+
+    Nu vises hele saesonen. For den igangvaerende saeson straekkes den bagerste
+    graense window_days ud i fremtiden, saa naeste saesons foerste loeb allerede
+    kan forberedes.
+
+    Fuldstaendigheden beregnes IKKE her — den kraever et snes forespoergsler pr.
+    loeb og hentes derfor pr. loeb, naar du klikker ind.
+    """
     _require_admin(request)
     today = today_dk()
-    frm = (today - timedelta(days=window_days)).isoformat()
-    til = (today + timedelta(days=window_days)).isoformat()
+    saeson = season or today.year
+    frm = date(saeson, 1, 1).isoformat()
+    til = (today + timedelta(days=window_days) if saeson == today.year
+           else date(saeson, 12, 31)).isoformat()
 
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/races?select=name,slug,start_date,end_date,category"
@@ -1322,7 +1336,7 @@ def admin_pipeline_races(request: Request, window_days: int = 120):
             "failed_count": len(failed),
             "active_count": len(active),
         })
-    return {"races": out, "today": today_iso}
+    return {"races": out, "today": today_iso, "season": saeson}
 
 
 @app.get("/admin/pipelines/races/{race_slug}")

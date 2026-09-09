@@ -182,13 +182,20 @@ export default function PipelinesPage() {
           {PHASE_ORDER.map((phase) => {
             const list = races.filter((r) => r.phase === phase);
             if (!list.length) return null;
+            // Afsluttede løb vises nyeste først: skal man efterbehandle et løb,
+            // er det næsten altid det, der lige er kørt. De kommende står
+            // fortsat i kalenderrækkefølge, hvor det næste er det vigtigste.
+            const sorted = phase === "afsluttet"
+              ? [...list].sort((a, b) => b.start_date.localeCompare(a.start_date))
+              : list;
             return (
               <section key={phase} className="mb-8">
                 <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium mb-3">
                   {PHASE_TITLES[phase]}
+                  <span className="text-slate-600 ml-2 tracking-normal">{sorted.length}</span>
                 </h2>
                 <div className="space-y-2">
-                  {list.map((race) => <RaceRow key={race.slug} race={race} />)}
+                  {sorted.map((race) => <RaceRow key={race.slug} race={race} />)}
                 </div>
               </section>
             );
