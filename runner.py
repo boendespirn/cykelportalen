@@ -61,6 +61,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import requests
 from dotenv import load_dotenv
@@ -95,6 +96,19 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _filter_value(value: str) -> str:
+    """URL-koder en vaerdi, der skal staa i et PostgREST-filter.
+
+    Noedvendig for tidsstempler: ISO-formatet slutter paa "+00:00", og et bart
+    '+' i en query-streng laeses som et mellemrum. "...853629+00:00" naaede
+    derfor frem som "...853629 00:00", PostgREST afviste hele kaldet med
+    22007 (invalid input syntax for timestamp), og claim_next_job() fik aldrig
+    fat i et eneste job. Fundet 2026-09-09, da etape 17's referat blev
+    liggende i koeen for evigt.
+    """
+    return quote(value, safe="")
+
+
 def log(msg: str) -> None:
     print(f"{datetime.now().strftime('%H:%M:%S')} {msg}", flush=True)
 
@@ -112,7 +126,7 @@ def claim_next_job() -> dict | None:
     afbrydelsen samme sekund, må jobbet ikke slippe igennem alligevel.
     """
     res = requests.get(
-        f"{RUNS_URL}?status=eq.queued&not_before=lte.{now()}&cancel_requested=is.false"
+        f"{RUNS_URL}?status=eq.queued&not_before=lte.{_filter_value(now())}&cancel_requested=is.false"
         f"&select=id,job_key,race_slug,stage_number,args"
         f"&order=queued_at.asc&limit=1",
         headers=READ_HEADERS, timeout=30,
