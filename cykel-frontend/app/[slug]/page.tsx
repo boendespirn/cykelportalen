@@ -15,6 +15,9 @@ type Race = {
   name: string; slug: string; start_date: string; end_date: string | null;
   country_code: string | null; category: string; pcs_url: string | null;
   race_type: string; cover_image_url: string | null; description: string | null;
+  // Samlet beretning om hele ræsets forløb, skrevet af race_recap_agent.py
+  // efter sidste etape. Findes kun for afsluttede flerdagesløb.
+  race_recap: string | null;
 };
 
 type Stage = {
@@ -846,6 +849,25 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
             </div>
           </div>
         </Link>
+      )}
+
+      {/* ── Sådan forløb ræset ──
+          Skrives først når ræset er kørt færdigt, så feltet er tomt under
+          selve løbet og sektionen forsvinder helt. Teksten kommer fra
+          race_recap_agent.py, der binder etapereferaterne sammen. */}
+      {race.race_recap && (
+        <section className="mb-10">
+          <h2 className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-4">
+            Sådan forløb {race.name}
+          </h2>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 px-6 py-5 space-y-4">
+            {race.race_recap.split(/\n\s*\n/).map((afsnit, i) => (
+              <p key={i} className="text-slate-300 text-[15px] leading-relaxed">
+                {afsnit.trim()}
+              </p>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* ── Fremhævede profiler ── */}

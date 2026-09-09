@@ -87,7 +87,8 @@ def _stage_label(s: dict) -> str:
 
 
 def race_completeness(race_slug: str) -> dict | None:
-    races = _get("races", f"slug=eq.{race_slug}&select=id,name,slug,start_date,end_date")
+    races = _get("races", f"slug=eq.{race_slug}"
+                          f"&select=id,name,slug,start_date,end_date,race_recap")
     if not races:
         return None
     race = races[0]
@@ -138,6 +139,7 @@ def race_completeness(race_slug: str) -> dict | None:
         _results_check(raced, results),
         _classification_check(raced, classifications),
         _recap_check(raced),
+        _race_recap_check(race, stages),
         _tv_check(broadcasts, race),
     ]
 
@@ -311,9 +313,31 @@ def _recap_check(raced):
     if mangler:
         return _check("referater", "Etapereferater", MISSING,
                       f"{len(mangler)} af {len(raced)} kørte etaper mangler referat",
-                      ["referater"], mangler)
+                      ["resultater"], mangler)
     return _check("referater", "Etapereferater", OK,
                   f"Referat for alle {len(raced)} kørte etaper")
+
+
+def _race_recap_check(race, stages):
+    """Det samlede referat af hele ræset (races.race_recap).
+
+    Kan pr. definition først skrives, når ræset er kørt færdigt — indtil da er
+    det "ikke muligt", ikke en mangel. Ellers ville hvert igangværende løb stå
+    med et permanent rødt punkt i tre uger, og så holder man op med at kigge
+    på listen.
+    """
+    if len(stages) <= 1:
+        return _check("raesreferat", "Samlet ræsreferat", IMPOSSIBLE,
+                      "Endagsløb — etapereferatet er hele historien")
+    slut = race.get("end_date") or race.get("start_date")
+    if not slut or slut >= today_dk():
+        return _check("raesreferat", "Samlet ræsreferat", IMPOSSIBLE,
+                      "Ræset er ikke kørt færdigt endnu")
+    if not (race.get("race_recap") or "").strip():
+        return _check("raesreferat", "Samlet ræsreferat", MISSING,
+                      "Ræset er slut, men har intet samlet referat", ["raesreferat"])
+    return _check("raesreferat", "Samlet ræsreferat", OK,
+                  f"{len((race['race_recap']).split())} ord om hele ræsets forløb")
 
 
 def _tv_check(broadcasts, race):

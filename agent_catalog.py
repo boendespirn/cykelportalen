@@ -77,6 +77,8 @@ LEGACY_LABELS = {
     "stigningsprofiler_gpx": "Stigningsprofiler (GPX-fallback) — udgået",
     "rytterbilleder":        "Rytterbilleder — udgået",
     "resultater_alle":       "Resultater — alle etaper (nu et omfang på Resultater)",
+    "referater":             "Etapereferater (nu trin 2 i Resultater)",
+    "historisk_fortaelling": "Historisk fortælling — erstattet af Samlet ræsreferat",
 }
 
 
@@ -179,7 +181,7 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
 
     _job("fuld_forberedelse", "Fuld forberedelse (hele pipelinen)", PHASE_BEFORE, [
             "startliste", "raesinfo", "stigningsprofiler", "rytterstats",
-            "resultater", "referater",
+            "resultater",
          ],
          description="Kører samtlige trin i rækkefølge. Tager lang tid. "
                      "Vælges én etape, springes de trin over, der kun giver mening for hele løbet.",
@@ -192,28 +194,29 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
     _job("resultater", "Resultater og klassementer", PHASE_DURING, [
             _step("results_agent.py", ["--race", "{db_slug}"],
                   whole=["--all-stages"], stage=["--stage", "{stage}"],
-                  label="Top 10 og alle fire klassementer"),
-         ],
-         description="Etaperesultat og klassement. Hele løbet lukker huller bagud; "
-                     "én etape henter netop den.",
-         covers=["resultater", "klassementer"], est_minutes=40, est_stage_minutes=3),
-
-    _job("referater", "Etapereferater", PHASE_DURING, [
+                  label="1/2 Top 10 og alle fire klassementer"),
+            # Referatet er ikke et selvstændigt job længere (2026-09-09). Det
+            # grundfæster sig i etapens resultat og klassement og skal derfor
+            # ALTID køre lige efter dem: var det en knap for sig, kunne man
+            # komme til at skrive et referat oven på forældede resultater.
             _step("stage_recap_agent.py", ["--race", "{db_slug}"],
                   whole=["--all-stages"], stage=["--stage", "{stage}"],
-                  label="'Sådan forløb etapen' fra PCS LiveStats"),
+                  label="2/2 Etapereferat fra PCS LiveStats"),
          ],
-         description="Skriver etapereferatet ud fra PCS' LiveStats. Kræver at resultaterne er hentet først.",
-         covers=["referater"], est_minutes=6, est_stage_minutes=2),
+         description="Etaperesultat, klassement og etapereferat i én kørsel. "
+                     "Hele ræset lukker huller bagud; én etape henter netop den.",
+         covers=["resultater", "klassementer", "referater"],
+         est_minutes=45, est_stage_minutes=4),
 
     # ── Efter løbet ──────────────────────────────────────────────────────────
-    _job("historisk_fortaelling", "Historisk fortælling", PHASE_AFTER, [
-            _step("historic_recap_agent.py", ["--race", "{db_slug}"],
-                  whole=["--all-stages"], stage=["--stage", "{stage}"],
-                  label="Tilbageskuende fortælling (TourTracker-kilde)"),
+    _job("raesreferat", "Samlet ræsreferat", PHASE_AFTER, [
+            _step("race_recap_agent.py", ["--race", "{db_slug}"],
+                  stage=None,
+                  label="Ræsets historie skrevet ud fra etapereferaterne"),
          ],
-         description="Tilbageskuende fortælling til historiske etapesider.",
-         covers=["historisk_fortaelling"], est_minutes=6, est_stage_minutes=2),
+         description="Skriver én samlet beretning om, hvordan HELE ræset forløb, "
+                     "til løbssiden. Kan først køres, når ræset er kørt færdigt.",
+         covers=["raesreferat"], est_minutes=3),
 
     # ── Uafhængigt af løb ────────────────────────────────────────────────────
     _job("nyheder_rss", "Nyheder — hent RSS", PHASE_GLOBAL, [
