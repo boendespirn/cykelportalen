@@ -211,11 +211,15 @@ def extract_info(pairs: list[dict]) -> dict:
 
 # ── Playwright scraper ────────────────────────────────────────────────────────
 
-async def scrape_race_stages(pcs_slug: str) -> list[dict]:
+async def scrape_race_stages(pcs_slug: str, only_stage: int | None = None) -> list[dict]:
     """
     Scraper alle etaper for ét løb fra PCS.
     Bruger en ny browserside per etape for at undgå Cloudflare-detektion
     (PCS blokerer navigationer fra race-oversigt til stage-sider).
+
+    only_stage: scrap kun den etape. Bruges af admin-dashboardet, når man
+    retter én etape og ikke vil vente på alle 21 — og af pipelinens
+    etape-tilstand (agent_catalog.py).
     """
     from playwright.async_api import async_playwright
 
@@ -225,7 +229,9 @@ async def scrape_race_stages(pcs_slug: str) -> list[dict]:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
 
-        for stage_num in range(1, 30):
+        stage_range = [only_stage] if only_stage else range(1, 30)
+
+        for stage_num in stage_range:
             url = f"{BASE_URL}/race/{pcs_slug}/{YEAR}/stage-{stage_num}"
             print(f"    Etape {stage_num}: {url}")
 
@@ -583,7 +589,8 @@ def save_stages(race_id: str, stages: list[dict]) -> None:
 
 # ── Hovedprogram ──────────────────────────────────────────────────────────────
 
-async def run(target_slug: str | None = None, oneday: bool = False):
+async def run(target_slug: str | None = None, oneday: bool = False,
+              only_stage: int | None = None):
     slugs = [target_slug] if target_slug else PCS_RACE_SLUGS
 
     for pcs_slug in slugs:
@@ -599,7 +606,7 @@ async def run(target_slug: str | None = None, oneday: bool = False):
             if oneday:
                 stages = await scrape_oneday_race(pcs_slug)
             else:
-                stages = await scrape_race_stages(pcs_slug)
+                stages = await scrape_race_stages(pcs_slug, only_stage)
         except Exception as e:
             print(f"  SCRAPE FEJL: {e}")
             import traceback
@@ -620,6 +627,10 @@ if __name__ == "__main__":
     p.add_argument("slug", nargs="?", default=None)
     p.add_argument("--oneday", action="store_true", help="Scraper løbets hovedside (endagsløb)")
     p.add_argument("--year", type=int, default=YEAR, help="Sæsonår, fx 2023 (default: indeværende sæson)")
+    p.add_argument("--stage", type=int, default=None,
+                   help="Kun denne etape (default: alle etaper i loebet)")
     args = p.parse_args()
     YEAR = args.year
-    asyncio.run(run(args.slug, oneday=args.oneday))
+    if args.stage and args.oneday:
+        p.error("--stage og --oneday udelukker hinanden: et endagsloeb har kun een etape")
+    asyncio.run(run(args.slug, oneday=args.oneday, only_stage=args.stage))

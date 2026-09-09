@@ -1,62 +1,25 @@
 """
 race_prep_pipeline.py
-Kører alle agenter der er nødvendige for at gøre et løb klar til publikation.
+Kører alle agenter, der er nødvendige for at gøre et løb klar til publikation.
 
 Bruger:
-  python race_prep_pipeline.py tour-de-suisse                # indeværende sæson, bruger PCS-slug
-  python race_prep_pipeline.py tour-de-france
-  python race_prep_pipeline.py giro-d-italia
+  python race_prep_pipeline.py tour-de-suisse                # indeværende sæson, PCS-slug
   python race_prep_pipeline.py tour-de-france --year 2023    # historisk sæson
+  python race_prep_pipeline.py tour-de-france --stage 7      # kun én etape
 
-Pipeline-trin (i rækkefølge):
-  1. Startliste         — henter alle ryttere med bib-numre fra PCS
-  2. Etapedata          — bekræfter/opdaterer etaper og profilbilleder
-  3. Høj-kval profiler  — erstatter lave PCS-profiler med /info/profiles versioner
-  4. Rytterbilleder     — opdaterer manglende/brudte fotos fra PCS
-  5. Rytterstats        — henter vægt og højde for ryttere der mangler det
-  6. Stigninger (opret) — gpx_climb_agent.py. OPRETTER stage_climbs-rækkerne i
-                          første omgang (klatreinfo + gradient_sections fra PCS).
-                          Uden dette trin har trin 7-8 intet at arbejde på — de
-                          tilføjer kun billeder til allerede eksisterende rækker
-                          (se STG-023, fundet 2026-07-15 under SEO-022-backfillen).
-  7. Stigningsprofiler  — ClimbFinder-profiler for individuelle stigninger
-  8. Stigningsprofiler-fallback — climb_profile_generator.py (GPX-baseret) for
-                          stigninger ClimbFinder ikke fandt/verificerede.
-                          Springer automatisk og ufarligt over løb uden
-                          konfigureret GPX-kilde (se CYCLINGSTAGE_GPX_PAGES).
-  9. Resultater          — results_agent.py --all-stages. For et afsluttet (historisk)
-                          løb hentes samtlige etapers resultater+klassement i denne
-                          kørsel, i modsætning til den løbende opdatering under et
-                          igangværende løb (som i stedet kører uden --all-stages,
-                          løbende efter hver etape — se docstring i results_agent.py).
- 9b. Etapereferater     — stage_recap_agent.py --all-stages. Skriver stages.stage_recap
-                          ud fra PCS' LiveStats-tidslinje. Kører EFTER trin 9, fordi
-                          referatet grundfæstes i vores egne verificerede resultater og
-                          klassement. Etaper uden LiveStats-tidslinje (typisk ældre
-                          årgange) springes automatisk over — trinnet er derfor
-                          ufarligt at køre for ethvert løb.
+Trinnene står IKKE her. De kommer fra agent_catalog.JOBS["fuld_forberedelse"]
+— præcis de samme trin, som knappen "Fuld forberedelse" i admin-dashboardet
+kører. Det var en bevidst omlægning 2026-09-09: så længe listen fandtes to
+steder, kom de to ud af trit, og denne fil kørte stadig climbfinder_agent.py og
+rider_photo_agent.py, længe efter at begge var taget ud af dashboardet. Skal
+rækkefølgen ændres, ændres den i agent_catalog.py, og begge veje følger med.
 
-Ved --historic (letvægts-flow, jf. docs/superpowers/specs/2026-07-15-historiske-
-etapesider-letvaegt.md): trin 6-8 (individuelle stigningsprofiler) springes bevidst
-over — det var den reelle flaskehals for at levere historiske sider hurtigt, og
-historiske sider viser kun hel-etape-højdeprofilen (fra trin 2), ikke pr.-stigning-
-nedbrydning. I stedet tilføjes et nyt afsluttende trin:
- 10. Historisk fortælling — historic_recap_agent.py --all-stages. Kører EFTER
-                          resultater (trin 9), da narrativ-agenten bruger vores
-                          egne verificerede etaperesultater som faktuel grundlag
-                          sammen med TourTracker-kilden (se agents/tourtracker_id_map.json).
+Kør `python agent_catalog.py` for at se de kommandoer, kataloget giver.
 
-Bemærk: `--year` er kun understøttet af trin 1-2 (startlist_agent.py/stage_pcs_agent.py),
-som er de eneste trin, der tager et bart PCS-slug og selv skal udlede DB-slug/PCS-URL.
-Trin 3-9 tager alle `--race DB-SLUG` (som allerede indeholder årstallet, fx
-"tour-de-france-2023") og er derfor årgang-agnostiske i sig selv.
-
-Ikke inkluderet endnu (fremtidig forbedring, ikke blokerende): `profile_reader_agent.py`
-(Claude vision-baseret genlæsning af klatredata fra højdeprofil-billedet, mere
-præcis end gpx_climb_agent.py's rå PCS-scrape) og `veloviewer_agent.py`
-(Strava-segment-baseret visuel profil, nu prioritet 1 for 2026 jf. STG-020) —
-begge kan tilføjes som selvstændige forbedringstrin senere uden at blokere
-selve klatre-opret-trinnet (6) ovenfor.
+Ved --historic tilføjes et afsluttende trin (historic_recap_agent.py), der
+skriver den tilbageskuende fortælling til historiske etapesider ud fra vores
+egne verificerede resultater sammen med TourTracker-kilden
+(se agents/tourtracker_id_map.json).
 """
 
 import subprocess
@@ -122,12 +85,12 @@ def notify_indexnow(db_slug: str) -> None:
         print(f"\n[IndexNow] Kunne ikke melde URL'er til IndexNow (ikke-kritisk): {e}")
 
 
-def run(cmd: list[str], label: str) -> bool:
+def run(cmd: list[str], label: str, cwd: str | None = None) -> bool:
     print(f"\n{'='*60}")
     print(f"▶ {label}")
     print(f"  {' '.join(cmd)}")
     print("=" * 60)
-    result = subprocess.run(cmd, cwd=os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run(cmd, cwd=cwd or os.path.dirname(os.path.abspath(__file__)))
     ok = result.returncode == 0
     print(f"\n{'✓' if ok else '✗'} {label} {'OK' if ok else 'FEJL (fortsætter alligevel)'}")
     return ok
@@ -138,11 +101,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("pcs_slug", help="PCS race-slug, fx tour-de-suisse")
     parser.add_argument("--year", type=int, default=None,
-                         help="Sæsonår, fx 2023 (default: indeværende sæson, jf. startlist_agent.YEAR)")
+                        help="Sæsonår, fx 2023 (default: indeværende sæson, jf. startlist_agent.YEAR)")
+    parser.add_argument("--stage", type=int, default=None,
+                        help="Kør kun for denne etape. Trin, der kun giver mening for hele "
+                             "løbet (startliste, rytterstats, TV-tider), springes over.")
     parser.add_argument("--historic", action="store_true",
-                         help="Kør resultat-trinnet (9/9) med --all-stages i stedet for kun seneste etape, "
-                              "og spring rytterbilleder (4/9) over, da de sjældnere er relevante for gamle sæsoner. "
-                              "Sættes automatisk til True hvis --year peger på en tidligere sæson end indeværende.")
+                        help="Tilføj den historiske fortælling til sidst. Sættes automatisk, "
+                             "hvis --year peger på en tidligere sæson end indeværende.")
     args = parser.parse_args()
     pcs_slug = args.pcs_slug.lower().strip()
 
@@ -152,94 +117,31 @@ def main():
     db_base = PCS_TO_DB_SLUG.get(pcs_slug, pcs_slug)
     db_slug = f"{db_base}-{year}"
 
-    print(f"\nRace Prep Pipeline")
+    import agent_catalog
+
+    print("\nRace Prep Pipeline")
     print(f"PCS-slug : {pcs_slug}")
     print(f"DB-slug  : {db_slug}")
     print(f"År       : {year}{' (historisk)' if historic else ''}")
+    print(f"Omfang   : {agent_catalog.scope_label(args.stage)}")
 
-    py = sys.executable
-    year_args = ["--year", str(year)]
-
-    steps = [
-        (
-            [py, "startlist_agent.py", pcs_slug, *year_args],
-            "1/9 Startliste (PCS)",
-        ),
-        (
-            [py, "stage_pcs_agent.py", pcs_slug, *year_args],
-            "2/9 Etapedata og basisprofilbilleder (PCS)",
-        ),
-        (
-            [py, "pcs_profile_image_agent.py", "--race", db_slug, "--overwrite"],
-            "3/9 Høj-kvalitets profilbilleder (/info/profiles)",
-        ),
-        (
-            [py, "rider_photo_agent.py", "--race", db_slug],
-            "4/9 Rytterbilleder",
-        ),
-        (
-            [py, "rider_stats_agent.py", "--race", db_slug],
-            "5/9 Rytterstats (vægt + højde)",
-        ),
-        (
-            [py, "gpx_climb_agent.py", "--race", db_slug],
-            "6/9 Stigninger — opret stage_climbs-rækker (PCS)",
-        ),
-        (
-            [py, "climbfinder_agent.py", "--race", db_slug],
-            "7/9 Stigningsprofiler (ClimbFinder)",
-        ),
-        (
-            [py, "climb_profile_generator.py", "--race", db_slug, "--all",
-             "--style", "full", "--write-db"],
-            "8/9 Stigningsprofiler-fallback (GPX-generator)",
-        ),
-        (
-            [py, "aso_roadbook_agent.py", "--race", db_slug, "--write"],
-            "8b/9 Roadbook-fakta: stigningskategorier + mellemsprints (kun ASO-løb, ellers no-op)",
-        ),
-        (
-            [py, "stage_profile_generator.py", "--race", db_slug, "--all", "--write-db"],
-            "8c/9 Hel-etape-højdeprofil i eget design (GPX-generator, LEG-001-erstatning)",
-        ),
-        (
-            [py, "results_agent.py", "--race", db_slug, *(["--all-stages"] if historic else [])],
-            "9/9 Resultater + klassement" + (" (alle etaper, historisk)" if historic else " (seneste etape)"),
-        ),
-        (
-            [py, "stage_recap_agent.py", "--race", db_slug, "--all-stages"],
-            "9b/9 Etapereferater (PCS LiveStats)",
-        ),
-    ]
-
-    # Rytterbilleder er lavere prioritet for historiske sæsoner (mange ryttere
-    # stoppet, ingen SEO-værdi i friske fotos af en gammel startliste) — spring
-    # trinnet over ved --historic i stedet for at bruge tid/PCS-kald på det.
-    # Stignings-trinnene (6-8) springes også over ved --historic — historiske
-    # sider viser bevidst ikke individuelle stigningsprofiler (se spec i
-    # docstringen ovenfor); det var den reelle flaskehals for hurtig levering.
-    if historic:
-        skip_prefixes = ("4/9", "6/9", "7/9", "8/9")
-        steps = [(cmd, label) for cmd, label in steps if not label.startswith(skip_prefixes)]
-        steps.append((
-            [py, "historic_recap_agent.py", "--race", db_slug, "--all-stages"],
-            "10/9 Historisk fortælling (narrativ-agent)",
-        ))
+    try:
+        steps = agent_catalog.build_commands("fuld_forberedelse", db_slug, args.stage)
+        if historic:
+            steps += agent_catalog.build_commands("historisk_fortaelling", db_slug, args.stage)
+    except ValueError as e:
+        print(f"\nFEJL: {e}")
+        sys.exit(1)
 
     results = []
-    for cmd, label in steps:
-        ok = run(cmd, label)
-        results.append((label, ok))
+    for i, step in enumerate(steps, 1):
+        label = f"{i}/{len(steps)} {step['label']}"
+        results.append((label, run(step["cmd"], label, step["cwd"])))
 
     print(f"\n{'='*60}")
     print("Pipeline færdig — oversigt:")
     for label, ok in results:
         print(f"  {'✓' if ok else '✗'} {label}")
-
-    if not historic:
-        print(f"\nNæste trin når løbet kører:")
-        print(f"  python results_agent.py --race {db_slug}")
-        print(f"  (kør efter hver etape er afsluttet, uden --all-stages)")
 
     notify_indexnow(db_slug)
 

@@ -18,12 +18,15 @@ type Check = {
 type Run = {
   id: string;
   job_key: string;
+  stage_number: number | null;
   status: "queued" | "running" | "success" | "failed" | "cancelled";
   trigger: string;
   queued_at: string;
+  not_before: string | null;
   started_at: string | null;
   finished_at: string | null;
   exit_code: number | null;
+  cancel_requested: boolean;
   validation_verdict: "ok" | "warning" | "error" | "skipped" | null;
   validation_note: string | null;
 };
@@ -34,8 +37,18 @@ type Job = {
   phase: string;
   description: string;
   est_minutes: number;
+  est_stage_minutes: number | null;
+  supports_stage: boolean;
+  step_labels: string[];
   last_run: Run | null;
   would_fix: string[];
+};
+
+type Stage = {
+  stage_number: number;
+  label: string;
+  date: string | null;
+  cancelled: boolean;
 };
 
 type Detail = {
@@ -47,13 +60,26 @@ type Detail = {
   completeness_pct: number;
   checks: Check[];
   jobs: Job[];
+  stages: Stage[];
   recent_runs: Run[];
   phase_labels: Record<string, string>;
+  cancel_window_seconds: number;
 };
 
 type RunnerStatus = { online: boolean; message: string | null };
 
 const PHASE_ORDER = ["before", "during", "after"];
+
+/** Sekunder til et tidspunkt i fremtiden — 0 når det er passeret. Bruges til
+ *  fortryd-nedtællingen, så man kan se præcis hvor længe man har til at
+ *  fortryde, i stedet for at gætte. */
+function secondsUntil(iso: string | null | undefined, now: number): number {
+  if (!iso) return 0;
+  return Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 1000));
+}
+
+const isActive = (r: Run | null | undefined) =>
+  r?.status === "queued" || r?.status === "running";
 
 export default function RacePipelinePage(
   { params }: { params: Promise<{ slug: string }> }
@@ -66,6 +92,11 @@ export default function RacePipelinePage(
   const [toast, setToast] = useState<string | null>(null);
   const [openRun, setOpenRun] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  // Valgt omfang pr. job: "" = hele ræset, ellers etapenummeret som streng.
+  const [scopes, setScopes] = useState<Record<string, string>>({});
+  // Tikker hvert sekund, mens noget er aktivt — uden det ville fortryd-
+  // nedtællingen stå stille, og man ville ikke turde stole på den.
+  const [clock, setClock] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     if (!adminKey) return;
@@ -81,21 +112,47 @@ export default function RacePipelinePage(
 
   // Mens noget kører, opdaterer vi hyppigt — ellers ville siden vise "i kø"
   // længe efter at jobbet var færdigt, og man ville trykke igen.
-  const active = data?.recent_runs.some((r) => r.status === "queued" || r.status === "running");
+  const active = data?.recent_runs.some(isActive) ?? false;
   useEffect(() => {
     if (!adminKey) return;
     const t = setInterval(load, active ? 5000 : 30000);
     return () => clearInterval(t);
   }, [adminKey, load, active]);
 
-  const runJob = async (jobKey: string) => {
-    setBusy(jobKey);
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+
+  const say = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 5000);
+  };
+
+  const runJob = async (job: Job) => {
+    const picked = scopes[job.key] ?? "";
+    const stage = picked === "" ? null : Number(picked);
+    setBusy(job.key);
     const res = await adminPost<{ queued: boolean; message: string | null }>(
-      "/admin/pipelines/run", adminKey, { job_key: jobKey, race_slug: slug }
+      "/admin/pipelines/run", adminKey,
+      { job_key: job.key, race_slug: slug, stage_number: stage }
     );
     setBusy(null);
-    setToast(res ? (res.message ?? "Lagt i kø") : "Kunne ikke lægges i kø");
-    setTimeout(() => setToast(null), 4000);
+    const scopeText = stage === null ? "hele ræset" : `etape ${stage}`;
+    say(res
+      ? (res.message ?? `Lagt i kø for ${scopeText} — du kan nå at fortryde`)
+      : "Kunne ikke lægges i kø");
+    load();
+  };
+
+  const cancelRun = async (runId: string) => {
+    setBusy(runId);
+    const res = await adminPost<{ cancelled: boolean; message: string }>(
+      `/admin/pipelines/runs/${runId}/cancel`, adminKey, {}
+    );
+    setBusy(null);
+    say(res ? res.message : "Kunne ikke afbryde");
     load();
   };
 
@@ -168,7 +225,17 @@ export default function RacePipelinePage(
             </h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 divide-y divide-slate-800/60">
               {jobs.map((job) => (
-                <JobRow key={job.key} job={job} busy={busy === job.key} onRun={() => runJob(job.key)} />
+                <JobRow
+                  key={job.key}
+                  job={job}
+                  stages={data.stages}
+                  scope={scopes[job.key] ?? ""}
+                  onScope={(v) => setScopes((s) => ({ ...s, [job.key]: v }))}
+                  busy={busy === job.key || busy === job.last_run?.id}
+                  clock={clock}
+                  onRun={() => runJob(job)}
+                  onCancel={() => job.last_run && cancelRun(job.last_run.id)}
+                />
               ))}
             </div>
           </section>
@@ -186,6 +253,9 @@ export default function RacePipelinePage(
             {data.recent_runs.map((run) => (
               <RunRow key={run.id} run={run} adminKey={adminKey}
                       open={openRun === run.id}
+                      busy={busy === run.id}
+                      clock={clock}
+                      onCancel={() => cancelRun(run.id)}
                       onToggle={() => setOpenRun(openRun === run.id ? null : run.id)} />
             ))}
           </div>
@@ -242,42 +312,116 @@ function CheckRow({ check }: { check: Check }) {
   );
 }
 
-function JobRow({ job, busy, onRun }: { job: Job; busy: boolean; onRun: () => void }) {
+function JobRow({ job, stages, scope, onScope, busy, clock, onRun, onCancel }: {
+  job: Job;
+  stages: Stage[];
+  scope: string;
+  onScope: (v: string) => void;
+  busy: boolean;
+  clock: number;
+  onRun: () => void;
+  onCancel: () => void;
+}) {
   const last = job.last_run;
-  const isActive = last?.status === "queued" || last?.status === "running";
+  const running = isActive(last);
+  // Fortryd-vinduet: så længe not_before ligger i fremtiden, har runneren
+  // stadig ikke rørt jobbet, og et klik på Afbryd efterlader databasen urørt.
+  const undoLeft = last?.status === "queued" ? secondsUntil(last.not_before, clock) : 0;
+  const minutes = scope === "" ? job.est_minutes : (job.est_stage_minutes ?? job.est_minutes);
+
   return (
-    <div className="flex items-center gap-4 px-5 py-3">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-slate-200">{job.label}</span>
-          {job.would_fix.length > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-              lukker: {job.would_fix.join(", ")}
-            </span>
+    <div className="px-5 py-3.5">
+      <div className="flex items-start gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-slate-200">{job.label}</span>
+            {job.step_labels.length > 1 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/40 text-slate-400 border border-slate-700">
+                {job.step_labels.length} trin
+              </span>
+            )}
+            {job.would_fix.length > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                lukker: {job.would_fix.join(", ")}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-slate-500">{job.description}</div>
+          {job.step_labels.length > 1 && (
+            <div className="text-xs text-slate-600 mt-1 font-mono truncate">
+              {job.step_labels.join(" → ")}
+            </div>
           )}
+          <div className="text-xs text-slate-600 mt-0.5">
+            {last ? (
+              <>
+                sidst {timeAgo(last.queued_at)}
+                {last.stage_number ? ` · etape ${last.stage_number}` : " · hele ræset"}
+                {last.validation_verdict && last.validation_verdict !== "ok" && (
+                  <span className="text-amber-400"> · {last.validation_note}</span>
+                )}
+              </>
+            ) : "aldrig kørt"}
+          </div>
         </div>
-        <div className="text-xs text-slate-500 truncate">{job.description}</div>
-        <div className="text-xs text-slate-600 mt-0.5">
-          {last ? (
-            <>
-              sidst {timeAgo(last.queued_at)}
-              {last.validation_verdict && last.validation_verdict !== "ok" && (
-                <span className="text-amber-400"> · {last.validation_note}</span>
-              )}
-            </>
-          ) : "aldrig kørt"}
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <select
+            value={scope}
+            onChange={(e) => onScope(e.target.value)}
+            disabled={!job.supports_stage}
+            title={job.supports_stage
+              ? "Kør for hele ræset eller for én etape"
+              : "Dette job gælder altid hele ræset"}
+            className="text-xs bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-300 outline-none focus:border-emerald-500/60 disabled:opacity-40 max-w-[15rem]"
+          >
+            <option value="">Hele ræset</option>
+            {job.supports_stage && stages.map((s) => (
+              <option key={s.stage_number} value={String(s.stage_number)}>
+                {s.label}{s.cancelled ? " (aflyst)" : ""}
+              </option>
+            ))}
+          </select>
+
+          <span className="text-xs text-slate-600 font-mono hidden sm:inline w-14 text-right">
+            ~{minutes} min
+          </span>
+
+          {/* Kør bliver stående, selv mens noget er aktivt: med etapevalg er det
+              helt normalt at ville lægge etape 6 i kø, mens etape 5 venter.
+              API'et afviser selv en dublet af præcis samme job + løb + etape. */}
+          {running && (
+            <button
+              onClick={onCancel}
+              disabled={busy || last?.cancel_requested}
+              className="text-xs px-3 py-1.5 rounded-lg border border-red-500/50 text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 w-28"
+            >
+              {last?.cancel_requested
+                ? "Stopper …"
+                : undoLeft > 0
+                  ? `Afbryd (${undoLeft}s)`
+                  : last?.status === "running" ? "Afbryd kørsel" : "Afbryd"}
+            </button>
+          )}
+          <button
+            onClick={onRun}
+            disabled={busy}
+            className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300 transition-colors disabled:opacity-40 w-28"
+          >
+            {busy ? "…" : "Kør"}
+          </button>
         </div>
       </div>
-      <span className="text-xs text-slate-600 font-mono flex-shrink-0 hidden sm:inline">
-        ~{job.est_minutes} min
-      </span>
-      <button
-        onClick={onRun}
-        disabled={busy || isActive}
-        className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300 transition-colors disabled:opacity-40 flex-shrink-0"
-      >
-        {isActive ? (last?.status === "running" ? "Kører …" : "I kø") : busy ? "…" : "Kør"}
-      </button>
+
+      {running && (
+        <p className="text-xs mt-2 text-slate-500">
+          {last?.status === "queued"
+            ? undoLeft > 0
+              ? `I kø — starter om ${undoLeft} sek. Afbryder du nu, bliver intet ændret.`
+              : "I kø — venter på runneren. Afbryder du nu, bliver intet ændret."
+            : "Kører nu. Afbryder du, stopper processen, men det, der allerede er gemt, bliver stående."}
+        </p>
+      )}
     </div>
   );
 }
@@ -288,6 +432,10 @@ const STATUS_STYLE: Record<string, string> = {
   success: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   failed:  "bg-red-500/15 text-red-300 border-red-500/30",
   cancelled: "bg-slate-500/15 text-slate-400 border-slate-600/40",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  queued: "i kø", running: "kører", success: "ok", failed: "fejlet", cancelled: "afbrudt",
 };
 
 const VERDICT_STYLE: Record<string, string> = {
@@ -301,34 +449,59 @@ const VERDICT_LABEL: Record<string, string> = {
   ok: "Kontrolleret OK", warning: "Advarsel", error: "Fejl", skipped: "Ikke kontrolleret",
 };
 
-function RunRow({ run, adminKey, open, onToggle }: {
-  run: Run; adminKey: string; open: boolean; onToggle: () => void;
+function RunRow({ run, adminKey, open, busy, clock, onToggle, onCancel }: {
+  run: Run; adminKey: string; open: boolean; busy: boolean; clock: number;
+  onToggle: () => void; onCancel: () => void;
 }) {
   const [log, setLog] = useState<string | null>(null);
+  const [label, setLabel] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || log !== null) return;
-    adminGet<{ log_tail: string | null }>(`/admin/pipelines/runs/${run.id}`, adminKey)
-      .then((d) => setLog(d?.log_tail ?? "(ingen log gemt)"));
+    adminGet<{ log_tail: string | null; job_label: string }>(
+      `/admin/pipelines/runs/${run.id}`, adminKey
+    ).then((d) => {
+      setLog(d?.log_tail ?? "(ingen log gemt)");
+      setLabel(d?.job_label ?? null);
+    });
   }, [open, log, run.id, adminKey]);
+
+  const undoLeft = run.status === "queued" ? secondsUntil(run.not_before, clock) : 0;
 
   return (
     <div className="px-5 py-3">
-      <button onClick={onToggle} className="w-full flex items-center gap-3 text-left">
-        <span className={`text-xs px-2 py-0.5 rounded-full border flex-shrink-0 ${STATUS_STYLE[run.status]}`}>
-          {run.status}
-        </span>
-        <span className="text-sm text-slate-300 flex-1 min-w-0 truncate">{run.job_key}</span>
-        {run.validation_verdict && (
-          <span className={`text-xs flex-shrink-0 ${VERDICT_STYLE[run.validation_verdict]}`}>
-            {VERDICT_LABEL[run.validation_verdict]}
+      <div className="flex items-center gap-3">
+        <button onClick={onToggle} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+          <span className={`text-xs px-2 py-0.5 rounded-full border flex-shrink-0 ${STATUS_STYLE[run.status]}`}>
+            {STATUS_LABEL[run.status] ?? run.status}
           </span>
+          <span className="text-sm text-slate-300 flex-1 min-w-0 truncate">
+            {label ?? run.job_key}
+            <span className="text-slate-600">
+              {" · "}{run.stage_number ? `etape ${run.stage_number}` : "hele ræset"}
+            </span>
+          </span>
+          {run.validation_verdict && (
+            <span className={`text-xs flex-shrink-0 ${VERDICT_STYLE[run.validation_verdict]}`}>
+              {VERDICT_LABEL[run.validation_verdict]}
+            </span>
+          )}
+          <span className="text-xs text-slate-600 flex-shrink-0 hidden sm:inline">
+            {formatDateTime(run.queued_at)}
+          </span>
+          <span className="text-slate-600 text-xs">{open ? "▲" : "▼"}</span>
+        </button>
+
+        {isActive(run) && (
+          <button
+            onClick={onCancel}
+            disabled={busy || run.cancel_requested}
+            className="text-xs px-2.5 py-1 rounded-lg border border-red-500/50 text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 flex-shrink-0"
+          >
+            {run.cancel_requested ? "Stopper …" : undoLeft > 0 ? `Afbryd (${undoLeft}s)` : "Afbryd"}
+          </button>
         )}
-        <span className="text-xs text-slate-600 flex-shrink-0 hidden sm:inline">
-          {formatDateTime(run.queued_at)}
-        </span>
-        <span className="text-slate-600 text-xs">{open ? "▲" : "▼"}</span>
-      </button>
+      </div>
 
       {run.validation_note && (
         <p className={`text-xs mt-1.5 ${VERDICT_STYLE[run.validation_verdict ?? "skipped"]}`}>

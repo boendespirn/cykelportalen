@@ -7,9 +7,13 @@ import { useAdminKey, adminGet, adminPost, timeAgo, AdminLogin } from "../adminK
 type Run = {
   id: string;
   job_key: string;
+  race_slug: string | null;
+  stage_number: number | null;
   status: string;
   queued_at: string;
+  not_before: string | null;
   finished_at: string | null;
+  cancel_requested: boolean;
   validation_verdict: string | null;
   validation_note: string | null;
 };
@@ -41,7 +45,18 @@ type Job = {
   needs_race: boolean;
   description: string;
   est_minutes: number;
+  step_labels: string[];
 };
+
+const isActive = (r: Run | null | undefined) =>
+  r?.status === "queued" || r?.status === "running";
+
+/** Sekunder til et tidspunkt i fremtiden — 0 naar det er passeret. Driver
+ *  fortryd-nedtaellingen paa Afbryd-knappen. */
+function secondsUntil(iso: string | null | undefined, now: number): number {
+  if (!iso) return 0;
+  return Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 1000));
+}
 
 const PHASE_ORDER: Race["phase"][] = ["i_gang", "kommende", "afsluttet"];
 const PHASE_TITLES: Record<Race["phase"], string> = {
@@ -55,20 +70,34 @@ export default function PipelinesPage() {
   const [races, setRaces] = useState<Race[]>([]);
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
   const [globalJobs, setGlobalJobs] = useState<Job[]>([]);
+  // Seneste koersel pr. globalt job — det er den, Afbryd-knappen peger paa.
+  const [globalRuns, setGlobalRuns] = useState<Record<string, Run>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [clock, setClock] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     if (!adminKey) return;
-    const [r, s, j] = await Promise.all([
+    const [r, s, j, runs] = await Promise.all([
       adminGet<{ races: Race[] }>("/admin/pipelines/races", adminKey),
       adminGet<RunnerStatus>("/admin/pipelines/runner", adminKey),
       adminGet<{ jobs: Job[] }>("/admin/pipelines/jobs", adminKey),
+      adminGet<{ runs: Run[] }>("/admin/pipelines/runs?limit=100", adminKey),
     ]);
     if (r) setRaces(r.races);
     if (s) setRunner(s);
     if (j) setGlobalJobs(j.jobs.filter((x) => !x.needs_race));
+    if (runs) {
+      // Listen kommer nyest foerst, saa den foerste forekomst af et job_key er
+      // den seneste koersel. Kun de loebsloese job hoerer til paa denne side.
+      const latest: Record<string, Run> = {};
+      for (const run of runs.runs) {
+        if (run.race_slug) continue;
+        if (!latest[run.job_key]) latest[run.job_key] = run;
+      }
+      setGlobalRuns(latest);
+    }
     setLoading(false);
   }, [adminKey]);
 
@@ -82,14 +111,35 @@ export default function PipelinesPage() {
     return () => clearInterval(t);
   }, [adminKey, load]);
 
+  const anyActive = Object.values(globalRuns).some(isActive);
+  useEffect(() => {
+    if (!anyActive) return;
+    const t = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [anyActive]);
+
+  const say = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 5000);
+  };
+
   const runGlobal = async (jobKey: string) => {
     setBusy(jobKey);
     const res = await adminPost<{ queued: boolean; message: string | null }>(
       "/admin/pipelines/run", adminKey, { job_key: jobKey }
     );
     setBusy(null);
-    setToast(res ? (res.message ?? "Lagt i kø") : "Kunne ikke lægges i kø");
-    setTimeout(() => setToast(null), 4000);
+    say(res ? (res.message ?? "Lagt i kø — du kan nå at fortryde") : "Kunne ikke lægges i kø");
+    load();
+  };
+
+  const cancelRun = async (runId: string) => {
+    setBusy(runId);
+    const res = await adminPost<{ cancelled: boolean; message: string }>(
+      `/admin/pipelines/runs/${runId}/cancel`, adminKey, {}
+    );
+    setBusy(null);
+    say(res ? res.message : "Kunne ikke afbryde");
     load();
   };
 
@@ -150,24 +200,74 @@ export default function PipelinesPage() {
             </h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 divide-y divide-slate-800/60">
               {globalJobs.map((job) => (
-                <div key={job.key} className="flex items-center gap-4 px-5 py-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-slate-200">{job.label}</div>
-                    <div className="text-xs text-slate-500 truncate">{job.description}</div>
-                  </div>
-                  <span className="text-xs text-slate-600 font-mono flex-shrink-0">~{job.est_minutes} min</span>
-                  <button
-                    onClick={() => runGlobal(job.key)}
-                    disabled={busy === job.key}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300 transition-colors disabled:opacity-40"
-                  >
-                    {busy === job.key ? "…" : "Kør"}
-                  </button>
-                </div>
+                <GlobalJobRow
+                  key={job.key}
+                  job={job}
+                  run={globalRuns[job.key] ?? null}
+                  busy={busy === job.key || busy === globalRuns[job.key]?.id}
+                  clock={clock}
+                  onRun={() => runGlobal(job.key)}
+                  onCancel={() => {
+                    const run = globalRuns[job.key];
+                    if (run) cancelRun(run.id);
+                  }}
+                />
               ))}
             </div>
           </section>
         </>
+      )}
+    </div>
+  );
+}
+
+function GlobalJobRow({ job, run, busy, clock, onRun, onCancel }: {
+  job: Job; run: Run | null; busy: boolean; clock: number;
+  onRun: () => void; onCancel: () => void;
+}) {
+  const active = isActive(run);
+  // Saa laenge not_before ligger i fremtiden, har runneren ikke roert jobbet —
+  // et klik paa Afbryd her efterlader databasen fuldstaendig urort.
+  const undoLeft = run?.status === "queued" ? secondsUntil(run.not_before, clock) : 0;
+
+  return (
+    <div className="px-5 py-3">
+      <div className="flex items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-slate-200">{job.label}</div>
+          <div className="text-xs text-slate-500 truncate">{job.description}</div>
+        </div>
+        <span className="text-xs text-slate-600 font-mono flex-shrink-0">~{job.est_minutes} min</span>
+        {active ? (
+          <button
+            onClick={onCancel}
+            disabled={busy || run?.cancel_requested}
+            className="text-xs px-3 py-1.5 rounded-lg border border-red-500/50 text-red-300 hover:bg-red-500/10 transition-colors disabled:opacity-40 w-28"
+          >
+            {run?.cancel_requested
+              ? "Stopper …"
+              : undoLeft > 0
+                ? `Afbryd (${undoLeft}s)`
+                : run?.status === "running" ? "Afbryd kørsel" : "Afbryd"}
+          </button>
+        ) : (
+          <button
+            onClick={onRun}
+            disabled={busy}
+            className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300 transition-colors disabled:opacity-40 w-28"
+          >
+            {busy ? "…" : "Kør"}
+          </button>
+        )}
+      </div>
+      {active && (
+        <p className="text-xs mt-1.5 text-slate-500">
+          {run?.status === "queued"
+            ? undoLeft > 0
+              ? `I kø — starter om ${undoLeft} sek. Afbryder du nu, bliver intet ændret.`
+              : "I kø — venter på runneren. Afbryder du nu, bliver intet ændret."
+            : "Kører nu. Afbryder du, stopper processen, men det, der allerede er gemt, bliver stående."}
+        </p>
       )}
     </div>
   );

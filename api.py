@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import ast
 import os
@@ -1142,13 +1142,20 @@ RUNS_TABLE = f"{SUPABASE_URL}/rest/v1/agent_runs"
 # hvert 15. sekund, så 90 sekunder rummer et par tabte kald uden falsk alarm.
 RUNNER_STALE_SECONDS = 90
 
+# Fortryd-vinduet: runneren må ikke tage jobbet før så mange sekunder efter
+# klikket. Uden det ville et klik, der tilfældigvis ramte lige før runnerens
+# poll, være i gang med at skrive i databasen, inden man nåede at fortryde —
+# og hele pointen med Afbryd er at nå det, FØR noget ændres på sitet.
+CANCEL_WINDOW_SECONDS = 30
+
 
 def _runs_for(race_slug: str | None, limit: int = 200) -> list:
     """Seneste kørsler, nyeste først. Uden race_slug: alle."""
     race_filter = f"&race_slug=eq.{race_slug}" if race_slug else ""
     res = requests.get(
-        f"{RUNS_TABLE}?select=id,job_key,race_slug,status,trigger,queued_at,"
-        f"started_at,finished_at,exit_code,validation_verdict,validation_note"
+        f"{RUNS_TABLE}?select=id,job_key,race_slug,stage_number,status,trigger,"
+        f"queued_at,not_before,started_at,finished_at,exit_code,cancel_requested,"
+        f"validation_verdict,validation_note"
         f"{race_filter}&order=queued_at.desc&limit={limit}",
         headers=get_headers(),
     )
@@ -1171,6 +1178,7 @@ def admin_pipeline_jobs(request: Request):
     return {
         "jobs": agent_catalog.list_jobs(),
         "phase_labels": agent_catalog.PHASE_LABELS,
+        "cancel_window_seconds": CANCEL_WINDOW_SECONDS,
     }
 
 
@@ -1282,53 +1290,172 @@ def admin_pipeline_race_detail(request: Request, race_slug: str):
     return {
         **data,
         "jobs": jobs,
+        "stages": _stages_for_picker(race_slug),
         "recent_runs": runs[:20],
         "phase_labels": agent_catalog.PHASE_LABELS,
+        "cancel_window_seconds": CANCEL_WINDOW_SECONDS,
     }
+
+
+def _stages_for_picker(race_slug: str) -> list[dict]:
+    """Etaperne som dropdownen "hele loebet / etape N" skal vise.
+
+    Navnet hentes fra databasen og ikke fra et taelleloeb, saa listen altid
+    passer til det, der faktisk ligger der — et loeb med 21 etaper, hvor E3 er
+    aflyst, skal stadig kunne vaelges paa E3, fordi man kan have brug for at
+    genkoere netop den.
+    """
+    race = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?slug=eq.{race_slug}&select=id&limit=1",
+        headers=get_headers(),
+    )
+    rows = race.json() if race.ok and isinstance(race.json(), list) else []
+    if not rows:
+        return []
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stages?race_id=eq.{rows[0]['id']}"
+        f"&select=stage_number,start_location,finish_location,date,data_status"
+        f"&order=stage_number.asc",
+        headers=get_headers(),
+    )
+    stages = res.json() if res.ok and isinstance(res.json(), list) else []
+    out = []
+    for st in stages:
+        if st.get("stage_number") is None:
+            continue
+        rute = " - ".join(x for x in (st.get("start_location"), st.get("finish_location")) if x)
+        out.append({
+            "stage_number": st["stage_number"],
+            "label": f"Etape {st['stage_number']}" + (f": {rute}" if rute else ""),
+            "date": st.get("date"),
+            "cancelled": bool(st.get("data_status")),
+        })
+    return out
 
 
 class PipelineRunRequest(BaseModel):
     job_key: str
     race_slug: str | None = None
+    # None = hele løbet. Et tal = netop den etape. Kataloget afviser selv et
+    # nummer uden for området og et job, der ikke kan afgrænses til én etape.
+    stage_number: int | None = None
 
 
 @app.post("/admin/pipelines/run")
 def admin_pipeline_run(request: Request, body: PipelineRunRequest):
     """Laegger et job i koe. Koerer ikke noget her — det goer runner.py.
 
-    Kun job_key og loeb kommer udefra; kommandoen bygges af agent_catalog paa
-    ejerens maskine. build_command() kaldes allerede her for at afvise et
-    ugyldigt job eller slug med det samme i stedet for at lade en doed raekke
-    ligge i koeen.
+    Kun job_key, loeb og etape kommer udefra; kommandoerne bygges af
+    agent_catalog paa ejerens maskine. build_commands() kaldes allerede her for
+    at afvise et ugyldigt job, slug eller etapenummer med det samme i stedet
+    for at lade en doed raekke ligge i koeen.
+
+    Raekken faar `not_before` sat CANCEL_WINDOW_SECONDS ude i fremtiden. Det er
+    fortryd-vinduet: runneren roerer den ikke foer da, saa Afbryd naar altid at
+    virke, uanset hvornaar runneren sidst pollede.
     """
     _require_admin(request)
     try:
-        agent_catalog.build_command(body.job_key, body.race_slug)
+        agent_catalog.build_commands(body.job_key, body.race_slug, body.stage_number)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Samme job for samme loeb maa ikke staa i koe to gange — et dobbeltklik
-    # ville ellers sende to tunge Playwright-koersler mod PCS samtidig.
-    race_filter = f"&race_slug=eq.{body.race_slug}" if body.race_slug else "&race_slug=is.null"
+    # Samme job for samme loeb OG samme omfang maa ikke staa i koe to gange —
+    # et dobbeltklik ville ellers sende to tunge Playwright-koersler mod PCS
+    # samtidig. To FORSKELLIGE etaper af samme job er derimod i orden.
+    race_filter  = f"&race_slug=eq.{body.race_slug}" if body.race_slug else "&race_slug=is.null"
+    stage_filter = (f"&stage_number=eq.{body.stage_number}"
+                    if body.stage_number is not None else "&stage_number=is.null")
     dupes = requests.get(
-        f"{RUNS_TABLE}?select=id,status&job_key=eq.{body.job_key}{race_filter}"
+        f"{RUNS_TABLE}?select=id,status&job_key=eq.{body.job_key}{race_filter}{stage_filter}"
         f"&status=in.(queued,running)&limit=1",
         headers=get_headers(),
     )
     if dupes.ok and dupes.json():
         existing = dupes.json()[0]
         return {"queued": False, "run_id": existing["id"], "status": existing["status"],
+                "cancel_window_seconds": CANCEL_WINDOW_SECONDS,
                 "message": "Jobbet ligger allerede i køen"}
 
+    not_before = (datetime.now(timezone.utc)
+                  + timedelta(seconds=CANCEL_WINDOW_SECONDS)).isoformat()
     res = requests.post(
         RUNS_TABLE,
-        json={"job_key": body.job_key, "race_slug": body.race_slug, "trigger": "button"},
+        json={"job_key": body.job_key, "race_slug": body.race_slug,
+              "stage_number": body.stage_number, "not_before": not_before,
+              "trigger": "button"},
         headers={**get_headers(), "Content-Type": "application/json",
                  "Prefer": "return=representation"},
     )
     if not res.ok:
         raise HTTPException(status_code=500, detail=f"Kunne ikke lægge i kø: {res.text[:200]}")
-    return {"queued": True, "run_id": res.json()[0]["id"], "status": "queued", "message": None}
+    return {"queued": True, "run_id": res.json()[0]["id"], "status": "queued",
+            "not_before": not_before,
+            "cancel_window_seconds": CANCEL_WINDOW_SECONDS,
+            "message": None}
+
+
+@app.post("/admin/pipelines/runs/{run_id}/cancel")
+def admin_pipeline_cancel(request: Request, run_id: str):
+    """Afbryder en koersel.
+
+    To tilfaelde, og forskellen er vaesentlig:
+      i koe    — jobbet er aldrig startet, saa intet er aendret. Vi saetter
+                 status='cancelled' med det samme, og runneren ser den aldrig.
+      koerer   — processen er i gang. Vi kan ikke fortryde det, den allerede
+                 har skrevet, saa vi saetter kun cancel_requested. Runneren
+                 laeser flaget hvert femte sekund og draeber processen med hele
+                 dens traeaf barneprocesser.
+
+    Statusskiftet i koe-tilfaeldet filtreres paa `status=eq.queued`, saa vi ikke
+    kan komme til at overskrive en raekke, runneren tog i samme sekund — rammer
+    PATCH'en nul raekker, faldt vi igennem til koerer-tilfaeldet nedenfor.
+    """
+    _require_admin(request)
+    res = requests.get(
+        f"{RUNS_TABLE}?id=eq.{run_id}&select=id,job_key,status&limit=1",
+        headers=get_headers(),
+    )
+    rows = res.json() if res.ok and isinstance(res.json(), list) else []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Kørsel ikke fundet")
+    run = rows[0]
+
+    if run["status"] == "queued":
+        patched = requests.patch(
+            f"{RUNS_TABLE}?id=eq.{run_id}&status=eq.queued",
+            json={
+                "status": "cancelled",
+                "cancel_requested": True,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "log_tail": "Afbrudt fra dashboardet, før kørslen gik i gang. "
+                            "Intet blev ændret.",
+                "validation_verdict": "skipped",
+                "validation_note": "Afbrudt før start — ingen data blev rørt.",
+            },
+            headers={**get_headers(), "Content-Type": "application/json",
+                     "Prefer": "return=representation"},
+        )
+        if patched.ok and patched.json():
+            return {"cancelled": True, "status": "cancelled",
+                    "message": "Afbrudt — intet blev ændret"}
+        # Nul raekker: runneren naaede at tage jobbet imellem laesningen og
+        # PATCH'en. Behandl det som en igangvaerende koersel.
+        run["status"] = "running"
+
+    if run["status"] == "running":
+        requests.patch(
+            f"{RUNS_TABLE}?id=eq.{run_id}",
+            json={"cancel_requested": True},
+            headers={**get_headers(), "Content-Type": "application/json",
+                     "Prefer": "return=minimal"},
+        )
+        return {"cancelled": False, "status": "running",
+                "message": "Kørslen er i gang — stopper den nu. "
+                           "Det, den allerede har nået at gemme, bliver stående."}
+
+    return {"cancelled": False, "status": run["status"],
+            "message": f"Kørslen er allerede afsluttet ({run['status']}) og kan ikke afbrydes"}
 
 
 @app.get("/admin/pipelines/runs")
@@ -1346,6 +1473,8 @@ def admin_pipeline_run_detail(request: Request, run_id: str):
     if not rows:
         raise HTTPException(status_code=404, detail="Kørsel ikke fundet")
     run = rows[0]
-    job = agent_catalog.JOBS.get(run["job_key"])
-    run["job_label"] = job["label"] if job else run["job_key"]
+    # label_for() kender ogsaa de job, der er taget ud af kataloget siden — uden
+    # det ville historikken vise et raat job_key uden forklaring.
+    run["job_label"] = agent_catalog.label_for(run["job_key"])
+    run["scope_label"] = agent_catalog.scope_label(run.get("stage_number"))
     return run

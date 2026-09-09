@@ -22,6 +22,7 @@ resultatet i terminalen.
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -115,7 +116,7 @@ def race_completeness(race_slug: str) -> dict | None:
     # in.() med 150+ uuid'er bliver en meget lang URL — hent i bidder.
     for i in range(0, len(rider_ids), 100):
         chunk = ",".join(rider_ids[i:i + 100])
-        riders += _get("riders", f"id=in.({chunk})&select=id,name,photo_url,weight_kg,height_cm")
+        riders += _get("riders", f"id=in.({chunk})&select=id,name,weight_kg,height_cm")
 
     results = _get("results", f"race_id=eq.{race_id}&select=stage_id,position")
     classifications = _get("classifications",
@@ -123,7 +124,8 @@ def race_completeness(race_slug: str) -> dict | None:
     climbs = []
     for i in range(0, len(stage_ids), 100):
         chunk = ",".join(stage_ids[i:i + 100])
-        climbs += _get("stage_climbs", f"stage_id=in.({chunk})&select=stage_id,profile_image_url")
+        climbs += _get("stage_climbs",
+                       f"stage_id=in.({chunk})&select=stage_id,name,veloviewer_segment_id")
     broadcasts = _get("broadcast_schedule", f"race_id=eq.{race_id}&select=id")
 
     checks = [
@@ -131,8 +133,7 @@ def race_completeness(race_slug: str) -> dict | None:
         _stage_data_check(stages),
         _stage_profile_check(stages),
         _climbs_check(stages, climbs),
-        _climb_profile_check(climbs),
-        _rider_photo_check(riders),
+        _climb_profile_check(climbs, race["slug"]),
         _rider_stats_check(riders),
         _results_check(raced, results),
         _classification_check(raced, classifications),
@@ -176,26 +177,26 @@ def _startlist_check(startlist):
 
 def _stage_data_check(stages):
     if not stages:
-        return _check("etapedata", "Etapedata", MISSING, "Ingen etaper oprettet", ["etapedata"])
+        return _check("etapedata", "Etapedata", MISSING, "Ingen etaper oprettet", ["raesinfo"])
     mangler = [_stage_label(s) for s in stages
                if not s.get("distance_km") or not s.get("start_location") or not s.get("finish_location")]
     if mangler:
         return _check("etapedata", "Etapedata", MISSING,
                       f"{len(mangler)} af {len(stages)} etaper mangler distance eller by",
-                      ["etapedata"], mangler)
+                      ["raesinfo"], mangler)
     return _check("etapedata", "Etapedata", OK, f"{len(stages)} etaper med distance, start og mål")
 
 
 def _stage_profile_check(stages):
     if not stages:
-        return _check("etapeprofiler", "Højdeprofiler", MISSING, "Ingen etaper endnu", ["etapedata"])
+        return _check("etapeprofiler", "Højdeprofiler", MISSING, "Ingen etaper endnu", ["raesinfo"])
     # Kun egengenererede profiler må vises på sitet (LEG-001) — et PCS-billede
     # tæller derfor ikke som løst.
     mangler = [_stage_label(s) for s in stages if s.get("elevation_image_source") != "generated"]
     if mangler:
         return _check("etapeprofiler", "Højdeprofiler", MISSING,
                       f"{len(mangler)} af {len(stages)} etaper mangler vores egen profil",
-                      ["etapeprofiler"], mangler)
+                      ["raesinfo"], mangler)
     return _check("etapeprofiler", "Højdeprofiler", OK,
                   f"Alle {len(stages)} etaper har egengenereret profil")
 
@@ -210,34 +211,47 @@ def _climbs_check(stages, climbs):
     if mangler:
         return _check("stigninger", "Stigninger", MISSING,
                       f"{len(mangler)} af {len(bjerg)} bjerg-/kuperede etaper har ingen stigninger",
-                      ["stigninger_opret"], mangler)
+                      ["raesinfo"], mangler)
     return _check("stigninger", "Stigninger", OK,
                   f"Alle {len(bjerg)} bjerg-/kuperede etaper har stigninger")
 
 
-def _climb_profile_check(climbs):
+def _gpx_source_exists(race_slug: str) -> bool:
+    """Har vi en GPX-kilde for løbet? VeloViewer-agenten bruger etapens GPX
+    både til at beregne søgeboksen og til at verificere kandidaten geometrisk,
+    så uden en kilde kan der pr. konstruktion ikke findes et segment.
+
+    Kan modulet ikke importeres (fx et web-miljø uden agenternes afhængigheder),
+    svarer vi ja: et tjek, der stille erklærer noget for umuligt på grund af en
+    manglende import, ville skjule en reel mangel."""
+    agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agents")
+    if agents_dir not in sys.path:
+        sys.path.insert(0, agents_dir)
+    try:
+        from climb_profile_generator import CYCLINGSTAGE_GPX_PAGES
+    except Exception:
+        return True
+    return race_slug in CYCLINGSTAGE_GPX_PAGES
+
+
+def _climb_profile_check(climbs, race_slug):
+    """Kun VeloViewers eget embed vises på sitet (besluttet 2026-09-09), så det
+    er stage_climbs.veloviewer_segment_id, der afgør, om en stigning har en
+    profil. ClimbFinder-billeder tæller ikke længere med."""
     if not climbs:
         return _check("stigningsprofiler", "Stigningsprofiler", IMPOSSIBLE,
                       "Ingen stigninger oprettet endnu")
-    uden = [c for c in climbs if not c.get("profile_image_url")]
+    if not _gpx_source_exists(race_slug):
+        return _check("stigningsprofiler", "Stigningsprofiler", IMPOSSIBLE,
+                      "Ingen GPX-kilde for løbet — VeloViewer-segmenter kan ikke verificeres")
+    uden = [c for c in climbs if not c.get("veloviewer_segment_id")]
     if uden:
         return _check("stigningsprofiler", "Stigningsprofiler", MISSING,
-                      f"{len(uden)} af {len(climbs)} stigninger mangler profil",
-                      ["stigningsprofiler_cf", "stigningsprofiler_gpx"])
+                      f"{len(uden)} af {len(climbs)} stigninger mangler VeloViewer-segment",
+                      ["stigningsprofiler"],
+                      [c.get("name") or "?" for c in uden])
     return _check("stigningsprofiler", "Stigningsprofiler", OK,
-                  f"Alle {len(climbs)} stigninger har profil")
-
-
-def _rider_photo_check(riders):
-    if not riders:
-        return _check("rytterbilleder", "Rytterbilleder", MISSING,
-                      "Ingen ryttere på startlisten endnu", ["startliste"])
-    uden = [r["name"] for r in riders if not r.get("photo_url")]
-    if uden:
-        return _check("rytterbilleder", "Rytterbilleder", MISSING,
-                      f"{len(uden)} af {len(riders)} ryttere mangler foto",
-                      ["rytterbilleder"], uden)
-    return _check("rytterbilleder", "Rytterbilleder", OK, f"Alle {len(riders)} ryttere har foto")
+                  f"Alle {len(climbs)} stigninger har et VeloViewer-segment")
 
 
 def _rider_stats_check(riders):
@@ -268,7 +282,7 @@ def _results_check(raced, results):
     if mangler:
         return _check("resultater", "Etaperesultater", MISSING,
                       f"{len(mangler)} af {len(raced)} kørte etaper har under 10 placeringer",
-                      ["resultater_alle"], mangler)
+                      ["resultater"], mangler)
     return _check("resultater", "Etaperesultater", OK,
                   f"Top 10 for alle {len(raced)} kørte etaper")
 
@@ -285,7 +299,7 @@ def _classification_check(raced, classifications):
     if mangler:
         return _check("klassementer", "Klassementer", MISSING,
                       f"{len(mangler)} af {len(raced)} kørte etaper mangler samlet klassement",
-                      ["resultater_alle"], mangler)
+                      ["resultater"], mangler)
     return _check("klassementer", "Klassementer", OK,
                   f"Samlet klassement efter alle {len(raced)} kørte etaper")
 
@@ -306,7 +320,7 @@ def _tv_check(broadcasts, race):
     if race.get("end_date") and race["end_date"] < today_dk():
         return _check("tv", "TV-tider", IMPOSSIBLE, "Løbet er afsluttet")
     if not broadcasts:
-        return _check("tv", "TV-tider", MISSING, "Ingen sendetider fundet", ["tv_tider"])
+        return _check("tv", "TV-tider", MISSING, "Ingen sendetider fundet", ["tv_tider", "raesinfo"])
     return _check("tv", "TV-tider", OK, f"{len(broadcasts)} sendetider")
 
 

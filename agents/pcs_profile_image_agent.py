@@ -73,7 +73,8 @@ EXTRACT_JS = """() => {
 }"""
 
 
-def get_stages(race_slug: str, overwrite: bool) -> list[dict]:
+def get_stages(race_slug: str, overwrite: bool,
+               only_stage: int | None = None) -> list[dict]:
     race = requests.get(
         f"{SUPABASE_URL}/rest/v1/races?slug=eq.{race_slug}&select=id&limit=1",
         headers=SB_AUTH,
@@ -86,7 +87,8 @@ def get_stages(race_slug: str, overwrite: bool) -> list[dict]:
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}&pcs_stage_url=not.is.null"
         f"&select=id,stage_number,pcs_stage_url,elevation_image_url,elevation_image_source"
-        f"&order=stage_number.asc",
+        f"&order=stage_number.asc"
+        + (f"&stage_number=eq.{only_stage}" if only_stage else ""),
         headers=SB_AUTH,
     ).json()
     if not isinstance(stages, list):
@@ -131,8 +133,9 @@ async def scrape_one(browser, stage: dict, sem: asyncio.Semaphore) -> tuple[str,
             await ctx.close()
 
 
-async def run(race_slug: str, overwrite: bool) -> None:
-    stages = get_stages(race_slug, overwrite)
+async def run(race_slug: str, overwrite: bool,
+              only_stage: int | None = None) -> None:
+    stages = get_stages(race_slug, overwrite, only_stage)
     if not stages:
         return
 
@@ -172,5 +175,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--race", required=True, help="DB-slug for løbet")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--stage", type=int, default=None,
+                        help="Kun denne etape (default: alle etaper i loebet)")
     args = parser.parse_args()
-    asyncio.run(run(args.race, args.overwrite))
+    asyncio.run(run(args.race, args.overwrite, args.stage))
