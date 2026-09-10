@@ -82,6 +82,25 @@ LEGACY_LABELS = {
 }
 
 
+# Hvilken ydre kilde hvert agent-script afhaenger af. Noeglerne matcher
+# data_sources.py, og det er dét, der goer det muligt at sige "GPX mangler for
+# dette loeb, saa trin 3 springes over" i stedet for bare at lade agenten
+# stoppe stille. Staar et script ikke her, afhaenger det ikke af en ydre kilde
+# (tv_agent henter sin egen side, race_recap_agent laeser kun vores egen DB).
+STEP_SOURCES = {
+    "startlist_agent.py":         "pcs_race",
+    "stage_pcs_agent.py":         "pcs_race",
+    "results_agent.py":           "pcs_race",
+    "rider_stats_agent.py":       "pcs_race",
+    "pcs_profile_image_agent.py": "pcs_stages",
+    "gpx_climb_agent.py":         "pcs_stages",
+    "stage_recap_agent.py":       "pcs_live",
+    "stage_profile_generator.py": "gpx",
+    "veloviewer_agent.py":        "gpx",
+    "aso_roadbook_agent.py":      "aso",
+}
+
+
 def _step(script, args=(), *, whole=(), stage=(), cwd="agents",
           runner="python", label=""):
     """Ét trin = én kommando. Se modulets docstring for whole/stage."""
@@ -93,6 +112,7 @@ def _step(script, args=(), *, whole=(), stage=(), cwd="agents",
         "cwd":    cwd,
         "runner": runner,
         "label":  label or script,
+        "source": STEP_SOURCES.get(script),
     }
 
 
@@ -283,6 +303,8 @@ def list_jobs() -> list[dict]:
             **{k: v for k, v in job.items() if k != "steps"},
             "supports_stage": job["needs_race"] and supports_stage(job["key"]),
             "step_labels": [s["label"] for s in expand_steps(job["key"])],
+            "steps_meta": [{"label": s["label"], "source": s["source"]}
+                           for s in expand_steps(job["key"])],
         })
     return out
 

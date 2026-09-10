@@ -1193,6 +1193,7 @@ def search(q: str = ""):
 
 import agent_catalog
 from race_completeness import race_completeness
+from data_sources import race_sources
 
 RUNS_TABLE = f"{SUPABASE_URL}/rest/v1/agent_runs"
 
@@ -1360,19 +1361,31 @@ def admin_pipeline_race_detail(request: Request, race_slug: str):
         for job_key in check["fixed_by"]:
             missing_by_job.setdefault(job_key, []).append(check["label"])
 
+    # Kilderne afgoer, hvad der overhovedet KAN koeres. Et trin, hvis kilde
+    # mangler, springes over af agenten — og uden det her ville man trykke paa
+    # knappen, se en groen koersel og undre sig over, at manglen stadig staar.
+    sources = race_sources(race_slug) or []
+    utilgaengelige = {k["key"] for k in sources if k["status"] == "nej"}
+
     jobs = []
     for job in agent_catalog.list_jobs():
         if not job["needs_race"]:
             continue
+        blokerede = [m["label"] for m in job["steps_meta"]
+                     if m["source"] in utilgaengelige]
         jobs.append({
             **job,
             "last_run": latest.get(job["key"]),
             "would_fix": missing_by_job.get(job["key"], []),
+            "blocked_steps": blokerede,
+            # Alle trin blokerede = knappen kan ikke udrette noget for dette loeb.
+            "fully_blocked": bool(blokerede) and len(blokerede) == len(job["steps_meta"]),
         })
 
     return {
         **data,
         "jobs": jobs,
+        "sources": sources,
         "stages": _stages_for_picker(race_slug),
         "recent_runs": runs[:20],
         "phase_labels": agent_catalog.PHASE_LABELS,

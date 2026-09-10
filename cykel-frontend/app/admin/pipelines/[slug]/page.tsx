@@ -42,6 +42,19 @@ type Job = {
   step_labels: string[];
   last_run: Run | null;
   would_fix: string[];
+  // Trin hvis kilde ikke findes for dette løb — agenten springer dem over.
+  blocked_steps: string[];
+  fully_blocked: boolean;
+};
+
+// Hvad der overhovedet KAN hentes for løbet. Adskilt fra Check, som måler
+// hvad vi allerede HAR hentet.
+type Source = {
+  key: string;
+  label: string;
+  status: "ja" | "delvist" | "nej" | "ukendt" | "ikke_relevant";
+  detail: string;
+  paavirker: string[];
 };
 
 type Stage = {
@@ -60,6 +73,7 @@ type Detail = {
   completeness_pct: number;
   checks: Check[];
   jobs: Job[];
+  sources: Source[];
   stages: Stage[];
   recent_runs: Run[];
   phase_labels: Record<string, string>;
@@ -206,6 +220,23 @@ export default function RacePipelinePage(
         </div>
       )}
 
+      {/* ── Datakilder ──
+          Står FØR fuldstændigheden, fordi den er forudsætningen: mangler
+          kilden, er en "mangel" nedenfor ikke noget, man kan trykke sig ud af. */}
+      {data.sources.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium mb-1">
+            Datakilder
+          </h2>
+          <p className="text-xs text-slate-600 mb-3">
+            Hvad der kan hentes for dette ræs — og hvad hver kilde bruges til
+          </p>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 divide-y divide-slate-800/60">
+            {data.sources.map((s) => <SourceRow key={s.key} source={s} />)}
+          </div>
+        </section>
+      )}
+
       <section className="mb-8">
         <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium mb-3">
           Datafuldstændighed
@@ -286,6 +317,35 @@ function CompletenessBar({ pct, missingCount }: { pct: number; missingCount: num
   );
 }
 
+const SOURCE_STYLE: Record<Source["status"], { ikon: string; farve: string; tekst: string }> = {
+  ja:      { ikon: "✓", farve: "text-emerald-400", tekst: "text-slate-400" },
+  delvist: { ikon: "~", farve: "text-amber-400",   tekst: "text-amber-200/80" },
+  nej:     { ikon: "✕", farve: "text-red-400",     tekst: "text-slate-500" },
+  ukendt:  { ikon: "?", farve: "text-slate-600",   tekst: "text-slate-600" },
+  // Gaelder slet ikke for loebet. Neutral graa, ikke roed: det er ikke noget,
+  // der skal udbedres, og et kryds ville faa en til at lede efter en loesning,
+  // der ikke findes.
+  ikke_relevant: { ikon: "–", farve: "text-slate-600", tekst: "text-slate-600" },
+};
+
+function SourceRow({ source }: { source: Source }) {
+  const style = SOURCE_STYLE[source.status] ?? SOURCE_STYLE.ukendt;
+  return (
+    <div className="flex items-start gap-3 px-5 py-3">
+      <span className={`font-mono text-sm mt-0.5 flex-shrink-0 w-4 text-center ${style.farve}`}>
+        {style.ikon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm text-slate-200">{source.label}</div>
+        <div className={`text-xs break-words ${style.tekst}`}>{source.detail}</div>
+        <div className="text-xs text-slate-600 mt-0.5">
+          bruges til: {source.paavirker.join(", ")}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const CHECK_STYLE = {
   ok:          { dot: "bg-emerald-400", text: "text-slate-300" },
   mangler:     { dot: "bg-amber-400",   text: "text-amber-200" },
@@ -347,11 +407,26 @@ function JobRow({ job, stages, runnerOnline, scope, onScope, busy, clock, onRun,
                 lukker: {job.would_fix.join(", ")}
               </span>
             )}
+            {job.fully_blocked && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30">
+                kilden mangler
+              </span>
+            )}
           </div>
           <div className="text-xs text-slate-500">{job.description}</div>
           {job.step_labels.length > 1 && (
             <div className="text-xs text-slate-600 mt-1 font-mono truncate">
               {job.step_labels.join(" → ")}
+            </div>
+          )}
+          {/* Agenten springer selv de trin over, hvis kilde mangler. Uden denne
+              linje ville man trykke, se en grøn kørsel og undre sig over, at
+              manglen stadig står. */}
+          {job.blocked_steps.length > 0 && (
+            <div className={`text-xs mt-1 ${job.fully_blocked ? "text-red-400" : "text-amber-400/80"}`}>
+              {job.fully_blocked
+                ? "Kan ikke udrette noget for dette ræs — kilden mangler."
+                : `Springer ${job.blocked_steps.length} trin over (kilden mangler): ${job.blocked_steps.join(", ")}`}
             </div>
           )}
           <div className="text-xs text-slate-600 mt-0.5">
