@@ -48,15 +48,16 @@ LOGO_MAP = {
     "gcn-plus.svg":    "GCN+",
     "viaplay.svg":     "Viaplay",
     "dplay.svg":       "Discovery+",
+    "6eren.svg":       "6'eren",
 }
 
 # Nøgleord i løbstitel → DB slug (opdater ved ny sæson)
 RACE_KEYWORDS = {
     "giro":        "giro-d-italia-2026",
     "tour de fra": "tour-de-france-2026",
-    "vuelta":      "vuelta-a-espana-2026",
+    "vuelta":      "la-vuelta-ciclista-a-espana-2026",
     "flandern":    "ronde-van-vlaanderen-2026",
-    "roubaix":     "paris-roubaix-2026",
+    "roubaix":     "paris-roubaix-hauts-de-france-2026",
     "liège":       "liege-bastogne-liege-2026",
     "liege":       "liege-bastogne-liege-2026",
     "amstel":      "amstel-gold-race-2026",
@@ -65,7 +66,7 @@ RACE_KEYWORDS = {
     "schweiz":     "tour-de-suisse-2026",
     "suisse":      "tour-de-suisse-2026",
     "lombardia":   "il-lombardia-2026",
-    "san remo":    "milano-san-remo-2026",
+    "san remo":    "milano-sanremo-2026",
     "tirreno":     "tirreno-adriatico-2026",
     "strade":      "strade-bianche-2026",
     "denmark":     "postnord-tour-of-denmark-2026",
@@ -93,6 +94,7 @@ EXTRACT_JS = """() => {
         'gcn-plus.svg':    'GCN+',
         'viaplay.svg':     'Viaplay',
         'dplay.svg':       'Discovery+',
+        '6eren.svg':       "6'eren",
     };
     const results = [];
 
@@ -159,14 +161,22 @@ def parse_date(date_str: str) -> date | None:
     return None
 
 
-def parse_stage_number(race_str: str) -> int | None:
-    """'Giro d'Italia [M] - 16. etape' → 16."""
+def parse_stage_number(race_str: str, oneday: bool = False) -> int | None:
+    """'Giro d'Italia [M] - 16. etape' → 16.
+
+    Et ENDAGSLØB har intet etapenummer i programtitlen — der står bare
+    "Il Lombardia [M]". Før 2026-10-06 returnerede funktionen None på dem, og
+    kaldstedet kasserede programmet. Det betød, at tv_agent aldrig kunne gemme
+    en sending for et endagsløb overhovedet: 2026-10-06 fandt den 12 programmer
+    og gemte 0, fordi oktober kun rummer endagsløb. Vores database modellerer
+    et endagsløb som etape 1, så det er dét, vi returnerer.
+    """
     m = re.search(r"(\d+)\.\s*etape", race_str, re.IGNORECASE)
     if m:
         return int(m.group(1))
     if "prolog" in race_str.lower():
         return 0
-    return None
+    return 1 if oneday else None
 
 
 def match_race_slug(race_str: str, race_slugs: set[str]) -> str | None:
@@ -178,6 +188,21 @@ def match_race_slug(race_str: str, race_slugs: set[str]) -> str | None:
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
+
+def _pent_kanalnavn(raa: str, ukendte: set[str]) -> str:
+    """Kanalnavnet, som det skal staa paa sitet.
+
+    LOGO_MAP oversaetter logo-filnavnet til et visningsnavn, men faldt foer
+    tilbage til det RAA filnavn, naar et logo ikke stod i kortet. 2026-10-06 var
+    "6eren.svg" paa vej i databasen som kanalnavn. Vi fjerner derfor endelsen,
+    saa en manglende post aldrig kan vise en filsti paa sitet — og raaber op om
+    den, saa kortet kan udvides i stedet for at degradere stille.
+    """
+    if not raa.lower().endswith((".svg", ".png", ".jpg", ".jpeg", ".webp")):
+        return raa
+    ukendte.add(raa)
+    return raa.rsplit(".", 1)[0].replace("-", " ").strip()
+
 
 def get_race_id(slug: str, cache: dict) -> str | None:
     if slug in cache:
@@ -214,10 +239,18 @@ def scrape(dry_run: bool) -> None:
     print(f"tv_agent.py — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Kilde: {SOURCE_URL}\n")
 
+    # limit=1000, ikke 200: databasen rummer over 200 loeb, og med det gamle
+    # loft kunne et loeb falde uden for listen og blive tavst kasseret af
+    # match_race_slug(). Vi henter ogsaa race_type, fordi etapenummeret for et
+    # endagsloeb ikke staar i programtitlen og maa udledes af loebstypen.
     res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/races?select=slug&limit=200", headers=AUTH
+        f"{SUPABASE_URL}/rest/v1/races?select=slug,race_type&limit=1000", headers=AUTH
     )
-    race_slugs = {r["slug"] for r in (res.json() if res.ok else [])}
+    raekker = res.json() if res.ok else []
+    race_slugs = {r["slug"] for r in raekker}
+    # Begge stavemaader findes i kolonnen ("oneday" fra 2026, "one_day" foer).
+    oneday_slugs = {r["slug"] for r in raekker
+                    if (r.get("race_type") or "").startswith("one")}
     race_id_cache: dict[str, str | None] = {}
 
     with sync_playwright() as p:
@@ -233,33 +266,48 @@ def scrape(dry_run: bool) -> None:
     print(f"Fandt {len(programs)} programmer på siden\n")
 
     saved = skipped = 0
+    # Hvorfor et program blev kasseret, samles op og skrives til sidst.
+    # "0 gemt, 12 sprunget over" uden en grund er praecis den tavse fejl,
+    # run_validator.py blev bygget for at fange (tv_agent, 2026-09-09) — og den
+    # gentog sig 2026-10-06, hvor samtlige 12 programmer var endagsloeb. Naar
+    # agenten selv siger hvorfor, staar svaret i loggen med det samme.
+    grunde: dict[str, list[str]] = {}
+    ukendte_logoer: set[str] = set()
+
+    def spring_over(grund: str, prog: dict) -> None:
+        nonlocal skipped
+        skipped += 1
+        grunde.setdefault(grund, []).append(prog.get("race", "?"))
+
     for prog in programs:
         d = parse_date(prog["date"])
         if not d:
-            skipped += 1
+            spring_over("ulaeselig dato", prog)
             continue
 
-        stage_num = parse_stage_number(prog["race"])
-        if stage_num is None:
-            skipped += 1
-            continue
-
+        # Loebet foerst: uden at vide HVILKET loeb det er, kan vi ikke afgoere,
+        # om en manglende "N. etape" betyder "endagsloeb" eller "uforstaaelig".
         slug = match_race_slug(prog["race"], race_slugs)
         if not slug:
-            skipped += 1
+            spring_over("loebet kendes ikke (se RACE_KEYWORDS)", prog)
+            continue
+
+        stage_num = parse_stage_number(prog["race"], oneday=slug in oneday_slugs)
+        if stage_num is None:
+            spring_over("intet etapenummer, og loebet er ikke et endagsloeb", prog)
             continue
 
         race_id = get_race_id(slug, race_id_cache)
         if not race_id:
-            skipped += 1
+            spring_over("loebet findes ikke i databasen", prog)
             continue
 
         start_time = f"{prog['time']}:00"
         date_str = d.isoformat()
 
-        channels = prog["channels"]
+        channels = [_pent_kanalnavn(c, ukendte_logoer) for c in prog["channels"]]
         if not channels:
-            skipped += 1
+            spring_over("ingen kanal angivet", prog)
             continue
 
         for channel in channels:
@@ -277,7 +325,7 @@ def scrape(dry_run: bool) -> None:
                 if save_broadcast(entry):
                     saved += 1
                 else:
-                    skipped += 1
+                    spring_over("databasen afviste raekken", prog)
             else:
                 saved += 1
 
@@ -285,6 +333,16 @@ def scrape(dry_run: bool) -> None:
         print(f"\nDry-run: {saved} poster fundet (ikke gemt)")
     else:
         print(f"\nFærdig: {saved} gemt, {skipped} sprunget over")
+    if ukendte_logoer:
+        print("\nUkendte TV-logoer — tilfoej dem i LOGO_MAP (begge kopier):")
+        for logo in sorted(ukendte_logoer):
+            print(f"  {logo}")
+    if grunde:
+        print("\nSprunget over, fordelt på grund:")
+        for grund, loeb in sorted(grunde.items(), key=lambda kv: -len(kv[1])):
+            print(f"  {len(loeb):>3}x  {grund}")
+            for navn in sorted(set(loeb))[:4]:
+                print(f"         - {navn}")
 
 
 # ── Manuel tilføjelse som fallback ────────────────────────────────────────────

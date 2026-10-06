@@ -469,6 +469,29 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
                     pendingTitle = null;
                 }
             }
+
+            // PCS' LOEBSFORSIDE bruger slet ikke .title/.value. Her er labelen
+            // en <div class="bold mr5">Departure: </div> og vaerdien den naeste
+            // div (ofte med et <a> indeni). Scanningen ovenfor finder derfor
+            // INTET paa et endagsloeb, og felterne gik tavst tabt: distancen
+            // blev reddet af titel-regexet nedenfor, mens Departure/Arrival og
+            // Vertical meters forsvandt — hvorefter de aarsblinde ONEDAY_CITIES
+            // vandt og skrev sidste aars rute. Det var praecis dét, der gav Il
+            // Lombardia 2026 "Como - Bergamo" i stedet for "Bergamo - Como"
+            // (verificeret i PCS' raa HTML 2026-10-06).
+            //
+            // Denne pas koeres SIDST, saa den vinder over scanningen ovenfor:
+            // staar et felt begge steder, er loebssidens eget felt det, der
+            // beskriver loebet.
+            for (const el of document.querySelectorAll('div.bold')) {
+                const label = el.innerText.trim();
+                if (!label.endsWith(':')) continue;
+                const next = el.nextElementSibling;
+                if (!next) continue;
+                const value = next.innerText.trim();
+                if (value) pairs.push({ title: label, value: value });
+            }
+
             result.pairs = pairs;
             return result;
         }""")
