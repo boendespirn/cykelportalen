@@ -5,6 +5,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
+import ClimbProfile from "./stage/[n]/ClimbProfile";
 import SpoilerSection from "./SpoilerSection";
 import DnfSection from "./DnfSection";
 import StageMapLoader from "./stage/[n]/StageMapLoader";
@@ -171,6 +172,37 @@ async function getDnfs(slug: string): Promise<DnfEntry[]> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/dnfs`, { next: { revalidate: 60 } });
     return res.ok ? res.json() : [];
+  } catch { return []; }
+}
+
+type RaceClimb = {
+  id: string;
+  name: string;
+  km_from_start: number | null;
+  length_km: number | null;
+  elevation_m: number | null;
+  avg_gradient: number | null;
+  max_gradient: number | null;
+  gradient_sections: { km: number; gradient: number }[] | null;
+  profile_image_url: string | null;
+  veloviewer_segment_id: number | null;
+  source: string | null;
+};
+
+/** Stigningerne for et endagsløb.
+ *
+ *  De lå før kun på /{slug}/stage/{n}, men den side 308-redirecter til
+ *  løbssiden, når løbet kun har én etape (SEO-021) — så et endagsløbs
+ *  stigninger kunne bogstaveligt talt ikke ses nogen steder. Opdaget
+ *  2026-10-06, da Il Lombardia fik sine otte stigninger og ingen af dem
+ *  nåede skærmen. Et endagsløb er altid etape 1. */
+async function getClimbs(slug: string): Promise<RaceClimb[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/1/climbs`,
+                            { next: { revalidate: 300 } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch { return []; }
 }
 
@@ -493,7 +525,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     notFound();
   }
 
-  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, history, raceNews] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, climbs, history, raceNews] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -504,6 +536,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getClassification(slug, "youth"),
       getDnfs(slug),
       getBroadcast(slug),
+      getClimbs(slug),
       getRaceHistory(slug),
       getRaceNews(slug),
     ]);
@@ -661,6 +694,20 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
         {/* ── TV / Streaming ── */}
         <TvSektion broadcasts={broadcasts} today={today} visEtape={false} />
+
+        {/* ── Rute og stigninger ──
+            Hel-etape-profilen OG hver enkelt stigning, i samme komponent som
+            etapesiderne bruger. Et endagsløb havde før ingen af delene: profilen
+            blev tegnet, men aldrig vist, og stigningerne lå kun på /stage/1, som
+            redirecter hertil (SEO-021). ── */}
+        {singleStage && (climbs.length > 0 || generatedProfileUrl(singleStage)) && (
+          <div className="mb-8">
+            <ClimbProfile
+              climbs={climbs}
+              elevationImageUrl={generatedProfileUrl(singleStage)}
+            />
+          </div>
+        )}
 
         {/* Historisk fortælling — kun for étdagsløb (den eneste "etape" redirecter
             permanent til denne side, se [slug]/stage/[n]/page.tsx, så det er her,

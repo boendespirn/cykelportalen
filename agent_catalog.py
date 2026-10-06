@@ -97,6 +97,7 @@ STEP_SOURCES = {
     "stage_recap_agent.py":       "pcs_live",
     "stage_profile_generator.py": "gpx",
     "veloviewer_agent.py":        "gpx",
+    "climb_vision_agent.py":      "pcs_stages",
     "aso_roadbook_agent.py":      "aso",
 }
 
@@ -151,34 +152,50 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
 
     # Den samlede informationspipeline. Alt det, en etapeside skal bruge for at
     # være komplet, hentes her i den rækkefølge, trinnene afhænger af hinanden:
-    # etaperne skal findes, før de kan få profiler, og stigningsrækkerne skal
-    # oprettes, før roadbooket kan skrive kategorier på dem (STG-023).
+    # etaperne skal findes først, derefter stigningerne, og roadbooket skriver
+    # kategorier PÅ de stigninger (STG-023).
+    #
+    # Hel-etape-højdeprofilen tegnes TIL SIDST, fordi den overlejrer
+    # stigningerne med navn og kategori. Indtil 2026-10-06 stod den som trin 3,
+    # før stigningerne overhovedet var hentet, så en frisk kørsel altid gav en
+    # nøgen profil uden markører — og det blev ikke opdaget, fordi trinnet
+    # bagefter nægter at overskrive sit eget billede uden --overwrite.
     _job("raesinfo", "Ræsinfo", PHASE_BEFORE, [
             _step("stage_pcs_agent.py", ["{pcs_slug}", "--year", "{year}"],
                   stage=["--stage", "{stage}"],
-                  label="1/6 Etapedata (distance, type, start og mål)"),
+                  label="1/7 Etapedata (distance, type, start og mål)"),
             _step("pcs_profile_image_agent.py", ["--race", "{db_slug}", "--overwrite"],
                   stage=["--stage", "{stage}"],
-                  label="2/6 Højkvalitets profilbilleder (PCS /info/profiles)"),
-            _step("stage_profile_generator.py", ["--race", "{db_slug}", "--write-db"],
-                  whole=["--all"], stage=["--stage", "{stage}"],
-                  label="3/6 Hel-etape-højdeprofil i eget design (LEG-001)"),
+                  label="2/7 Højkvalitets profilbilleder (PCS /info/profiles)"),
             _step("gpx_climb_agent.py", ["--race", "{db_slug}"],
                   stage=["--stage", "{stage}"],
-                  label="4/6 Stigninger — opret stage_climbs-rækker"),
+                  label="3/7 Stigninger — opret stage_climbs-rækker"),
+            # Stigninger findes i to former hos PCS: som tekst i HTML'en (trin 3)
+            # og — langt oftere — kun som BILLEDER på /info/profiles. Trin 4
+            # læser billederne og er for mange løb det eneste trin, der
+            # overhovedet kan skaffe stigninger (STG-031). Det kører EFTER trin
+            # 3, så en etape, hvor HTML'en faktisk havde data, ikke overskrives.
+            _step("climb_vision_agent.py", ["--race", "{db_slug}", "--write-db"],
+                  stage=["--stage", "{stage}"],
+                  label="4/7 Stigninger fra PCS' profilbilleder (vision)"),
             _step("aso_roadbook_agent.py", ["--race", "{db_slug}", "--write"],
                   stage=["--stages", "{stage}"],
-                  label="5/6 Roadbook-fakta (ASO) — kategorier og mellemspurter"),
+                  label="5/7 Roadbook-fakta (ASO) — kategorier og mellemspurter"),
+            _step("stage_profile_generator.py",
+                  ["--race", "{db_slug}", "--write-db", "--overwrite"],
+                  whole=["--all"], stage=["--stage", "{stage}"],
+                  label="6/7 Hel-etape-højdeprofil i eget design (LEG-001)"),
             # tv_agent.py scraper hele sendeplanen på én gang og kan ikke
             # afgrænses til én etape — derfor kun med, når hele løbet køres.
             # Den står også som selvstændig knap under "Uafhængigt af løb".
             _step("tv_agent.py", [], stage=None,
-                  label="6/6 TV-tider (sendeplan)"),
+                  label="7/7 TV-tider (sendeplan)"),
          ],
          description="Alt om løbet og dets etaper i én kørsel: etapedata, profilbilleder, "
-                     "vores egen højdeprofil, stigningsrækker, ASO-roadbook og TV-tider.",
+                     "vores egen højdeprofil, stigningsrækker (både fra tekst og fra "
+                     "PCS' profilbilleder), ASO-roadbook og TV-tider.",
          covers=["etapedata", "etapeprofiler", "stigninger", "tv"],
-         est_minutes=22, est_stage_minutes=4),
+         est_minutes=30, est_stage_minutes=4),
 
     # Kun VeloViewer. ClimbFinder-profilerne blev taget ud 2026-09-09: vi viser
     # udelukkende VeloViewers eget embed (stage_climbs.veloviewer_segment_id),
