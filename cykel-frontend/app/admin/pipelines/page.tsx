@@ -214,6 +214,7 @@ export default function PipelinesPage() {
                   runnerOnline={runner?.online ?? true}
                   busy={busy === job.key || busy === globalRuns[job.key]?.id}
                   clock={clock}
+                  adminKey={adminKey}
                   onRun={() => runGlobal(job.key)}
                   onCancel={() => {
                     const run = globalRuns[job.key];
@@ -229,11 +230,37 @@ export default function PipelinesPage() {
   );
 }
 
-function GlobalJobRow({ job, run, runnerOnline, busy, clock, onRun, onCancel }: {
+const VERDICT_STYLE: Record<string, string> = {
+  ok: "text-emerald-400",
+  warning: "text-amber-400",
+  error: "text-red-400",
+  skipped: "text-slate-500",
+};
+
+function GlobalJobRow({ job, run, runnerOnline, busy, clock, adminKey, onRun, onCancel }: {
   job: Job; run: Run | null; runnerOnline: boolean; busy: boolean; clock: number;
-  onRun: () => void; onCancel: () => void;
+  adminKey: string; onRun: () => void; onCancel: () => void;
 }) {
   const active = isActive(run);
+  // Loggen er det eneste sted, et job som Datakilde-scan kan vise sine fund:
+  // den skriver intet i databasen, saa uden dette ville man trykke paa knappen
+  // og aldrig se, hvad den fandt. Hentes foerst ved klik — log_tail er op til
+  // 8.000 tegn pr. koersel, og de fem globale job skal ikke hente dem alle
+  // paa hver eneste opdatering af siden.
+  const [open, setOpen] = useState(false);
+  // Loggen gemmes MED sin koersels id. Havde den kun vaeret en streng, skulle
+  // den nulstilles i en effekt ved hvert nyt run — og saa ville visningen et
+  // oejeblik staa med den forrige koersels fund. Her bliver den i stedet bare
+  // irrelevant af sig selv, naar id'et ikke laengere passer.
+  const [log, setLog] = useState<{ runId: string; text: string } | null>(null);
+  const visLog = log && run && log.runId === run.id ? log.text : null;
+
+  useEffect(() => {
+    if (!open || !run || visLog !== null) return;
+    adminGet<{ log_tail: string | null }>(
+      `/admin/pipelines/runs/${run.id}`, adminKey
+    ).then((d) => setLog({ runId: run.id, text: d?.log_tail ?? "(ingen log gemt)" }));
+  }, [open, visLog, run, adminKey]);
   // Saa laenge not_before ligger i fremtiden, har runneren ikke roert jobbet —
   // et klik paa Afbryd her efterlader databasen fuldstaendig urort.
   const undoLeft = run?.status === "queued" ? secondsUntil(run.not_before, clock) : 0;
@@ -245,7 +272,20 @@ function GlobalJobRow({ job, run, runnerOnline, busy, clock, onRun, onCancel }: 
           <div className="text-sm text-slate-200">{job.label}</div>
           <div className="text-xs text-slate-500 truncate">{job.description}</div>
         </div>
+        {!active && run && (
+          <span className="text-xs text-slate-600 flex-shrink-0 hidden sm:inline">
+            sidst {timeAgo(run.finished_at ?? run.queued_at)}
+          </span>
+        )}
         <span className="text-xs text-slate-600 font-mono flex-shrink-0">~{job.est_minutes} min</span>
+        {run && !active && (
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200 transition-colors flex-shrink-0"
+          >
+            {open ? "Skjul log" : "Vis log"}
+          </button>
+        )}
         {active ? (
           <button
             onClick={onCancel}
@@ -271,6 +311,18 @@ function GlobalJobRow({ job, run, runnerOnline, busy, clock, onRun, onCancel }: 
           </button>
         )}
       </div>
+      {!active && run?.validation_note && (
+        <p className={`text-xs mt-1.5 ${VERDICT_STYLE[run.validation_verdict ?? "skipped"]}`}>
+          {run.validation_note}
+        </p>
+      )}
+
+      {open && (
+        <pre className="mt-3 text-xs text-slate-400 bg-slate-950 border border-slate-800 rounded-xl p-3 overflow-x-auto max-h-96 whitespace-pre-wrap">
+          {visLog ?? "Henter log …"}
+        </pre>
+      )}
+
       {active && (
         <p className={`text-xs mt-1.5 ${run?.cancel_requested && !runnerOnline ? "text-amber-400" : "text-slate-500"}`}>
           {run?.cancel_requested

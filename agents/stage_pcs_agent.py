@@ -91,8 +91,16 @@ def sb_upsert(table: str, records: list, conflict: str) -> bool:
     return res.ok
 
 
-# PCS-slug → vores DB-slug (når de afviger)
-# Hardcoded start/finish cities for one-day classics (PCS main page never shows departure/arrival)
+# Nødfald for endagsløbenes start- og målby, NÅR PCS endnu ikke har annonceret
+# ruten. Den tidligere kommentar her påstod, at PCS' løbsside aldrig viser
+# departure/arrival — det er forkert (verificeret 2026-10-06: Il Lombardia 2026
+# viser "Departure: Bergamo / Arrival: Como"). extract_info() læser derfor de
+# rigtige byer, og tabellen bruges kun, hvis siden intet har.
+#
+# ADVARSEL: tabellen er årsblind. Flere af løbene skifter retning eller rute
+# fra år til år — Il Lombardia veksler mellem Como→Bergamo og Bergamo→Como —
+# så en post her kan være sidste års rute. Bliver den brugt, siger loggen det
+# ("hardkodet"), og så skal etapen køres igen, når PCS har ruten.
 ONEDAY_CITIES: dict[str, tuple[str, str]] = {
     "omloop-het-nieuwsblad":           ("Gent",          "Ninove"),
     "strade-bianche":                  ("Siena",          "Siena"),
@@ -137,6 +145,25 @@ PCS_TO_DB_SLUG: dict[str, str] = {
     "e3-saxo-bank-classic":       "e3-saxo-classic",
     "ronde-van-brugge":           "ronde-van-brugge-tour-of-bruges",
 }
+
+
+def is_oneday_race(race_id: str) -> bool:
+    """Er løbet et endagsløb ifølge vores egen database?
+
+    Pipelinen (agent_catalog.py → "Ræsinfo") kører agenten UDEN --oneday, fordi
+    kataloget ikke ved, hvilken type løb det er. Uden dette opslag ledte den så
+    efter /stage-1 … /stage-29 på et endagsløb, fandt intet og skrev "løbet er
+    endnu ikke annonceret" — mens ruten hele tiden stod på løbets forside.
+    Det var grunden til, at Il Lombardia 2026 stod med distance 0 km fire dage
+    før løbet (fundet 2026-10-06).
+
+    Begge stavemåder findes i kolonnen ("oneday" fra 2026, "one_day" på ældre
+    rækker), så vi matcher på præfikset frem for på en af dem.
+    """
+    rows = sb_get("races", f"id=eq.{race_id}&select=race_type&limit=1")
+    if not rows:
+        return False
+    return (rows[0].get("race_type") or "").startswith("one")
 
 
 def get_race_id(pcs_slug: str) -> str | None:
@@ -602,8 +629,15 @@ async def run(target_slug: str | None = None, oneday: bool = False,
             print("  FEJL: Kunne ikke finde/oprette løb i DB")
             continue
 
+        # --oneday er en overstyring, ikke en betingelse: står løbet som
+        # endagsløb i databasen, er løbets forside den eneste rigtige kilde,
+        # uanset om flaget blev givet.
+        er_endagsloeb = oneday or is_oneday_race(race_id)
+        if er_endagsloeb and not oneday:
+            print("  [auto] Står som endagsløb i databasen — læser løbets forside")
+
         try:
-            if oneday:
+            if er_endagsloeb:
                 stages = await scrape_oneday_race(pcs_slug)
             else:
                 stages = await scrape_race_stages(pcs_slug, only_stage)

@@ -256,6 +256,19 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
          description="Opdaterer sendeplanen for alle kommende løb. Indgår også i Ræsinfo.",
          covers=["tv"], est_minutes=3),
 
+    # Spørger OPSTRØMS i stedet for i vores egen config. Knappen findes, fordi
+    # data_sources.py kun kan sige "ingen GPX-kilde konfigureret" — den kan ikke
+    # se, at kilden er kommet til siden sidst. Il Lombardias GPX lå offentligt i
+    # 11 dage, før nogen opdagede den (2026-10-06).
+    _job("datakilde_scan", "Datakilde-scan — er der kommet nye kilder?", PHASE_GLOBAL, [
+            _step("datakilde_scan_agent.py", [], stage=None,
+                  label="Scanner cyclingstage og PCS for data, vi ikke henter endnu"),
+         ], needs_race=False,
+         description="Tjekker sæsonens løb opstrøms: nye GPX-ruter, kilder der er "
+                     "rådnet, og PCS-rutedata vi mangler. Skriver intet — rapporterer "
+                     "kun, og fundene står i loggen.",
+         est_minutes=6),
+
     _job("daglig_pipeline", "Daglig kørsel (hele pipelinen)", PHASE_GLOBAL, [
             _step("daily_pipeline.ps1", [], cwd="root", runner="powershell",
                   stage=None, label="Daglig kørsel"),

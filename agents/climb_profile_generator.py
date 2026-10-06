@@ -48,12 +48,72 @@ BUCKET = "stage-profiles"
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
+# cyclingstage.com har KUN dedikerede GPX-sider for de store etapeløb. Alle
+# øvrige løb (klassikere + mindre etapeløb) linkes direkte fra én fælles
+# årgangs-index-side — verificeret 2026-07-31: /paris-nice-2026-gpx/,
+# /strade-bianche-2026-gpx/ og /tirreno-adriatico-2026-gpx/ giver alle 404,
+# mens indexet nedenfor indeholder 22 løb som direkte CDN-links (DATA-003).
+CYCLINGSTAGE_SHARED_INDEX = "https://www.cyclingstage.com/gpx-2026-pro-cycling-races/"
+
 CYCLINGSTAGE_GPX_PAGES: dict[str, str] = {
+    # Dedikerede sider (én løbs-slug pr. side — intet filter nødvendigt)
     "giro-d-italia-2026":              "https://www.cyclingstage.com/giro-2026-gpx",
     "tour-de-france-2026":             "https://www.cyclingstage.com/tour-de-france-2026-gpx",
     "criterium-du-dauphine-2026":      "https://www.cyclingstage.com/criterium-du-dauphine-2026-gpx",
     "tour-de-suisse-2026":             "https://www.cyclingstage.com/tour-de-suisse-2026-gpx",
     "la-vuelta-ciclista-a-espana-2026": "https://www.cyclingstage.com/vuelta-2026-gpx/",
+    # Fælles index — KRÆVER en CYCLINGSTAGE_CDN_SLUG-post, ellers ville
+    # get_gpx_url_for_stage() kunne matche et VILKÅRLIGT andet løbs stage-N-fil
+    # fra samme side.
+    "milano-sanremo-2026":                                CYCLINGSTAGE_SHARED_INDEX,
+    "paris-roubaix-hauts-de-france-2026":                 CYCLINGSTAGE_SHARED_INDEX,
+    "ronde-van-vlaanderen-2026":                          CYCLINGSTAGE_SHARED_INDEX,
+    "liege-bastogne-liege-2026":                          CYCLINGSTAGE_SHARED_INDEX,
+    "amstel-gold-race-2026":                              CYCLINGSTAGE_SHARED_INDEX,
+    "strade-bianche-2026":                                CYCLINGSTAGE_SHARED_INDEX,
+    "e3-saxo-classic-2026":                               CYCLINGSTAGE_SHARED_INDEX,
+    "omloop-nieuwsblad-2026":                             CYCLINGSTAGE_SHARED_INDEX,
+    "dwars-door-vlaanderen-a-travers-la-flandre-2026":    CYCLINGSTAGE_SHARED_INDEX,
+    "in-flanders-fields-from-middelkerke-to-wevelgem-2026": CYCLINGSTAGE_SHARED_INDEX,
+    "paris-nice-2026":                                    CYCLINGSTAGE_SHARED_INDEX,
+    "tirreno-adriatico-2026":                             CYCLINGSTAGE_SHARED_INDEX,
+    "itzulia-basque-country-2026":                        CYCLINGSTAGE_SHARED_INDEX,
+    "uae-tour-2026":                                      CYCLINGSTAGE_SHARED_INDEX,
+    "volta-ciclista-a-catalunya-2026":                    CYCLINGSTAGE_SHARED_INDEX,
+    # Egen rute-underside. Efteraarsklassikerne staar IKKE paa den faelles
+    # index-side (verificeret raat 2026-10-06: 76 GPX-links, nul Lombardia) —
+    # deres GPX ligger alene under loebets eget "route"-underside. Siden
+    # indeholder kun dette loebs GPX, saa der skal ingen CYCLINGSTAGE_CDN_SLUG-
+    # post til. Bemaerk at cyclingstage kalder loebet "tour-of-lombardy" i
+    # CDN-stien, hvilket er grunden til, at ARKITEKTUR.md frem til 2026-10-06
+    # fejlagtigt erklaerede loebet for helt udaekket (DATA-003).
+    "il-lombardia-2026": "https://www.cyclingstage.com/tour-of-lombardy-2026/route-illombardia-2026/",
+}
+
+# Vores DB-slug → cyclingstages eget slug i CDN-stien
+# (https://cdn.cyclingstage.com/images/<slug>/2026/…). Navnene er ofte helt
+# anderledes end vores (fx "tour-of-flanders" vs. "ronde-van-vlaanderen"), så
+# de kan ikke udledes — de er aflæst direkte fra indexet 2026-07-31.
+#
+# Kun nødvendig for løb på den fælles index-side. Er der ingen post, filtreres
+# der ikke — det bevarer den hidtidige adfærd for de dedikerede sider præcis
+# som før (verificeret: hver af dem indeholder kun ét CDN-slug).
+CYCLINGSTAGE_CDN_SLUG: dict[str, str] = {
+    "milano-sanremo-2026":                                "milan-san-remo",
+    "paris-roubaix-hauts-de-france-2026":                 "paris-roubaix",
+    "ronde-van-vlaanderen-2026":                          "tour-of-flanders",
+    "liege-bastogne-liege-2026":                          "liege-bastogne-liege",
+    "amstel-gold-race-2026":                              "amstel-gold-race",
+    "strade-bianche-2026":                                "strade-bianche",
+    "e3-saxo-classic-2026":                               "e3-saxo-classic",
+    "omloop-nieuwsblad-2026":                             "omloop-het-nieuwsblad",
+    "dwars-door-vlaanderen-a-travers-la-flandre-2026":    "dwars-door-vlaanderen",
+    "in-flanders-fields-from-middelkerke-to-wevelgem-2026": "in-flanders-fields",
+    "paris-nice-2026":                                    "paris-nice",
+    "tirreno-adriatico-2026":                             "tirreno-adriatico",
+    "itzulia-basque-country-2026":                        "tour-of-the-basque-country",
+    "uae-tour-2026":                                      "uae-tour",
+    "volta-ciclista-a-catalunya-2026":                    "volta-a-catalunya",
 }
 
 
@@ -97,30 +157,59 @@ def parse_gpx_with_elevation(xml_content: str) -> list[tuple[float, float, float
     return points
 
 
+# cyclingstage.com bruger flere filnavns-mønstre for GPX-links: "stage-N-route.gpx"
+# (giro), "stage-N.gpx" uden suffix (nogle tour-de-france-etaper, se
+# STG-006/STG-007/STG-002), siden juli 2026 "stage-N-parcours.gpx" for hele
+# tour-de-france-2026 (bekræftet: cyclingstage.com skiftede navnekonvention —
+# uden "-parcours" i regex fik get_gpx_url_for_stage() til at returnere None for
+# ALLE TdF 2026-etaper, hvilket sprang veloviewer_agent.py's GPX-udtræk helt over,
+# se STG-019), og "etappe-N-route.gpx" (hollandsk) for enkelte etaper hos
+# tirreno-adriatico — fundet 2026-07-31 under DATA-003.
+_STAGE_GPX_RE = re.compile(r".*(?:stage|etappe)-(\d+)(?:-route|-parcours)?\.gpx")
+
+# Endagsløb har ingen etapenummer i filnavnet — de hedder blot "route.gpx".
+# Bemærk `route\.gpx` og ikke `route.*\.gpx`: sidstnævnte ville også ramme
+# "route-women.gpx", som ligger side om side for Amstel, Paris-Roubaix,
+# Strade Bianche og Ronde van Vlaanderen. Vi dækker herrernes løb, så et
+# kvinde-spor ville være stille forkert data på en herre-etapeside.
+_ONEDAY_GPX_RE = re.compile(r".*/route\.gpx")
+
+
 def get_gpx_url_for_stage(race_slug: str, stage_number: int) -> str | None:
-    """Finder GPX-download-URL'en for en specifik etape på cyclingstage.com."""
+    """Finder GPX-download-URL'en for en specifik etape på cyclingstage.com.
+
+    For løb på den fælles index-side (se CYCLINGSTAGE_SHARED_INDEX) filtreres
+    links først på løbets eget CDN-slug — uden det filter ville et opslag på
+    "stage-3" ramme det første vilkårlige løb på siden, der har en etape 3.
+    """
     gpx_page_url = CYCLINGSTAGE_GPX_PAGES.get(race_slug)
     if not gpx_page_url:
         return None
     res = requests.get(gpx_page_url, headers={"User-Agent": UA}, timeout=15)
     if not res.ok:
         return None
+
+    cdn_slug = CYCLINGSTAGE_CDN_SLUG.get(race_slug)
     soup = BeautifulSoup(res.text, "html.parser")
+
+    oneday_match = None
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        # cyclingstage.com bruger flere filnavns-mønstre for GPX-links: "stage-N-route.gpx"
-        # (giro), "stage-N.gpx" uden suffix (nogle tour-de-france-etaper, se
-        # STG-006/STG-007/STG-002), og siden juli 2026 "stage-N-parcours.gpx" for hele
-        # tour-de-france-2026 (bekræftet: cyclingstage.com skiftede navnekonvention —
-        # uden "-parcours" i regex fik get_gpx_url_for_stage() til at returnere None for
-        # ALLE TdF 2026-etaper, hvilket sprang veloviewer_agent.py's GPX-udtræk helt over,
-        # se STG-019).
-        m = re.fullmatch(r".*stage-(\d+)(?:-route|-parcours)?\.gpx", href)
-        if not m:
+        # Kun dette løbs egne filer, når vi læser en delt side.
+        if cdn_slug and f"/images/{cdn_slug}/" not in href:
             continue
-        if int(m.group(1)) == stage_number:
-            return href if href.startswith("http") else "https://cdn.cyclingstage.com" + href
-    return None
+
+        m = _STAGE_GPX_RE.fullmatch(href)
+        if m:
+            if int(m.group(1)) == stage_number:
+                return href if href.startswith("http") else "https://cdn.cyclingstage.com" + href
+            continue
+
+        # Endagsløb ligger som ét "route.gpx" og har i vores DB altid etape 1.
+        if stage_number == 1 and _ONEDAY_GPX_RE.fullmatch(href) and oneday_match is None:
+            oneday_match = href if href.startswith("http") else "https://cdn.cyclingstage.com" + href
+
+    return oneday_match
 
 
 def download_stage_gpx(race_slug: str, stage_number: int) -> list[tuple[float, float, float]] | None:
@@ -135,7 +224,7 @@ def download_stage_gpx(race_slug: str, stage_number: int) -> list[tuple[float, f
     if not gpx_url:
         return None
     candidates = [gpx_url]
-    m = re.fullmatch(r"(.*stage-\d+)(?:-route|-parcours)?\.gpx", gpx_url)
+    m = re.fullmatch(r"(.*(?:stage|etappe)-\d+)(?:-route|-parcours)?\.gpx", gpx_url)
     if m:
         for suffix in ("-parcours", "-route", ""):
             alt = f"{m.group(1)}{suffix}.gpx"
