@@ -430,7 +430,8 @@ export async function generateMetadata(
  *  sendetider. Det var usynligt, saa laenge tv_agent heller ikke kunne gemme
  *  en sending for et endagsloeb; da agenten blev rettet, stod dataene klar i
  *  API'et uden at naa skaermen. Nu bruges den samme komponent begge steder. */
-function TvSektion({ broadcasts, today }: { broadcasts: Broadcast[]; today: string }) {
+function TvSektion({ broadcasts, today, visEtape = true }:
+    { broadcasts: Broadcast[]; today: string; visEtape?: boolean }) {
   if (broadcasts.length === 0) return null;
       const upcoming = broadcasts.filter((b) => b.broadcast_date >= today);
       if (upcoming.length === 0) return null;
@@ -464,7 +465,7 @@ function TvSektion({ broadcasts, today }: { broadcasts: Broadcast[]; today: stri
                 <span className="font-mono text-sm font-semibold">{b.start_time?.slice(0, 5)}</span>
                 <span className="text-[10px] opacity-70">
                   {new Date(b.broadcast_date + "T00:00:00").toLocaleDateString("da-DK", { weekday: "short", day: "numeric", month: "short" })}
-                  {b.stage_number ? ` · E${b.stage_number}` : ""}
+                  {visEtape && b.stage_number ? ` · E${b.stage_number}` : ""}
                 </span>
               </div>
             ))}
@@ -659,7 +660,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         )}
 
         {/* ── TV / Streaming ── */}
-        <TvSektion broadcasts={broadcasts} today={today} />
+        <TvSektion broadcasts={broadcasts} today={today} visEtape={false} />
 
         {/* Historisk fortælling — kun for étdagsløb (den eneste "etape" redirecter
             permanent til denne side, se [slug]/stage/[n]/page.tsx, så det er her,
