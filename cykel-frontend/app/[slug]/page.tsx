@@ -425,6 +425,54 @@ export async function generateMetadata(
 
 // ── Page ───────────────────────────────────────────────────────────────────
 
+/** TV-sektionen. Laa foer 2026-10-06 inline i etapeloebs-layoutet alene, og
+ *  endagsloeb returnerer tidligere i funktionen — de kunne derfor ALDRIG vise
+ *  sendetider. Det var usynligt, saa laenge tv_agent heller ikke kunne gemme
+ *  en sending for et endagsloeb; da agenten blev rettet, stod dataene klar i
+ *  API'et uden at naa skaermen. Nu bruges den samme komponent begge steder. */
+function TvSektion({ broadcasts, today }: { broadcasts: Broadcast[]; today: string }) {
+  if (broadcasts.length === 0) return null;
+      const upcoming = broadcasts.filter((b) => b.broadcast_date >= today);
+      if (upcoming.length === 0) return null;
+
+      // Gruppér per kanal — vis næste udsendelse per kanal
+      const byChannel = new Map<string, Broadcast>();
+      for (const b of upcoming) {
+        if (!byChannel.has(b.broadcaster)) byChannel.set(b.broadcaster, b);
+      }
+      const channels = Array.from(byChannel.values());
+
+      function channelStyle(name: string) {
+        if (name.includes("TV 2")) return "bg-blue-500/15 text-blue-300 border-blue-500/20";
+        if (name.includes("Eurosport")) return "bg-orange-500/15 text-orange-300 border-orange-500/20";
+        if (name.includes("GCN")) return "bg-yellow-500/15 text-yellow-300 border-yellow-500/20";
+        if (name.includes("HBO")) return "bg-purple-500/15 text-purple-300 border-purple-500/20";
+        if (name.includes("Discovery") || name.includes("Kanal 5")) return "bg-blue-400/15 text-blue-200 border-blue-400/20";
+        return "bg-slate-700/50 text-slate-300 border-slate-600/30";
+      }
+
+      return (
+        <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <span className="text-sm">📺</span>
+            <span className="text-xs uppercase tracking-[0.2em] text-slate-400 font-medium">Se det her</span>
+          </div>
+          <div className="p-4 flex flex-wrap gap-3">
+            {channels.map((b, i) => (
+              <div key={i} className={`flex flex-col gap-1 rounded-xl border px-4 py-3 min-w-[140px] ${channelStyle(b.broadcaster)}`}>
+                <span className="text-xs font-bold">{b.broadcaster}</span>
+                <span className="font-mono text-sm font-semibold">{b.start_time?.slice(0, 5)}</span>
+                <span className="text-[10px] opacity-70">
+                  {new Date(b.broadcast_date + "T00:00:00").toLocaleDateString("da-DK", { weekday: "short", day: "numeric", month: "short" })}
+                  {b.stage_number ? ` · E${b.stage_number}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+}
+
 export default async function RacePage(props: { params: Promise<{ slug: string }> }) {
   const { slug: rawSlug } = await props.params;
   // Next.js 16 leverer params som det rå, procent-kodede segment (fx "l%C3%B8b")
@@ -609,6 +657,9 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
             )}
           </div>
         )}
+
+        {/* ── TV / Streaming ── */}
+        <TvSektion broadcasts={broadcasts} today={today} />
 
         {/* Historisk fortælling — kun for étdagsløb (den eneste "etape" redirecter
             permanent til denne side, se [slug]/stage/[n]/page.tsx, så det er her,
@@ -946,47 +997,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       })()}
 
       {/* ── TV / Streaming ── */}
-      {broadcasts.length > 0 && (() => {
-        const upcoming = broadcasts.filter((b) => b.broadcast_date >= today);
-        if (upcoming.length === 0) return null;
-
-        // Gruppér per kanal — vis næste udsendelse per kanal
-        const byChannel = new Map<string, Broadcast>();
-        for (const b of upcoming) {
-          if (!byChannel.has(b.broadcaster)) byChannel.set(b.broadcaster, b);
-        }
-        const channels = Array.from(byChannel.values());
-
-        function channelStyle(name: string) {
-          if (name.includes("TV 2")) return "bg-blue-500/15 text-blue-300 border-blue-500/20";
-          if (name.includes("Eurosport")) return "bg-orange-500/15 text-orange-300 border-orange-500/20";
-          if (name.includes("GCN")) return "bg-yellow-500/15 text-yellow-300 border-yellow-500/20";
-          if (name.includes("HBO")) return "bg-purple-500/15 text-purple-300 border-purple-500/20";
-          if (name.includes("Discovery") || name.includes("Kanal 5")) return "bg-blue-400/15 text-blue-200 border-blue-400/20";
-          return "bg-slate-700/50 text-slate-300 border-slate-600/30";
-        }
-
-        return (
-          <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
-              <span className="text-sm">📺</span>
-              <span className="text-xs uppercase tracking-[0.2em] text-slate-400 font-medium">Se det her</span>
-            </div>
-            <div className="p-4 flex flex-wrap gap-3">
-              {channels.map((b, i) => (
-                <div key={i} className={`flex flex-col gap-1 rounded-xl border px-4 py-3 min-w-[140px] ${channelStyle(b.broadcaster)}`}>
-                  <span className="text-xs font-bold">{b.broadcaster}</span>
-                  <span className="font-mono text-sm font-semibold">{b.start_time?.slice(0, 5)}</span>
-                  <span className="text-[10px] opacity-70">
-                    {new Date(b.broadcast_date + "T00:00:00").toLocaleDateString("da-DK", { weekday: "short", day: "numeric", month: "short" })}
-                    {b.stage_number ? ` · E${b.stage_number}` : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      <TvSektion broadcasts={broadcasts} today={today} />
 
       {/* ── Spoiler-sektion (fuld klassementstabel) ── */}
       {hasResults && (
