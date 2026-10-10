@@ -37,7 +37,13 @@ DB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-MODEL = "claude-haiku-4-5-20251001"  # billig og hurtig; skift til claude-sonnet-4-6 for højere kvalitet
+# Hævet fra claude-haiku-4-5 2026-10-10. Teksten er brugervendt og står på
+# løbets landingsside, og Haikus danske prosa holdt ikke: Il Lombardia fik
+# "besiges" for bestiges, "pillestedsted" for pilgrimssted og "cykelsporten
+# helgeninde" uden ejefald. Agenten kører kun på etaper, hvor description er
+# NULL, så det er ikke en løbende udgift — men skift den tilbage, hvis en
+# bulk-kørsel over en hel Grand Tour bliver for dyr.
+MODEL = "claude-opus-5"
 
 STAGE_TYPE_LABELS = {
     "flat":     "Flad (sprinteretape)",
@@ -81,6 +87,24 @@ def get_stages(race_slug: str | None, force_all: bool, stage_number: int | None 
     return r.json()
 
 
+def get_climbs(stage_id: str) -> list[dict]:
+    """Etapens stigninger, som de står verificeret i vores egen database.
+
+    Uden dem skrev agenten ud fra modellens egen hukommelse om regionen, og så
+    kan en tekst om Il Lombardia nævne bjerge, ruten slet ikke kører over —
+    eller tie om Ghisallo, Civiglio og den dobbelte San Fermo, som er hele
+    historien. Vi HAR tallene, GPX-verificerede; så skal de i prompten frem for
+    at blive gættet (CLAUDE.md §6).
+    """
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/stage_climbs?stage_id=eq.{stage_id}"
+        f"&select=name,km_from_start,length_km,avg_gradient,max_gradient,elevation_m"
+        f"&order=km_from_start.asc.nullslast",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+    )
+    return r.json() if r.ok and isinstance(r.json(), list) else []
+
+
 def get_race_name(race_id: str, cache: dict) -> str:
     if race_id not in cache:
         r = requests.get(
@@ -112,16 +136,51 @@ SYSTEM = (
 )
 
 
-def build_prompt(race_name: str, stage: dict) -> str:
+def build_prompt(race_name: str, stage: dict, climbs: list[dict] | None = None) -> str:
     type_label = STAGE_TYPE_LABELS.get(stage.get("stage_type", ""), "Ukendt")
     elev = stage.get("elevation_gain_m")
     score = stage.get("profile_score")
+
+    if climbs:
+        dist = stage.get("distance_km")
+        linjer = []
+        for c in climbs:
+            km = c.get("km_from_start")
+            laengde = c.get("length_km")
+            # Afstanden til mål REGNES her og gives til modellen. Uden den
+            # regnede den selv — og tog fejl: San Fermos anden opstigning
+            # topper 5 km fra mål, men blev beskrevet som "næstsidste
+            # kilometer" (2026-10-10). Et forkert tal i en finale-beskrivelse
+            # er præcis den slags, der koster tillid (CLAUDE.md §4).
+            til_maal = ""
+            if km is not None and dist:
+                top_km = km + (laengde or 0)
+                til_maal = (f", toppen {float(dist) - top_km:.1f} km fra mål"
+                            if top_km <= float(dist) else "")
+            linjer.append(
+                f"- {c['name']}"
+                + (f", fod ved km {km:g}" if km is not None else "")
+                + (f", {laengde:g} km" if laengde else "")
+                + (f" @ {c['avg_gradient']:g} %" if c.get("avg_gradient") else "")
+                + (f" (max {c['max_gradient']:g} %)" if c.get("max_gradient") else "")
+                + (f", +{c['elevation_m']} højdemeter" if c.get("elevation_m") else "")
+                + til_maal
+            )
+        klatre_blok = ("\n\nStigninger på ruten (VERIFICERET mod GPX-sporet — brug disse "
+                       "navne og tal, og nævn ingen andre stigninger). Afstanden til mål "
+                       "står på hver linje: regn den ALDRIG selv, og skriv aldrig at en "
+                       "stigning ligger tættere på mål, end der står her:\n"
+                       + "\n".join(linjer))
+    else:
+        klatre_blok = ("\n\nVi har ingen verificerede stigningsdata for denne etape. "
+                       "Nævn derfor INGEN stigninger ved navn.")
+
     return f"""Beskriv denne cykling-etape for danske fans.
 
 Løb: {race_name}
 Etape {stage.get('stage_number')}: {stage.get('start_location', '?')} → {stage.get('finish_location', '?')}
 Dato: {stage.get('date', '?')} | Distance: {stage.get('distance_km', '?')} km
-Højdemeter: {f'+{elev} m' if elev else '?'} | Type: {type_label} | Profil-score: {score or '?'}
+Højdemeter: {f'+{elev} m' if elev else '?'} | Type: {type_label} | Profil-score: {score or '?'}{klatre_blok}
 
 Returner præcis dette JSON-objekt:
 {{
@@ -130,6 +189,10 @@ Returner præcis dette JSON-objekt:
   "finish_type": "sprint|uphill|cobblestone|tt|gravel|circuit",
   "stage_start_time": "HH:MM eller null"
 }}
+
+SKRIV TAL PÅ DANSK i teksten: komma som decimaltegn og punktum som tusindtalsskilletegn
+— altså "239,0 km", "4.662 højdemeter", "10,5 km @ 5,6 %". Tallene ovenfor står med
+engelsk punktum; oversæt dem, men lav dem ikke om.
 
 fun_facts: 3-4 konkrete bullets om etapen (geografi, historik, vejbeskaffenhed, vigtige stigninger).
 finish_type: sprint=massespurt, uphill=bjergfinish, cobblestone=brosten, tt=enkeltstart.
@@ -150,16 +213,26 @@ def extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-def call_claude(client: Anthropic, race_name: str, stage: dict) -> dict | None:
+def call_claude(client: Anthropic, race_name: str, stage: dict,
+                climbs: list[dict] | None = None) -> dict | None:
     try:
         resp = client.messages.create(
             model=MODEL,
-            max_tokens=900,
+            # Rummeligt, fordi adaptiv taenkning ogsaa taeller med i
+            # max_tokens: ved 900 blev JSON'en afkortet midt i en streng.
+            max_tokens=8000,
             system=SYSTEM,
-            messages=[{"role": "user", "content": build_prompt(race_name, stage)}],
-            temperature=0.7,
+            messages=[{"role": "user",
+                       "content": build_prompt(race_name, stage, climbs)}],
+            # Ingen temperature: den er fjernet på Opus 5 og giver 400.
+            thinking={"type": "adaptive"},
         )
-        return extract_json(resp.content[0].text)
+        # Med adaptiv tænkning er content[0] et ThinkingBlock, ikke svaret.
+        svar = next((b.text for b in resp.content if b.type == "text"), None)
+        if not svar:
+            print("  [API FEJL] intet tekstsvar i svaret")
+            return None
+        return extract_json(svar)
     except Exception as e:
         print(f"  [API FEJL] {e}")
         return None
@@ -189,7 +262,11 @@ def run(race_slug: str | None, force_all: bool, stage_number: int | None = None)
         print(f"[{i}/{total}] {race_name} E{stage['stage_number']}: "
               f"{stage.get('start_location')} → {stage.get('finish_location')}")
 
-        result = call_claude(client, race_name, stage)
+        climbs = get_climbs(stage["id"])
+        if climbs:
+            print(f"  {len(climbs)} verificeret(e) stigning(er) med i prompten")
+
+        result = call_claude(client, race_name, stage, climbs)
         if not result or not result.get("description"):
             print("  -> FEJL")
             fail += 1

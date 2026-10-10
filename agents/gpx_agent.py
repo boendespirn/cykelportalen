@@ -1,17 +1,29 @@
 """
 gpx_agent.py
-Downloader GPX-ruter fra cyclingstage.com og gemmer koordinater i stages.route_points.
+Downloader GPX-ruter fra cyclingstage.com og gemmer koordinater i
+stages.route_points — det er dem, kortet tegner ruten af.
+
+Løbene og GPX-opslaget kommer fra climb_profile_generator, så der kun findes
+ÉN liste over, hvilke løb vi har en rute til.
 
 Kør: python gpx_agent.py                          # alle kendte løb
-     python gpx_agent.py --race giro-d-italia-2026
+     python gpx_agent.py --race il-lombardia-2026
 """
 
-import os, sys, io, re, time, json, argparse, requests
+import os, sys, io, time, argparse, requests
 import xml.etree.ElementTree as ET
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import climb_profile_generator as cpg
+
+# climb_profile_generator pakker selv sys.stdout ind ved import ovenfor. Pakker
+# vi den ind EN GANG TIL om den samme buffer, mister dens wrapper sin sidste
+# reference, bliver frigivet og lukker bufferen — hvorefter alt print dør med
+# "I/O operation on closed file". Derfor kun, hvis der ikke allerede er en
+# UTF-8-wrapper. Samme fælde er beskrevet i data_sources.py._agent_attr().
+if not isinstance(sys.stdout, io.TextIOWrapper) or (sys.stdout.encoding or "").lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -21,36 +33,7 @@ SB_HEADERS = {**SB_AUTH, "Content-Type": "application/json", "Prefer": "return=m
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-# Løb-slug → cyclingstage.com GPX-side
-RACES = {
-    "giro-d-italia-2026":         "https://www.cyclingstage.com/giro-2026-gpx",
-    "tour-de-france-2026":        "https://www.cyclingstage.com/tour-de-france-2026-gpx",
-    "criterium-du-dauphine-2026": "https://www.cyclingstage.com/criterium-du-dauphine-2026-gpx",
-    "tour-de-suisse-2026":        "https://www.cyclingstage.com/tour-de-suisse-2026-gpx",
-}
-
 MAX_POINTS = 400  # Maks antal koordinatpar gemt per etape
-
-
-def get_gpx_urls(gpx_page_url: str) -> dict[int, str]:
-    """Scraper en cyclingstage GPX-side og returnerer {etapenr: gpx_url}."""
-    res = requests.get(gpx_page_url, headers={"User-Agent": UA}, timeout=15)
-    if not res.ok:
-        print(f"  Kan ikke hente GPX-side: {res.status_code}")
-        return {}
-    soup = BeautifulSoup(res.text, "html.parser")
-    result: dict[int, str] = {}
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if ".gpx" not in href:
-            continue
-        m = re.search(r"stage-(\d+)", href)
-        if not m:
-            continue
-        n = int(m.group(1))
-        url = href if href.startswith("http") else "https://cdn.cyclingstage.com" + href
-        result[n] = url
-    return result
 
 
 def parse_gpx(content: str) -> list[list[float]] | None:
@@ -130,11 +113,18 @@ def save_route(stage_id: str, points: list) -> bool:
 
 
 def run(race_slug: str | None) -> None:
-    races = {race_slug: RACES[race_slug]} if race_slug else RACES
+    # Løbene kommer fra climb_profile_generator, ikke fra en liste her.
+    # Den lokale RACES-liste kendte kun 4 løb og var ikke blevet rørt, siden
+    # CYCLINGSTAGE_GPX_PAGES voksede til 20+ — så alle klassikerne, heriblandt
+    # Il Lombardia, kunne ikke få rutepunkter, og kortet tegnede en stiplet
+    # streg mellem start og mål i stedet for den faktiske rute. To lister over
+    # de samme løb kommer altid ud af trit; nu er der én.
+    alle = cpg.CYCLINGSTAGE_GPX_PAGES
+    slugs = [race_slug] if race_slug else list(alle)
 
-    for slug, gpx_page_url in races.items():
-        if race_slug and slug not in RACES:
-            print(f"Ukendt løb: {slug}. Kendte: {', '.join(RACES)}")
+    for slug in slugs:
+        if slug not in alle:
+            print(f"Ukendt løb: {slug}. Kendte: {', '.join(sorted(alle))}")
             continue
 
         print(f"\n{slug}")
@@ -144,13 +134,14 @@ def run(race_slug: str | None) -> None:
             continue
 
         stages = get_stages(race_id)
-        gpx_urls = get_gpx_urls(gpx_page_url)
-        print(f"  {len(stages)} etaper i DB, {len(gpx_urls)} GPX-filer på cyclingstage")
+        print(f"  {len(stages)} etaper i DB")
 
         updated = 0
         for stage in stages:
             n = stage["stage_number"]
-            gpx_url = gpx_urls.get(n)
+            # Samme opslag som resten af pipelinen: det kender både
+            # etapeløbenes "stage-N"-filer og endagsløbenes "route.gpx".
+            gpx_url = cpg.get_gpx_url_for_stage(slug, n)
             if not gpx_url:
                 print(f"  E{n}: ingen GPX-URL")
                 continue

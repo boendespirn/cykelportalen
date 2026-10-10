@@ -207,6 +207,29 @@ async function getClimbs(slug: string): Promise<RaceClimb[]> {
   } catch { return []; }
 }
 
+/** Detaljerne for et endagsløbs ene etape.
+ *
+ *  Etapelisten (/races/{slug}/stages) leverer hverken route_points eller
+ *  description — med vilje: et Grand Tour-svar med 21 ruter à 400
+ *  koordinatpar ville være enormt. Enkelt-etape-endpointet har dem begge, og
+ *  et endagsløb har kun én etape, så det er ét ekstra kald. */
+type StageDetail = {
+  route_points: [number, number][] | null;
+  description: string | null;
+  fun_facts: string[] | null;
+  finish_type: string | null;
+  stage_start_time: string | null;
+};
+
+async function getStageDetail(slug: string): Promise<StageDetail | null> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/1`,
+                            { next: { revalidate: 300 } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 async function getBroadcast(slug: string): Promise<Broadcast[]> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/broadcast`, { next: { revalidate: 60 } });
@@ -526,7 +549,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     notFound();
   }
 
-  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, climbs, history, raceNews] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, climbs, stageDetail, history, raceNews] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -538,6 +561,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getDnfs(slug),
       getBroadcast(slug),
       getClimbs(slug),
+      getStageDetail(slug),
       getRaceHistory(slug),
       getRaceNews(slug),
     ]);
@@ -696,6 +720,47 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         {/* ── TV / Streaming ── */}
         <TvSektion broadcasts={broadcasts} today={today} visEtape={false} />
 
+        {/* ── Løbsinfo ──
+            Samme blok som etapesidernes "Etapeinfo", så et endagsløb læses
+            som en etape. Teksten skrives af stage_info_agent ud fra vores
+            egne GPX-verificerede stigninger. ── */}
+        {(stageDetail?.description || stageDetail?.fun_facts?.length) && (
+          <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+                Løbsinfo
+              </span>
+              {singleStage?.stage_start_time && (
+                <span className="ml-auto text-xs text-slate-400 font-mono">
+                  🕐 Start {singleStage.stage_start_time.slice(0, 5)} CET
+                </span>
+              )}
+            </div>
+            <div className="p-5 space-y-4">
+              {stageDetail.description && (
+                <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+                  {stageDetail.description}
+                </div>
+              )}
+              {stageDetail.fun_facts && stageDetail.fun_facts.length > 0 && (
+                <div>
+                  <p className="text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">
+                    Værd at vide
+                  </p>
+                  <ul className="space-y-1.5">
+                    {stageDetail.fun_facts.map((f, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-slate-400">
+                        <span className="text-emerald-500/60 flex-shrink-0">•</span>
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Rute og stigninger ──
             Hel-etape-profilen OG hver enkelt stigning, i samme komponent som
             etapesiderne bruger. Et endagsløb havde før ingen af delene: profilen
@@ -726,43 +791,10 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           </div>
         )}
 
-        {/* Route map + startlist side by side */}
-        <div className={`grid gap-8 mb-10 ${startCoords && finishCoords ? "lg:grid-cols-[1fr_420px]" : ""}`}>
-
-          {/* Map */}
-          {startCoords && finishCoords && singleStage && (
-            <div className="rounded-xl overflow-hidden border border-slate-800" style={{ minHeight: "320px" }}>
-              <StageMapLoader
-                start={startCoords}
-                finish={finishCoords}
-                startName={singleStage.start_location ?? "Start"}
-                finishName={singleStage.finish_location ?? "Mål"}
-              />
-            </div>
-          )}
-
-          {/* Startlist */}
-          <section>
-            <div className="flex items-baseline justify-between mb-5">
-              <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase">
-                Startliste
-              </h2>
-              {totalRiders > 0 && (
-                <span className="text-slate-700 text-sm font-mono">{totalRiders} ryttere</span>
-              )}
-            </div>
-
-            {startlist.length === 0 ? (
-              <div className="rounded-xl border border-slate-800 p-10 text-center text-slate-600 text-sm">
-                Startliste ikke tilgængelig endnu.
-              </div>
-            ) : (
-              <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} showTimeTrialBadge={showsTimeTrialBadge(race.slug)} />
-            )}
-          </section>
-        </div>
-
-        {/* Danish riders & GC favorites */}
+        {/* ── Favoritter og danskere ──
+            Over startlisten, ikke under: hvem der kan vinde, er det
+            foerste en laeser vil vide, og en liste paa 174 navne
+            skubbede det hele ud af syne. ── */}
         {(danishRiders.length > 0 || gcFavorites.length > 0) && (
           <div className="grid gap-6 sm:grid-cols-2 mb-10">
             {gcFavorites.length > 0 && (
@@ -806,6 +838,43 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
             )}
           </div>
         )}
+
+        {/* Route map + startlist side by side */}
+        <div className={`grid gap-8 mb-10 ${startCoords && finishCoords ? "lg:grid-cols-[1fr_420px]" : ""}`}>
+
+          {/* Map */}
+          {startCoords && finishCoords && singleStage && (
+            <div className="rounded-xl overflow-hidden border border-slate-800" style={{ minHeight: "320px" }}>
+              <StageMapLoader
+                start={startCoords}
+                finish={finishCoords}
+                startName={singleStage.start_location ?? "Start"}
+                finishName={singleStage.finish_location ?? "Mål"}
+                routePoints={stageDetail?.route_points}
+              />
+            </div>
+          )}
+
+          {/* Startlist */}
+          <section>
+            <div className="flex items-baseline justify-between mb-5">
+              <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase">
+                Startliste
+              </h2>
+              {totalRiders > 0 && (
+                <span className="text-slate-700 text-sm font-mono">{totalRiders} ryttere</span>
+              )}
+            </div>
+
+            {startlist.length === 0 ? (
+              <div className="rounded-xl border border-slate-800 p-10 text-center text-slate-600 text-sm">
+                Startliste ikke tilgængelig endnu.
+              </div>
+            ) : (
+              <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={gcData} showTimeTrialBadge={showsTimeTrialBadge(race.slug)} />
+            )}
+          </section>
+        </div>
 
         {dnfs.length > 0 && <DnfSection entries={dnfs} />}
         {hasResults && (
