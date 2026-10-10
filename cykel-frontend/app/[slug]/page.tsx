@@ -226,7 +226,10 @@ async function getStageDetail(slug: string): Promise<StageDetail | null> {
     const res = await fetch(`${API_BASE}/races/${slug}/stages/1`,
                             { next: { revalidate: 300 } });
     if (!res.ok) return null;
-    return await res.json();
+    // Endpointet svarer {stage, race} — ikke etapen fladt. Uden udpakningen
+    // var alle felter undefined, og Løbsinfo-blokken blev aldrig vist.
+    const data = await res.json();
+    return data?.stage ?? null;
   } catch { return null; }
 }
 
