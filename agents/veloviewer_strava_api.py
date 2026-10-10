@@ -78,13 +78,21 @@ def _daily_limit_exhausted(res: requests.Response) -> bool:
     return daily_usage >= daily_limit
 
 
+# Saettes naar Stravas DAGLIGE loft er naaet. Kaldere skal tjekke den og
+# afbryde koerslen — ellers ser tomme svar ud som "ingen segmenter fundet",
+# og en batch-koersel ville rapportere falske negativer resten af dagen.
+daily_limit_reached = False
+
+
 def _get_with_retry(url: str, params: dict) -> requests.Response | None:
+    global daily_limit_reached
     token = get_access_token()
     for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
         res = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=15)
         if res.status_code != 429:
             return res
         if _daily_limit_exhausted(res):
+            daily_limit_reached = True
             print("    [rate limit] Stravas DAGLIGE read-loft (1000 kald/dag) er nået — "
                   "nulstiller først ved midnat UTC, så vi venter ikke vinduet ud. "
                   "Giver op for resten af kørslen, prøv igen efter midnat UTC.")
@@ -150,6 +158,314 @@ def get_segment(segment_id: int) -> dict | None:
         "elevation_high": d.get("elevation_high"),
         "elevation_low": d.get("elevation_low"),
     }
+
+
+def explore_segments_cat(bounds: str, min_cat: int | None = None, max_cat: int | None = None,
+                          activity_type: str = "riding") -> list[dict]:
+    """
+    Som explore_segments(), men med Stravas klatrekategori-filter.
+
+    Uden filter rangerer /segments/explore efter popularitet, og i bjergrige
+    omraader er top-10 typisk korte, populaere fragmenter ("Sprint Tourmalet",
+    300 m) frem for selve bjerget — bekraeftet 2026-07-22: en ufiltreret
+    soegning i Tourmalet-boksen indeholdt IKKE en eneste HC-stigning, mens
+    min_cat=4 straks gav de rigtige. Vi kender nu klatrens officielle
+    ASO-kategori (aso_roadbook_agent.py), saa filteret kan bruges maalrettet.
+    """
+    params = {"bounds": bounds, "activity_type": activity_type}
+    if min_cat is not None:
+        params["min_cat"] = min_cat
+    if max_cat is not None:
+        params["max_cat"] = max_cat
+    res = _get_with_retry(f"{API_BASE}/segments/explore", params)
+    if res is None or res.status_code != 200:
+        return []
+    return res.json().get("segments", [])
+
+
+# ── Geometrisk matchning ─────────────────────────────────────────────────────
+#
+# /segments/explore returnerer selv segmentets fulde rute som encoded polyline
+# ("points") sammen med distance, gradient, hoejdemeter og kategori. Vi kan
+# derfor bade finde OG verificere en kandidat uden et eneste /segments/{id}-
+# opslag — det sparer ~10 laesekald pr. kandidat og er det, der overhovedet
+# goer det muligt at scanne hele databasen inden for Stravas daglige loft.
+#
+# Polylinjen bruges KUN i hukommelsen til denne sammenligning. Den maa aldrig
+# persisteres eller vises, jf. modulets docstring og Stravas API Agreement.
+
+_CELL_DEG = 0.0006          # gittercelle ~66 m i breddegrad
+
+
+def decode_polyline(encoded: str) -> list[tuple[float, float]]:
+    """Google encoded polyline -> [(lat, lon), ...]."""
+    points: list[tuple[float, float]] = []
+    lat = lon = index = 0
+    while index < len(encoded):
+        for is_lat in (True, False):
+            shift = result = 0
+            while True:
+                byte = ord(encoded[index]) - 63
+                index += 1
+                result |= (byte & 0x1F) << shift
+                shift += 5
+                if byte < 0x20:
+                    break
+            delta = ~(result >> 1) if result & 1 else (result >> 1)
+            if is_lat:
+                lat += delta
+            else:
+                lon += delta
+        points.append((lat / 1e5, lon / 1e5))
+    return points
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    import math
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _densify(points: list[tuple[float, float]], step_m: int = 25) -> list[tuple[float, float]]:
+    """
+    Indsaetter mellempunkter, saa der aldrig er mere end step_m mellem to punkter.
+
+    Uden dette maales naerhed kun mod de raa polylinje-hjoerner, som paa en lang
+    stigning kan ligge hundredvis af meter fra hinanden — et korrekt segment
+    ville da fejlagtigt se ud til kun at daekke halvdelen af klatren.
+    """
+    if len(points) < 2:
+        return list(points)
+    out = [points[0]]
+    for a, b in zip(points, points[1:]):
+        gap_m = _haversine_km(a[0], a[1], b[0], b[1]) * 1000
+        steps = int(gap_m // step_m)
+        for i in range(1, steps + 1):
+            f = i / (steps + 1)
+            out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+        out.append(b)
+    return out
+
+
+def _cells(points: list[tuple[float, float]], lat0: float) -> set:
+    import math
+    lon_scale = max(math.cos(math.radians(lat0)), 0.2)
+    return {(int(p[0] / _CELL_DEG), int(p[1] * lon_scale / _CELL_DEG)) for p in points}
+
+
+def _fraction_near(points: list[tuple[float, float]], cellset: set, lat0: float) -> float:
+    import math
+    lon_scale = max(math.cos(math.radians(lat0)), 0.2)
+    hits = 0
+    for p in points:
+        cy, cx = int(p[0] / _CELL_DEG), int(p[1] * lon_scale / _CELL_DEG)
+        if any((cy + dy, cx + dx) in cellset for dy in (-1, 0, 1) for dx in (-1, 0, 1)):
+            hits += 1
+    return hits / len(points) if points else 0.0
+
+
+def geo_overlap(segment_points: list[tuple[float, float]],
+                climb_points: list[tuple[float, float]]) -> tuple[float, float]:
+    """
+    Returnerer (paa_rute, daekning):
+      paa_rute  = hvor stor del af SEGMENTET der foelger klatrens rute
+                  (lav vaerdi = segmentet stikker af ad en anden vej)
+      daekning  = hvor stor del af KLATREN segmentet daekker
+                  (lav vaerdi = segmentet er kun et fragment af stigningen)
+    """
+    seg = _densify(segment_points)
+    climb = _densify(climb_points)
+    if not seg or not climb:
+        return 0.0, 0.0
+    lat0 = climb[0][0]
+    return (_fraction_near(seg, _cells(climb, lat0), lat0),
+            _fraction_near(climb, _cells(seg, lat0), lat0))
+
+
+# Taerskler for at godkende et match. Bevidst strenge: hellere ingen embed
+# (og falde tilbage til vores egen genererede profil) end en profil for den
+# forkerte vej — jf. CLAUDE.md §6 om datakorrekthed frem for daekning.
+ON_ROUTE_MIN = 0.85    # segmentet må ikke stikke af ad en anden vej
+COVERAGE_MIN = 0.80    # segmentet skal daekke stoerstedelen af stigningen
+#
+# 0.80 er valgt empirisk: Strava-segmenter starter sjaeldent praecis hvor
+# roadbogens klatring starter, saa aegte match lander typisk paa 84-100%
+# daekning (bekraeftet: "SASSENAGE B&C - Engins Haut" 10.37 km mod vores
+# 11.6 km). Kombineret med laengde-ratio 0.75-1.33, gradient inden for 2% og
+# ON_ROUTE_MIN kan et fragment ikke slippe igennem — kun en let afkortet
+# udgave af den rigtige stigning.
+
+
+def expected_gain_m(db_climb: dict) -> float | None:
+    """
+    Klatrens HOEJDEMETER (stigning) — det tal hoejdetjekket skal maale imod.
+
+    `elevation_m` er ikke paalideligt hoejdemeter i hele databasen. Maalt
+    2026-08-20 er medianen af elevation_m / (laengde x gennemsnitsgradient)
+    1.00 for Tour de France 2026, men 2.70 for Vuelta 2026 — der indeholder
+    feltet overvejende TOPHOEJDEN (Coll d'Ordino staar med 1982 m, mens
+    stigningen reelt vinder ca. 693 m). Stravas `elev_difference` ER stigning,
+    saa en direkte sammenligning afviste korrekte segmenter paa et
+    hoejdemeter-diff, der i virkeligheden var forskellen mellem havoverflade og
+    bjergtop.
+
+    Derfor: brug elevation_m naar det er konsistent med laengde x gradient
+    (inden for 25%) — saa opfoerer tjekket sig praecis som foer for de loeb,
+    hvor feltet er korrekt. Ellers regnes hoejdemeteren ud af de to felter, der
+    ER internt konsistente. Kan ingen af delene lade sig goere, returneres None,
+    og kalderen springer hoejdetjekket over frem for at gaette.
+    """
+    elev = db_climb.get("elevation_m")
+    length = db_climb.get("length_km")
+    grade = db_climb.get("avg_gradient")
+    computed = length * grade * 10 if (length and grade) else None
+
+    if elev and computed:
+        return elev if 0.75 <= elev / computed <= 1.25 else computed
+    return elev or computed
+
+
+def segment_matches_climb_geo(segment: dict, db_climb: dict,
+                               climb_points: list[tuple[float, float]]) -> tuple[bool, str]:
+    """
+    Verificerer en /segments/explore-kandidat mod vores DB-klatring — paa
+    GEOMETRI i stedet for navn.
+
+    Navnetjekket (name_plausible_match) er bevidst droppet her: Strava-navne er
+    brugerskabte, og korrekte segmenter hedder ofte noget helt andet end
+    bjerget — bekraeftet 2026-07-22 er det rigtige segment for "Côte d'Engins"
+    navngivet "D531 Climb" (100% geometrisk sammenfald), og et aegte
+    Tourmalet-segment hedder "Ullrich vs. Lance 2003=24min". Navnetjekket var
+    dermed selv en hovedaarsag til den lave daekning (10%).
+
+    `segment` er raa explore-respons; `climb_points` er klatrens [(lat, lon)]
+    fra vores GPX. Returnerer (godkendt, forklaring) — forklaringen indeholder
+    Strava-tal og maa kun bruges i lokale logs, aldrig vises offentligt.
+    """
+    grade = segment.get("avg_grade")
+    if grade is None:
+        return False, "mangler gradient"
+    if grade <= 0:
+        # Samme vej den forkerte vej: nedkoersler ligger geometrisk oven i
+        # stigningen og ville ellers score perfekt (bekraeftet: "descente
+        # Engins" var hoejest scorende kandidat for Côte d'Engins).
+        return False, f"nedkoersel ({grade:.1f}%)"
+
+    db_len = db_climb.get("length_km")
+    seg_len = (segment.get("distance") or 0) / 1000
+    if db_len and seg_len > 0:
+        ratio = seg_len / db_len
+        # Nedre graense saenket til 0.65 (2026-08-20): 0.75 var STRENGERE end
+        # den geometriske port, den sidder foran, og vetoede derfor segmenter,
+        # geometrien allerede havde godkendt — bekraeftet paa Col de Sant
+        # Andrieu, hvor segment 715848 laa 100% paa ruten og daekkede 81% af
+        # klatren, men blev kasseret paa ratio 0.74. Et FRAGMENT kan stadig
+        # ikke slippe igennem: med ON_ROUTE ~1.0 medfoerer ratio 0.65 en
+        # daekning omkring 0.65, og COVERAGE_MIN = 0.80 afviser den. Det er
+        # altsaa fortsat geometrien, der doemmer — dette er kun et billigt
+        # forfilter, der frasorterer aabenlyse misforhold.
+        # Gaelder KUN denne GPX-variant. segment_matches_climb_summit() har
+        # ingen daekningsport, saa dér er laengde-ratioen baerende og uaendret.
+        if ratio < 0.65 or ratio > 1.33:
+            return False, f"laengde-ratio {ratio:.2f} uden for tolerance"
+
+    db_grad = db_climb.get("avg_gradient")
+    if db_grad is not None and abs(grade - db_grad) > 2.0:
+        return False, f"gradient-diff {abs(grade - db_grad):.1f}% uden for tolerance"
+
+    db_elev = expected_gain_m(db_climb)
+    seg_gain = segment.get("elev_difference")
+    if db_elev and seg_gain is not None:
+        diff = abs(seg_gain - db_elev)
+        if diff > max(150, db_elev * 0.35):
+            return False, f"hoejdemeter-diff {diff:.0f}m uden for tolerance"
+
+    pts = segment.get("points")
+    if not pts:
+        return False, "ingen rutegeometri i svaret"
+    on_route, coverage = geo_overlap(decode_polyline(pts), climb_points)
+    if on_route < ON_ROUTE_MIN:
+        return False, f"kun {on_route:.0%} af segmentet ligger paa ruten"
+    if coverage < COVERAGE_MIN:
+        return False, f"daekker kun {coverage:.0%} af stigningen"
+    return True, f"rute {on_route:.0%}, daekning {coverage:.0%}, {seg_len:.2f} km @ {grade:.1f}%"
+
+
+# Kalibreret 2026-08-07 mod de 21 stigninger, der allerede har et
+# GPX-verificeret segment: afstanden fra Nominatims geokodning af klatrenavnet
+# til segmentets toppunkt var median 0,30 km og 15 af 18 under 0,81 km, mens kun
+# 1 ud af 306 FORKERTE par lå under 2 km. 2,0 km rammer altså både recall og
+# præcision. Se modul-docstringen i veloviewer_nogpx_agent.py for kalibreringen.
+SUMMIT_MAX_KM = 2.0
+
+
+def segment_matches_climb_summit(segment: dict, db_climb: dict,
+                                  anchor: tuple[float, float]) -> tuple[bool, str]:
+    """
+    Verificerer en /segments/explore-kandidat UDEN rutedata (GPX).
+
+    Erstatter geo_overlap()-kontrollen med et identitetstjek: ligger segmentets
+    TOPPUNKT på det geokodede pas? Det er nødvendigt, fordi tolerancerne på
+    længde/højdemeter/hældning alene er dokumenteret utilstrækkelige — de lod
+    "Ste Marie - Tourmalet 10kms" passere som Col d'Aspin (se
+    name_plausible_match). Formsammenligning af højdekurven blev afprøvet som
+    alternativ 2026-08-07 og forkastet: de fleste asfaltstigninger har samme
+    normaliserede form, så korrekte og forkerte par overlappede fuldstændigt.
+
+    Toppunktet er polylinjens SIDSTE punkt: Strava-segmenter er retningsbestemte,
+    og vi kræver positiv gennemsnitshældning, så slutpunktet er pr. definition
+    det høje. Det sparer et /streams-kald pr. kandidat.
+
+    `anchor` er (lat, lon) for klatrens top fra geokodning. Returnerer
+    (godkendt, forklaring) — forklaringen indeholder Strava-tal og må kun
+    bruges i lokale logs, aldrig vises offentligt (se modulets docstring).
+    """
+    grade = segment.get("avg_grade")
+    if grade is None:
+        return False, "mangler gradient"
+    if grade <= 0:
+        # Nedkørslen ligger geografisk oven i stigningen og har samme toppunkt,
+        # så uden dette filter ville den score perfekt. Bekræftet 2026-08-07:
+        # "Słodyczki DH" (-8,1%) blev godkendt som stigningen Słodyczki, fordi
+        # metrics-varianten segment_matches_climb() mangler netop dette tjek.
+        return False, f"nedkoersel ({grade:.1f}%)"
+
+    db_len = db_climb.get("length_km")
+    seg_len = (segment.get("distance") or 0) / 1000
+    if not db_len or seg_len <= 0:
+        return False, "mangler laengde at sammenligne paa"
+    ratio = seg_len / db_len
+    if ratio < 0.75 or ratio > 1.33:
+        return False, f"laengde-ratio {ratio:.2f} uden for tolerance"
+
+    db_grad = db_climb.get("avg_gradient")
+    if db_grad is not None and abs(grade - db_grad) > 2.0:
+        return False, f"gradient-diff {abs(grade - db_grad):.1f}% uden for tolerance"
+
+    db_elev = expected_gain_m(db_climb)
+    seg_gain = segment.get("elev_difference")
+    if db_elev and seg_gain is not None:
+        diff = abs(seg_gain - db_elev)
+        if diff > max(150, db_elev * 0.35):
+            return False, f"hoejdemeter-diff {diff:.0f}m uden for tolerance"
+
+    pts = segment.get("points")
+    if not pts:
+        return False, "ingen rutegeometri i svaret"
+    decoded = decode_polyline(pts)
+    if len(decoded) < 2:
+        return False, "for kort rutegeometri"
+    summit = decoded[-1]
+    d_summit = _haversine_km(summit[0], summit[1], anchor[0], anchor[1])
+    if d_summit > SUMMIT_MAX_KM:
+        return False, f"toppunkt {d_summit:.2f} km fra det geokodede pas"
+
+    return True, (f"top {d_summit:.2f} km fra pas, {seg_len:.2f} km @ {grade:.1f}%, "
+                  f"laengde-ratio {ratio:.2f}")
 
 
 def explore_segments(bounds: str, activity_type: str = "riding") -> list[dict]:
@@ -227,7 +543,7 @@ def segment_matches_climb(segment: dict, db_climb: dict) -> tuple[bool, str]:
             return False, f"længde-ratio {ratio:.2f} uden for tolerance"
         reasons.append(f"len ratio {ratio:.2f}")
 
-    db_elev = db_climb.get("elevation_m")
+    db_elev = expected_gain_m(db_climb)
     seg_high = segment.get("elevation_high")
     seg_low = segment.get("elevation_low")
     if db_elev and seg_high is not None and seg_low is not None:
