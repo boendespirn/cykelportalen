@@ -584,7 +584,10 @@ def render_climb_profile(
                        fill=TEXT_COLOR, anchor="rm")
 
         step = max(1, round(total_km / 8))
-        km_marker = 0
+        # Starter ved 1 km, ikke 0: "0km" landede oven i start-højden
+        # ("217m"), som tegnes samme sted. Nulpunktet siger i forvejen intet,
+        # som akserne ikke allerede viser.
+        km_marker = step
         while km_marker <= total_km:
             x, _ = to_xy(km_marker, min_elev)
             draw.line([(x, baseline_y), (x, baseline_y + 8)], fill=GRID_COLOR, width=1)
@@ -605,9 +608,13 @@ def render_climb_profile(
         draw.text((WIDTH - PAD_RIGHT, HEIGHT - 20), "klassementet.dk",
                    font=_font(22), fill=BRAND_COLOR, anchor="rb")
 
-    x0, y0 = to_xy(0, start_elev)
-    draw.text((x0, y0 + 15), f"{int(round(start_elev))}m", font=_font(30),
-               fill=TEXT_COLOR, anchor="ma")
+    # Start-højden udelades, når stigningen begynder i sit laveste punkt —
+    # altså næsten altid. Så står tallet allerede nederst på y-aksen, og de to
+    # etiketter landede oven i hinanden ("217m" to gange på Civiglio).
+    if abs(start_elev - min_elev) > 1.0:
+        x0, y0 = to_xy(0, start_elev)
+        draw.text((x0, y0 + 15), f"{int(round(start_elev))}m", font=_font(30),
+                   fill=TEXT_COLOR, anchor="ma")
     x1, y1 = to_xy(total_km, summit_elev)
     draw.text((x1, y1 - 15), f"{int(round(summit_elev))}m", font=_font(30),
                fill=TEXT_COLOR, anchor="mb")
@@ -641,7 +648,7 @@ def get_climbs_for_stage(stage_id: str) -> list[dict]:
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/stage_climbs"
         f"?stage_id=eq.{stage_id}"
-        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,profile_image_url"
+        f"&select=id,name,km_from_start,length_km,elevation_m,avg_gradient,profile_image_url,veloviewer_segment_id"
         f"&order=km_from_start.asc",
         headers=SB_AUTH,
     )
@@ -671,15 +678,30 @@ def upload_image(path: str, data: bytes) -> str | None:
 
 
 def update_climb_profile(climb_id: str, profile_url: str) -> bool:
+    """Gemmer vores eget profilbillede på stigningen.
+
+    Skriver `profile_image_source`, IKKE `source`. De to betyder hver sit:
+    `source` fortæller, hvor stigningens TAL kommer fra ('pcs_climb_profile',
+    'vision', …), mens `profile_image_source` er porten for, om billedet må
+    vises (LEG-001). Indtil 2026-10-10 satte funktionen `source='generated'`
+    og slettede dermed dataens herkomst, hver gang et billede blev gemt.
+    """
     res = requests.patch(
         f"{SUPABASE_URL}/rest/v1/stage_climbs?id=eq.{climb_id}",
-        json={"profile_image_url": profile_url, "source": "generated"},
+        json={"profile_image_url": profile_url,
+              "profile_image_source": "generated"},
         headers=SB_HEADERS,
     )
     return res.ok
 
 
 # ── Hovedpipeline ─────────────────────────────────────────────────────────────
+
+# Sættes af --kun-uden-veloviewer. Et modulniveau-flag frem for et argument
+# gennem fire funktioner: ingen af dem kaldes udefra, og signaturerne er
+# allerede lange nok.
+KUN_UDEN_VELOVIEWER = False
+
 
 def process_climb(
     stage: dict,
@@ -695,6 +717,10 @@ def process_climb(
     length_km = climb.get("length_km")
     if km_from_start is None or not length_km:
         return f"  ✗ {climb['name']}: mangler km_from_start/length_km i DB"
+
+    if KUN_UDEN_VELOVIEWER and climb.get("veloviewer_segment_id"):
+        return (f"  → {climb['name']}: har et VeloViewer-segment, "
+                "springer over (vores billede er kun fallback)")
 
     if write_db and climb.get("profile_image_url") and not overwrite:
         return f"  → {climb['name']}: har allerede et profilbillede, springer over (brug --overwrite)"
@@ -713,7 +739,15 @@ def process_climb(
         return f"  ✗ {climb['name']}: GPX-segment matcher ikke DB-data — {reason}"
 
     resampled = resample_elevation_profile(segment)
-    sections = compute_gradient_sections(resampled)
+    # Antal bånd efter stigningens LÆNGDE, ikke et fast tal. 20 bånd på en
+    # 4 km stigning er 200 m pr. bånd, og over så kort et stykke drukner den
+    # ægte hældning i GPS-støj: Civiglios billede fik et bånd på 23 %, selvom
+    # bjerget topper omkring 14 % (set 2026-10-10). ~500 m pr. bånd er groft
+    # nok til at støjen midles væk og fint nok til at en mur stadig ses — og
+    # det er samme opløsning som gradient_sections, så billedet og grafen på
+    # siden fortæller det samme.
+    n_baand = max(6, min(24, round(float(length_km) / 0.5)))
+    sections = compute_gradient_sections(resampled, n_sections=n_baand)
 
     styles = ["full", "minimal"] if style == "both" else [style]
     urls = []
@@ -850,7 +884,12 @@ if __name__ == "__main__":
                          help="Upload til generated/ og patch profile_image_url (default: kun test/-upload)")
     parser.add_argument("--overwrite", action="store_true",
                          help="Ved --write-db: overskriv stigninger der allerede har et profilbillede")
+    parser.add_argument("--kun-uden-veloviewer", action="store_true",
+                         help="Spring stigninger over, der allerede har et VeloViewer-segment "
+                              "— vores eget billede er kun en fallback")
     args = parser.parse_args()
+
+    KUN_UDEN_VELOVIEWER = args.kun_uden_veloviewer
 
     if args.all:
         process_race_all_stages(args.race, args.style, args.write_db, args.overwrite)

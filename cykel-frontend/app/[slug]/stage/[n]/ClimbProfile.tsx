@@ -14,14 +14,23 @@ type Climb = {
   max_gradient: number | null;
   gradient_sections: GradientSection[] | null;
   profile_image_url: string | null;
+  profile_image_source: string | null;
   veloviewer_segment_id: number | null;
   source: string | null;
 };
 
 // Kun Veloviewer-embeds og vores egne genererede profiler vises — aldrig
-// hotlinkede billeder fra tredjepart (fx ClimbFinder, source="vision"). Se LEG-001.
+// hotlinkede billeder fra tredjepart (fx ClimbFinder). Se LEG-001.
+//
+// Porten er profile_image_source, ikke source. De to betyder hver sit: source
+// fortæller, hvor stigningens TAL kommer fra ("pcs_climb_profile", "vision"),
+// mens profile_image_source siger, om vi selv har tegnet billedet. Indtil
+// 2026-10-10 blev source brugt til begge dele, så det at gemme et billede
+// slettede oplysningen om, hvor dataene kom fra. `source === "generated"`
+// beholdes, så rækker skrevet før adskillelsen stadig vises.
 function hasOwnProfileImage(c: Climb): boolean {
-  return !!c.profile_image_url && c.source === "generated";
+  return !!c.profile_image_url &&
+    (c.profile_image_source === "generated" || c.source === "generated");
 }
 
 function avg4kmBuckets(sections: GradientSection[]): { km: number; gradient: number }[] {
@@ -99,7 +108,13 @@ function ClimbSvg({ climb }: { climb: Climb }) {
   const innerH = H - PAD_BOTTOM - PAD_TOP;
 
   const maxGrad = Math.max(...sections.map((s) => s.gradient), 1);
-  const totalKm = sections.length > 0 ? sections[sections.length - 1].km + 0.5 : 1;
+  // Stigningens egen længde, når vi har den. Fallbacken antog 0,5 km pr.
+  // sektion og strakte derfor x-aksen forkert for alt andet end netop dét —
+  // en 4,1 km stigning blev tegnet som 4,5 km.
+  const lastKm = sections[sections.length - 1].km;
+  const totalKm = climb.length_km && climb.length_km > lastKm
+    ? climb.length_km
+    : lastKm + (sections.length > 1 ? sections[1].km - sections[0].km : 0.5);
 
   const points = sections.map((s) => {
     const x = PAD_LEFT + (s.km / totalKm) * innerW;

@@ -185,6 +185,7 @@ type RaceClimb = {
   max_gradient: number | null;
   gradient_sections: { km: number; gradient: number }[] | null;
   profile_image_url: string | null;
+  profile_image_source: string | null;
   veloviewer_segment_id: number | null;
   source: string | null;
 };

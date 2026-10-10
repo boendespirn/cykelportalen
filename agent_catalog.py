@@ -197,17 +197,32 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
          covers=["etapedata", "etapeprofiler", "stigninger", "tv"],
          est_minutes=30, est_stage_minutes=4),
 
-    # Kun VeloViewer. ClimbFinder-profilerne blev taget ud 2026-09-09: vi viser
-    # udelukkende VeloViewers eget embed (stage_climbs.veloviewer_segment_id),
-    # så en pipeline, der hentede tredjepartsbilleder, havde intet at fylde.
-    _job("stigningsprofiler", "Stigningsprofiler (VeloViewer)", PHASE_BEFORE, [
+    # VeloViewer først, vores eget billede som fallback.
+    #
+    # ClimbFinder-profilerne blev taget ud 2026-09-09, fordi vi kun ville vise
+    # VeloViewers embed. Det forudsatte, at embedet altid kunne skaffes — og
+    # det kan det ikke længere: Strava har lukket segment-API'et for appen
+    # (2026-10-10: /segments/explore svarer 401 og /segments/{id} 404, mens
+    # /athlete og /segments/starred svarer 200, så det er adgangen til
+    # segmentdata, ikke nøglen, der mangler). Uden en fallback stod hver eneste
+    # stigning derfor helt uden profil. Trin 2 tegner vores egen ud fra
+    # GPX-ruten — vores eget design, vores egne data, så LEG-001 er uberørt —
+    # og springer de stigninger over, der har fået et VeloViewer-segment.
+    _job("stigningsprofiler", "Stigningsprofiler", PHASE_BEFORE, [
             _step("veloviewer_agent.py", ["--race", "{db_slug}", "--write-db"],
                   stage=["--stage", "{stage}"],
-                  label="Strava-segment pr. stigning (VeloViewer-embed)"),
+                  label="1/2 Strava-segment pr. stigning (VeloViewer-embed)"),
+            _step("climb_profile_generator.py",
+                  ["--race", "{db_slug}", "--style", "full", "--write-db",
+                   "--kun-uden-veloviewer"],
+                  whole=["--all"], stage=["--stage", "{stage}"],
+                  label="2/2 Egen stigningsprofil for dem uden VeloViewer-match"),
          ],
-         description="Finder og verificerer Strava-segmentet for hver stigning. "
-                     "Kun segment-ID'et gemmes — frontenden bygger selv VeloViewers embed.",
-         covers=["stigningsprofiler"], est_minutes=12, est_stage_minutes=3),
+         description="Finder Strava-segmentet for hver stigning (kun segment-ID'et "
+                     "gemmes; frontenden bygger selv embedet). De stigninger, der "
+                     "ikke får et match, får i stedet vores egen profil tegnet ud "
+                     "fra GPX-ruten.",
+         covers=["stigningsprofiler"], est_minutes=16, est_stage_minutes=4),
 
     _job("rytterstats", "Rytterstats (vægt og højde)", PHASE_BEFORE, [
             _step("rider_stats_agent.py", ["--race", "{db_slug}"],

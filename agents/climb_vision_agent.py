@@ -288,12 +288,17 @@ def aflaes_stigning(client: anthropic.Anthropic, billede: bytes,
 def _skemaer(laengde_km: float, antal: int) -> list[tuple[str, list[float]]]:
     """Mulige inddelinger af gradient-tabellen.
 
-    PCS deler ikke altid i hele kilometer: Madonna del Ghisallo har 9 felter
-    til 8,6 km (1 km + en rest), mens korte stigninger som San Fermo della
-    Battaglia deles finere. At antage 1 km pr. felt afviste derfor en korrekt
-    aflæsning (set 2026-10-06). Vi gætter ikke på inddelingen — vi prøver de
-    tre, PCS faktisk bruger, og lader SUMKONTROLLEN afgøre hvilken der holder.
-    Rammer ingen af dem, er billedet læst forkert.
+    PCS deler ikke altid i hele kilometer: Ghisallo har 9 felter til 8,6 km
+    (1 km + en rest), mens kortere stigninger deles i 0,5 km. Vi prøver begge
+    og lader sumkontrollen vælge.
+
+    Inddelingen bruges KUN til at verificere aflæsningen — kurvens form tages
+    fra GPX, ikke herfra. Et tredje "jævnt" skema (længde/antal) fandtes indtil
+    2026-10-10 og var en fejl: sumkontrollen kan ikke skelne skemaer, når
+    hældningen er nogenlunde ensartet, så det jævne skema vandt på tilfældige
+    decimaler og placerede gradienterne på forkerte km. Det gav synligt
+    forkerte kurver for 5 af Il Lombardias 8 stigninger (op til 5,7
+    procentpoint). Tilføj aldrig et skema, PCS ikke faktisk bruger.
     """
     if antal < 1 or laengde_km <= 0:
         return []
@@ -303,7 +308,6 @@ def _skemaer(laengde_km: float, antal: int) -> list[tuple[str, list[float]]]:
         rest = laengde_km - helt * trin
         if 0 < rest <= trin * 2:
             ud.append((navn, [trin] * helt + [round(rest, 3)]))
-    ud.append(("jævn", [laengde_km / antal] * antal))
     return ud
 
 
@@ -375,21 +379,62 @@ def hent_gpx(race_slug: str, stage_number: int, officiel_km: float | None):
     return punkter, cum, skala
 
 
-def find_i_gpx(gpx, s: Stigning, laengder: list[float],
-               vindue: tuple[float, float] | None = None) -> tuple[float, str] | None:
-    """Finder stigningens fod i GPX-sporet og returnerer (km_fra_start, note).
+def _form_afvigelse(punkter, cum, i: int, j: int, s: Stigning,
+                    laengder: list[float]) -> float:
+    """Hvor meget afviger kandidatens form fra billedets gradient-tabel?
 
-    Søger globalt: billedet fortæller ikke hvor på ruten stigningen ligger, så
+    Returnerer den gennemsnitlige absolutte forskel i procentpoint, maalt felt
+    for felt. Et lavt tal betyder, at GPX-strækningen stiger paa samme maade
+    som den stigning, billedet viser — ikke bare at den er lige saa lang og
+    lige saa hoej.
+    """
+    if not laengder or j <= i:
+        return 0.0
+    spaend = cum[j] - cum[i]
+    if spaend <= 0:
+        return 0.0
+    skala_seg = spaend / s.laengde_km        # GPX-km pr. rigtig km
+    afvig, n, km = 0.0, 0, 0.0
+    for g_billede, l in zip(s.gradienter_pr_km, laengder):
+        a = cum[i] + km * skala_seg
+        b = cum[i] + (km + l) * skala_seg
+        ia = min(range(i, j + 1), key=lambda k: abs(cum[k] - a))
+        ib = min(range(i, j + 1), key=lambda k: abs(cum[k] - b))
+        km += l
+        if ib <= ia:
+            continue
+        meter = (cum[ib] - cum[ia]) / skala_seg * 1000
+        if meter <= 0:
+            continue
+        g_gpx = (punkter[ib][2] - punkter[ia][2]) / meter * 100
+        afvig += abs(g_gpx - g_billede)
+        n += 1
+    return afvig / n if n else 0.0
+
+
+def find_alle_i_gpx(gpx, s: Stigning, laengder: list[float],
+                    vindue: tuple[float, float] | None = None) -> list[dict]:
+    """ALLE troværdige placeringer af stigningen på ruten, sorteret efter km.
+
+    Flertal, ikke ental: et løb kan køre den samme stigning flere gange. Il
+    Lombardia 2026 slutter på en 22 km afslutningssløjfe, hvor **San Fermo
+    della Battaglia køres to gange** med Civiglio imellem (bekræftet mod
+    rutebeskrivelserne 2026-10-10) — og PCS har kun ét billede af den. Da
+    funktionen kun gav ét svar, forsvandt den afgørende sidste opstigning 5 km
+    fra mål, og den ene række, vi skrev, landede oven i købet på den første
+    passage. Hver opstigning er sin egen række nu.
+
+    Søger globalt: billedet fortæller ikke, hvor på ruten stigningen ligger, så
     vi kan ikke bruge climb_profile_generator.locate_climb_segment(), der
     forfiner omkring en kendt position. Tophøjden er ankeret — den er aflæst
-    direkte og er langt det skarpeste signal.
+    direkte og er det skarpeste enkeltsignal.
     """
     if s.top_hoejde_m is None:
-        return None
+        return []
     punkter, cum, skala = gpx
     forventet_stigning = hoejdemeter(s, laengder)
 
-    bedste = None
+    kandidater: list[dict] = []
     for j in range(len(punkter)):
         if abs(punkter[j][2] - s.top_hoejde_m) > GPX_TOP_SLOER_M:
             continue
@@ -422,22 +467,150 @@ def find_i_gpx(gpx, s: Stigning, laengder: list[float],
                 > GPX_STIGNING_SLOER_PCT):
             continue
 
+        # Billedets gradient-tabel er et formfingeraftryk. Tophoejde, laengde
+        # og hoejdemeter alene skelner ikke to passager af samme terraen, og
+        # tabellen er allerede verificeret af sumkontrollen — den koster os
+        # derfor ingen ny usikkerhed.
+        form = _form_afvigelse(punkter, cum, i, j, s, laengder)
+
         score = (abs(punkter[j][2] - s.top_hoejde_m) / GPX_TOP_SLOER_M
                  + abs(laengde - s.laengde_km) / s.laengde_km
-                 + abs(stigning - forventet_stigning) / max(1, forventet_stigning))
-        if bedste is None or score < bedste[0]:
-            bedste = (score, round(cum[i] * skala, 1), laengde, stigning,
-                      round(punkter[j][2]))
+                 + abs(stigning - forventet_stigning) / max(1, forventet_stigning)
+                 + form / 3.0)
+        kandidater.append({
+            "score": score, "form": form, "km": round(cum[i] * skala, 1),
+            "laengde": laengde, "stigning": stigning,
+            "top": round(punkter[j][2]), "i": i, "j": j,
+        })
 
-    if bedste is None:
+    if not kandidater:
+        return []
+
+    # Snesevis af GPX-punkter omkring den samme top giver den samme stigning
+    # igen og igen. Vi beholder den bedste pr. sted og regner to fund som
+    # samme sted, naar fodpunkterne ligger taettere end stigningens laengde.
+    kandidater.sort(key=lambda k: k["score"])
+    unikke: list[dict] = []
+    for k in kandidater:
+        if all(abs(k["km"] - u["km"]) > max(1.0, s.laengde_km) for u in unikke):
+            unikke.append(k)
+    return sorted(unikke, key=lambda k: k["km"])
+
+
+def _note(k: dict, s: Stigning, forventet_stigning: int) -> str:
+    return (f"GPX: fod ved km {k['km']}, {k['laengde']:.1f} km, "
+            f"+{k['stigning']:.0f} m, top {k['top']} m (billedet: "
+            f"{s.laengde_km} km, +{forventet_stigning} m, "
+            f"top {s.top_hoejde_m} m), form ±{k['form']:.2f} pp")
+
+
+def find_i_gpx(gpx, s: Stigning, laengder: list[float],
+               vindue: tuple[float, float] | None = None
+               ) -> tuple[float, str, tuple[int, int]] | None:
+    """Den bedst passende enkeltplacering — til de kald, hvor kun én giver mening."""
+    alle = find_alle_i_gpx(gpx, s, laengder, vindue)
+    if not alle:
         return None
-    _, km, laengde, stigning, top = bedste
-    return km, (f"GPX: fod ved km {km}, {laengde:.1f} km, +{stigning:.0f} m, "
-                f"top {top} m (billedet: {s.laengde_km} km, "
-                f"+{forventet_stigning} m, top {s.top_hoejde_m} m)")
+    bedst = min(alle, key=lambda k: k["score"])
+    return (bedst["km"], _note(bedst, s, hoejdemeter(s, laengder)),
+            (bedst["i"], bedst["j"]))
+
+
+# Kurvens oploesning. Frontendens ClimbProfile tegner sektionerne som jaevnt
+# fordelte punkter, saa de SKAL have samme bredde — variable bredder gav en
+# forvredet x-akse. 0,5 km er fin nok til at vise en mur og grov nok til at
+# GPS-stoej ikke bliver til takker.
+SEKTION_KM = 0.5
+
+
+def gpx_sektioner(gpx, segment: tuple[int, int], laengde_km: float) -> list[dict]:
+    """Stigningens kurve, udregnet af GPX-sporet.
+
+    Her ligger rettelsen fra 2026-10-10. Kurven blev foer taget fra den
+    gradient-tabel, vision laeste af billedet, men tabellens felter har ingen
+    km-vaerdier paa billedet — de skulle gaettes, og et forkert gaet placerer
+    rigtige gradienter paa forkerte afstande. GPX'en har hoejden hver ~20 m og
+    kan derfor svare praecist uden at gaette paa noget.
+
+    Tabellen bruges stadig — som KONTROL af, at vi har fundet den rigtige
+    stigning. Den er god til det: den er aflaest fra samme billede som laengde
+    og gennemsnitshaeldning.
+    """
+    punkter, _cum, _skala = gpx
+    i, j = segment
+    seg = punkter[i:j + 1]
+    if len(seg) < 4:
+        return []
+    antal = max(4, round(laengde_km / SEKTION_KM))
+    resamplet = cpg.resample_elevation_profile(seg, n=max(200, antal * 8))
+    raa = cpg.compute_gradient_sections(resamplet, n_sections=antal)
+    # cpg bruger start_km/end_km/avg_gradient; frontenden vil have km/gradient,
+    # og km skal vaere den FAKTISKE afstand fra foden, ikke et loebenummer.
+    skaleret = laengde_km / resamplet[-1][0] if resamplet[-1][0] else 1.0
+    return [{"km": round(r["start_km"] * skaleret, 2),
+             "gradient": round(r["avg_gradient"], 1)} for r in raa]
 
 
 # ── Kørslen ──────────────────────────────────────────────────────────────────
+
+# Hvor god en gentagen opstigning skal vaere, foer vi tror paa den. En rute,
+# der koerer samme stigning to gange, er almindelig paa afslutningssloejfer,
+# men et loest krav ville opfinde opstigninger overalt, hvor terraenet ligner.
+GENTAG_FORM_MAX = 1.2          # procentpoint
+GENTAG_SCORE_FAKTOR = 1.5      # gange stigningens egen bedste score
+
+
+def _overlapper(a: dict, b: dict) -> bool:
+    """Deler de to fund vej? To FORSKELLIGE navngivne stigninger kan ikke
+    ligge oven i hinanden, og samme stigning kan ikke køres to gange uden at
+    forlade den imellem."""
+    return a["i"] < b["j"] and b["i"] < a["j"]
+
+
+def tildel_placeringer(fundne: list[dict]) -> None:
+    """Fordeler rutens pladser mellem stigningerne, globalt og uden overlap.
+
+    Hvorfor det skal være globalt: hver stigning for sig vælger bare sit
+    bedst scorende sted, og så kan to forskellige stigninger ende på det
+    samme stykke vej. Det skete (2026-10-10): Giovenzana scorede faktisk
+    bedst oppe på Civiglios skråning, og Colle di Berbenno landede oven i
+    både Giovenzana og Ghisallo. Hver for sig så de rimelige ud; tilsammen
+    var de umulige. Når pladserne fordeles ét sted, falder den slags ud af
+    sig selv, fordi Civiglio passer bedre til sin egen skråning end
+    Giovenzana gør.
+
+    To runder: først én plads til hver stigning, bedste score først. Derefter
+    gentagne opstigninger — kun når de er næsten lige så overbevisende som
+    stigningens egen bedste plads, så en afslutningssløjfe fanges uden at der
+    opfindes passager, ruten ikke kører.
+    """
+    alle = [(k["score"], idx, k)
+            for idx, f in enumerate(fundne) for k in f["kandidater"]]
+    alle.sort(key=lambda t: t[0])
+    taget: list[dict] = []
+
+    for _, idx, k in alle:
+        f = fundne[idx]
+        if f["valgt"] or any(_overlapper(k, t) for t in taget):
+            continue
+        f["valgt"].append(k)
+        taget.append(k)
+
+    for score, idx, k in alle:
+        f = fundne[idx]
+        if not f["valgt"] or k in f["valgt"]:
+            continue
+        bedst = min(x["score"] for x in f["valgt"])
+        if k["form"] > GENTAG_FORM_MAX or score > bedst * GENTAG_SCORE_FAKTOR:
+            continue
+        if any(_overlapper(k, t) for t in taget):
+            continue
+        f["valgt"].append(k)
+        taget.append(k)
+
+    for f in fundne:
+        f["valgt"].sort(key=lambda k: k["km"])
+
 
 def behandl_etape(client, race: dict, stage: dict, write_db: bool,
                   overwrite: bool) -> int:
@@ -466,7 +639,8 @@ def behandl_etape(client, race: dict, stage: dict, write_db: bool,
     print("  GPX: " + ("hentet — km-placering kan udledes"
                        if gpx else "ingen rute, km-placering udelades"))
 
-    godkendte: list[dict] = []
+    # 1) Læs hvert billede og find alle steder på ruten, det kan passe.
+    fundne: list[dict] = []
     for i, url in enumerate(billeder, start=1):
         hentet = hent_billede(url, side)
         if not hentet:
@@ -482,72 +656,73 @@ def behandl_etape(client, race: dict, stage: dict, write_db: bool,
             print(f"  {i}. AFVIST  {s.navn}: {grund}")
             continue
 
-        km_fra_start = None
-        gpx_note = "ingen GPX at kontrollere mod"
-        if gpx:
-            fund = find_i_gpx(gpx, s, laengder)
-            if fund:
-                km_fra_start, gpx_note = fund
-            else:
-                gpx_note = "kunne ikke genfindes i GPX — km udelades"
-
         print(f"  {i}. OK      {s.navn} — {s.laengde_km} km @ "
               f"{s.gennemsnit_gradient} %, +{hoejdemeter(s, laengder)} m")
         print(f"              sum: {grund}")
-        print(f"              {gpx_note}")
-
-        godkendte.append({
-            "stage_id":          stage["id"],
-            "name":              s.navn.strip(),
-            "km_from_start":     km_fra_start,
-            "length_km":         s.laengde_km,
-            "elevation_m":       hoejdemeter(s, laengder),
-            "avg_gradient":      s.gennemsnit_gradient,
-            "max_gradient":      max(s.gradienter_pr_km),
-            "gradient_sections": sektioner(s, laengder),
-            "sort_order":        i,
-            "source":            "pcs_climb_profile",
-            # Bæres kun med til anden runde og fjernes før skrivning.
-            "_stigning":         s,
-            "_laengder":         laengder,
+        fundne.append({
+            "s": s, "laengder": laengder, "valgt": [],
+            "kandidater": find_alle_i_gpx(gpx, s, laengder) if gpx else [],
         })
 
-    if not godkendte:
+    if not fundne:
         print("  Ingen stigninger bestod kontrollen — intet skrevet")
         return 0
 
-    # Anden runde: en stigning uden km afgrænses af sine naboer. PCS' egen
-    # nummerering ER rækkefølgen langs ruten, så en stigning mellem to fundne
-    # naboer kan kun ligge imellem dem — og inden for det vindue er der ingen
-    # tvetydighed tilbage at beskytte sig mod.
+    # 2) Fordel rutens pladser mellem dem, uden overlap.
     if gpx:
-        for n, r in enumerate(godkendte):
-            if r["km_from_start"] is not None:
-                continue
-            foer = [x["km_from_start"] for x in godkendte[:n]
-                    if x["km_from_start"] is not None]
-            efter = [x["km_from_start"] for x in godkendte[n + 1:]
-                     if x["km_from_start"] is not None]
-            lav = max(foer) if foer else 0.0
-            hoej = min(efter) if efter else float(stage.get("distance_km") or 0) or 1e9
-            if hoej <= lav:
-                continue
-            fund = find_i_gpx(gpx, r["_stigning"], r["_laengder"], (lav, hoej))
-            if fund:
-                r["km_from_start"] = fund[0]
-                print(f"  (2. runde) {r['name']} placeret mellem km {lav:.0f} "
-                      f"og {hoej:.0f} — {fund[1]}")
+        tildel_placeringer(fundne)
 
-    for r in godkendte:
-        r.pop("_stigning", None)
-        r.pop("_laengder", None)
+        # En stigning uden plads afgrænses af sine naboer og søges igen — uden
+        # kravet om lokalt maksimum, som ellers afviser en navngiven top, der
+        # sidder midt på en længere stigning (Selvino, 918 m på en skråning,
+        # der fortsætter til 1020 m).
+        placerede = sorted((f["valgt"][0]["km"] for f in fundne if f["valgt"]))
+        for f in fundne:
+            if f["valgt"] or not placerede:
+                continue
+            fund = find_i_gpx(gpx, f["s"], f["laengder"],
+                              (0.0, float(stage.get("distance_km") or 0) or 1e9))
+            if fund:
+                f["valgt"] = [{"km": fund[0], "i": fund[2][0], "j": fund[2][1],
+                               "note": fund[1]}]
+                print(f"  (2. runde) {f['s'].navn}: {fund[1]}")
+
+    # 3) Byg rækkerne — én pr. opstigning.
+    godkendte: list[dict] = []
+    for f in fundne:
+        s, laengder = f["s"], f["laengder"]
+        pladser = f["valgt"] or [None]
+        for n, p in enumerate(pladser, start=1):
+            if p:
+                kurve = gpx_sektioner(gpx, (p["i"], p["j"]), s.laengde_km)
+                kilde = f"GPX, {len(kurve)} x {SEKTION_KM} km"
+            else:
+                kurve, kilde = sektioner(s, laengder), "billedets tabel"
+            # Køres stigningen flere gange, skal fanerne kunne skelnes; kun
+            # km'en adskiller dem ellers, og to ens faner ligner en fejl.
+            navn = s.navn.strip()
+            if len(pladser) > 1:
+                navn = f"{navn} ({n}. opstigning)"
+            print(f"     → {navn}" + (f" — km {p['km']}" if p else " — uden km")
+                  + f" ({kilde})")
+            godkendte.append({
+                "stage_id":          stage["id"],
+                "name":              navn,
+                "km_from_start":     p["km"] if p else None,
+                "length_km":         s.laengde_km,
+                "elevation_m":       hoejdemeter(s, laengder),
+                "avg_gradient":      s.gennemsnit_gradient,
+                "max_gradient":      max(s.gradienter_pr_km),
+                "gradient_sections": kurve,
+                "sort_order":        0,
+                "source":            "pcs_climb_profile",
+            })
 
     # Rækkefølgen langs ruten, når GPX gav os km. Ellers PCS' egen nummerering.
-    med_km = [r for r in godkendte if r["km_from_start"] is not None]
-    if len(med_km) == len(godkendte):
+    if all(r["km_from_start"] is not None for r in godkendte):
         godkendte.sort(key=lambda r: r["km_from_start"])
-        for n, r in enumerate(godkendte, start=1):
-            r["sort_order"] = n
+    for n, r in enumerate(godkendte, start=1):
+        r["sort_order"] = n
 
     if not write_db:
         print(f"  {len(godkendte)} stigning(er) klar — IKKE skrevet "
