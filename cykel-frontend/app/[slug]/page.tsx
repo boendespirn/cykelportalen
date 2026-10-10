@@ -585,14 +585,21 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
   const danishRiders = startlist.filter((e) => e.riders?.nationality === "DK" && e.status === "active");
   const GC_SPECIALITIES = new Set(["GC", "Climber", "All-rounder", "Puncheur"]);
-  const gcFavorites = isOneDay
-    ? startlist.filter((e) => e.status === "active" && (e.is_gc_captain || e.is_sprint_captain)).slice(0, 8)
+  // Endagsløb og etapeløb vælger forskelligt HVEM der er kandidater, men
+  // rangordner ens. Indtil 2026-10-10 tog endagsgrenen bare de første otte
+  // kaptajner i databasens rækkefølge — på Il Lombardia gav det Tolio og
+  // Riccitello øverst, mens Evenepoel (verdensrangliste nr. 3) og Ciccone
+  // slet ikke var med. En favoritliste, der ikke nævner favoritterne, er
+  // værre end ingen.
+  const gcFavorites = (isOneDay
+    ? startlist.filter((e) => e.status === "active" &&
+        (e.is_gc_captain || e.is_sprint_captain || e.riders?.uci_ranking != null))
     : startlist
         .filter((e) => e.status === "active" && (
           e.riders?.uci_ranking != null ||
           e.is_gc_captain ||
           GC_SPECIALITIES.has(e.riders?.speciality ?? "")
-        ))
+        )))
         .sort((a, b) => {
           const rankA = a.riders?.uci_ranking ?? 9999;
           const rankB = b.riders?.uci_ranking ?? 9999;
