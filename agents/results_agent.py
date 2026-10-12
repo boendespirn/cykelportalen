@@ -317,6 +317,108 @@ def _find_resultscont_tables(soup: BeautifulSoup) -> list:
     return tagged
 
 
+def _find_oneday_result_table(soup: BeautifulSoup):
+    """
+    Resultattabellen på PCS' ENDAGSLØBSSIDE (…/race/il-lombardia/2026/result).
+
+    Fælde af samme slags som DATA-005 (se ARKITEKTUR.md): endagsløbssiden deler
+    ikke markup med etapesiderne. Den har hverken `#resultsCont` eller
+    `td.ridername` — tabellen ligger i `div.resultCont` (ÉNTAL), rytteren står i
+    den celle, hvis `<th>` har `data-code="rider"`, og der er kun ÉN tabel, fordi
+    et endagsløb ikke har klassementer. `_find_resultscont_tables()` fandt derfor
+    nul tabeller, og agenten skrev "Ingen etaperesultat fundet (muligvis ikke
+    koert endnu)" — tavst, selv om resultatet stod på siden (Il Lombardia 2026,
+    opdaget 2026-10-12).
+    """
+    cont = soup.find("div", class_="resultCont")
+    if cont is None:
+        return None
+    for table in cont.find_all("table"):
+        if table.find("thead") is None:
+            continue
+        if len(table.find_all("tr")) < 5:
+            continue
+        return table
+    return None
+
+
+def _oneday_columns(table) -> dict[str, int]:
+    """
+    Kolonneindeks pr. `data-code` fra tabellens `<thead>` ({'rnk': 0, 'rider': 7,
+    'timelag': 12, …}).
+
+    Læses fra headeren frem for at hardkode indekser: PCS slår kolonner til og
+    fra pr. løb (`hide_td*`-klasserne på tabellen), så et fast indeks ville
+    pege på et andet felt, så snart en kolonne forsvandt.
+    """
+    head = table.find("thead")
+    if head is None:
+        return {}
+    return {
+        th.get("data-code"): i
+        for i, th in enumerate(head.find_all("th"))
+        if th.get("data-code")
+    }
+
+
+def _parse_oneday_row(row, cols: dict[str, int]) -> dict | None:
+    """
+    Én række fra endagsløbstabellen → {rank, slug, name, time}.
+
+    `rank` er rå tekst, fordi feltet rummer både placeringer ("1") og udgange
+    ("DNF") — kalderen skelner. Tidsfeltet kan være PCS' ",,", der betyder
+    "samme tid som rytteren ovenfor"; det oversættes ikke her, men af
+    `_resolve_gap()`, som allerede falder tilbage til forrige rækkes gap.
+    """
+    tds = row.find_all("td", recursive=False)
+    i_rnk = cols.get("rnk")
+    i_rider = cols.get("rider")
+    if i_rnk is None or i_rider is None or len(tds) <= max(i_rnk, i_rider):
+        return None
+    link = tds[i_rider].find("a", href=True)
+    if not link:
+        return None
+    i_time = cols.get("timelag")
+    return {
+        "rank": tds[i_rnk].get_text(strip=True),
+        "slug": link["href"].replace("rider/", "").strip("/"),
+        "name": link.get_text(separator=" ", strip=True).upper(),
+        "time": tds[i_time].get_text(strip=True) if i_time is not None and len(tds) > i_time else "",
+    }
+
+
+def _scrape_oneday_result(table) -> dict:
+    """
+    Top 10 og udgåede ryttere fra et endagsløbs ene resultattabel.
+
+    Et endagsløb har ingen klassementer — de fire klassementsfelter forbliver
+    tomme, og agenten henter dem ikke (se `scrape_stage_result()`). Rækker uden
+    et tal i Rnk er udgange: kun "DNF" rapporteres videre, fordi `mark_dnf()`
+    skriver status "DNF" og en DNS/DSQ dermed ville blive gemt som noget andet,
+    end den var (CLAUDE.md §6).
+    """
+    cols = _oneday_columns(table)
+    top10: list[dict] = []
+    dnf: list[dict] = []
+    body = table.find("tbody") or table
+    for row in body.find_all("tr"):
+        parsed = _parse_oneday_row(row, cols)
+        if not parsed:
+            continue
+        rank = parsed["rank"]
+        if rank.isdigit():
+            if len(top10) < 10:
+                top10.append({
+                    "position": int(rank),
+                    "slug":     parsed["slug"],
+                    "name":     parsed["name"],
+                    "time":     parsed["time"],
+                })
+        elif rank.upper() == "DNF":
+            dnf.append({"slug": parsed["slug"], "name": parsed["name"]})
+    return {"top10": top10, "dnf": dnf}
+
+
 def _find_first_visible_table(soup: BeautifulSoup):
     """
     Finder den første IKKE-skjulte rytter-rangliste inde i #resultsCont — dvs.
@@ -446,6 +548,19 @@ def scrape_stage_result(pcs_stage_url: str, is_final_stage: bool = False) -> dic
             # blev afbrudt i hagl på Col de Mont-Louis).
             page_text = soup.get_text(" ", strip=True)
             result["cancelled"] = "stage is cancelled" in page_text.lower()
+
+            # ── Endagsløb ────────────────────────────────────────────────────
+            # Endagsløbssiden har sin egen markup OG ingen klassementer, så den
+            # afgøres før etapegrenen: ellers ville de fire klassementskald gå
+            # mod "…/2026-gc" — en URL, der ikke findes, og som kun kan give
+            # fire tomme opslag at læse i loggen.
+            oneday_table = _find_oneday_result_table(soup) if soup.find(id="resultsCont") is None else None
+            if oneday_table is not None:
+                browser.close()
+                parsed = _scrape_oneday_result(oneday_table)
+                result["top10"] = parsed["top10"]
+                result["dnf"] = parsed["dnf"]
+                return result
 
             tagged = _find_resultscont_tables(soup)
             if not tagged:

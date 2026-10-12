@@ -8,6 +8,7 @@ import { isHistoricRaceSlug } from "@/lib/historic-stage";
 import ClimbProfile from "./stage/[n]/ClimbProfile";
 import SpoilerSection from "./SpoilerSection";
 import DnfSection from "./DnfSection";
+import ResultList, { type ResultEntry } from "./ResultList";
 import StageMapLoader from "./stage/[n]/StageMapLoader";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -219,6 +220,10 @@ type StageDetail = {
   fun_facts: string[] | null;
   finish_type: string | null;
   stage_start_time: string | null;
+  // Referat af hvordan løbet forløb (agents/stage_recap_agent.py). Står på
+  // etapen, også for et endagsløb, fordi løbet ER etape 1 — og vises derfor
+  // her, hvor /stage/1 permanent redirecter til (SEO-021).
+  stage_recap: string | null;
 };
 
 async function getStageDetail(slug: string): Promise<StageDetail | null> {
@@ -231,6 +236,21 @@ async function getStageDetail(slug: string): Promise<StageDetail | null> {
     const data = await res.json();
     return data?.stage ?? null;
   } catch { return null; }
+}
+
+/** Resultatet af et endagsløbs ene etape (top 10).
+ *
+ *  Samme endpoint som etapesiderne bruger, og af samme grund som getClimbs():
+ *  et endagsløb er altid etape 1, og /stage/1 redirecter til denne side, så
+ *  uden dette kald kunne løbets resultat ikke ses nogen steder. */
+async function getOneDayResults(slug: string): Promise<ResultEntry[]> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/stages/1/results?limit=10`,
+                            { next: { revalidate: 60 } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
 }
 
 async function getBroadcast(slug: string): Promise<Broadcast[]> {
@@ -552,7 +572,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     notFound();
   }
 
-  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, climbs, stageDetail, history, raceNews] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, climbs, stageDetail, history, raceNews, oneDayResults] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -567,6 +587,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getStageDetail(slug),
       getRaceHistory(slug),
       getRaceNews(slug),
+      getOneDayResults(slug),
     ]);
 
   if (!race) {
@@ -729,6 +750,45 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
         {/* ── TV / Streaming ── */}
         <TvSektion broadcasts={broadcasts} today={today} visEtape={false} />
+
+        {/* ── Sådan forløb løbet ──
+            Samme blok og samme placering som etapesidernes "Sådan forløb
+            etapen": øverst, fordi det er dét en bruger, der googler "hvem
+            vandt" eller "hvad skete der", kom efter. Vises kun når referatet
+            findes — en kommende klassiker har intet at fortælle endnu, og
+            historiske løb har deres egen tilbageblik-blok længere nede. ── */}
+        {!isHistoric && stageDetail?.stage_recap && (
+          <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+                Sådan forløb løbet
+              </h2>
+            </div>
+            <div className="p-5 text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+              {stageDetail.stage_recap}
+            </div>
+          </section>
+        )}
+
+        {/* ── Resultat ──
+            Står ÅBENT, ikke i en Disclosure som på etapesiderne. To grunde:
+            et endagsløb har kun ét resultat, og det ER svaret på det, folk
+            søger på ("il lombardia resultat") — og Disclosure tegner først
+            sit indhold, når nogen klikker, så en foldet liste slet ikke ville
+            stå i den HTML, Google læser (CLAUDE.md §2: organisk trafik er
+            håndtaget). Vises kun når resultatet findes, så siden før løbet
+            ikke får en tom boks. ── */}
+        {oneDayResults.length > 0 && (
+          <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+                Resultat
+              </h2>
+              <span className="text-xs text-slate-600">Top {oneDayResults.length}</span>
+            </div>
+            <ResultList entries={oneDayResults} />
+          </section>
+        )}
 
         {/* ── Løbsinfo ──
             Samme blok som etapesidernes "Etapeinfo", så et endagsløb læses

@@ -120,6 +120,34 @@ Overblik over hvad der er kørt, hvor gammelt det er, hvor fuldstændigt et løb
 
 ---
 
+## Endagsløb — referenceopsætningen (Il Lombardia 2026)
+
+Il Lombardia 2026 er den opsætning, et **endagsløb** skal kopiere næste gang. Hele idéen er, at *et endagsløb læses som en etape*: løbet ER etape 1, og løbssiden `/{slug}` er dets eneste side, fordi `/{slug}/stage/1` 308-redirecter hertil (SEO-021). Alt, der ellers ville stå på en etapeside, skal derfor findes og vises her.
+
+**Sådan findes dataen (kilderne, i den rækkefølge pipelinen bruger dem):**
+
+| Hvad | Kilde | Hvem henter den |
+|---|---|---|
+| Rute, distance, start/mål, højdemeter | PCS' **løbsforside** (`/race/<løb>/<år>`), ikke en etapeside | `stage_pcs_agent.scrape_oneday_race()` — læser **begge** markupformer (`.title`/`.value` og `div.bold` + næste div), se DATA-005 |
+| GPX-spor | cyclingstages **rute-underside** (`…/tour-of-lombardy-2026/route-illombardia-2026/`), mønster `…/<år>/route.gpx` uden etapenummer | `gpx_agent.py` — bemærk at deres slug ofte er en anden sprogvariant end vores |
+| Stigninger | PCS' `-climb`-billeder på `/info/profiles`, verificeret mod GPX | `climb_vision_agent.py` (STG-031/STG-032) |
+| Stigningsprofiler | Egne tegninger fra GPX (Stravas segment-API er lukket, STG-033) | `climb_profile_generator` via jobbet *Stigningsprofiler* |
+| Løbstekst og "værd at vide" | Vores egne verificerede stigninger | `stage_info_agent.py` |
+| TV-tider | Endagsløb har intet etapenummer i programtitlen → slås op som etape 1 | `tv_agent.py` (DATA-005) |
+| **Resultat** | PCS' **endagsløbsside** `…/<år>/result` — `div.resultCont` (ÉNTAL), kolonner læses fra `<thead>`s `data-code` | `results_agent.py` (RES-006) |
+| Dato på etapen | `races.start_date` — PCS oplyser den ikke altid på forsiden | `stage_pcs_agent.run()` (RES-007) |
+
+**Det, der ikke findes:** PCS har **ingen LiveStats-tidslinje for et endagsløb** (`…/<år>/live` giver 0 hændelser, bekræftet 2026-10-12). `stage_recap_agent.py` kan derfor ikke skrive et referat for et endagsløb, og `race_recap_agent.py` kan det heller ikke, fordi den kræver etapereferater som grundlag. Se RES-008 — kilden mangler, og en ny kilde kræver ejerens accept.
+
+**Layoutet (endagsgrenen i `cykel-frontend/app/[slug]/page.tsx`):** rækkefølgen er *statusbjælke → TV → referat → resultat → løbsinfo → rute og stigninger → favoritter og danskere → kort og startliste → DNF → klassement*. Reglerne bag:
+- **Referat og resultat står øverst.** Efter løbet er "hvem vandt" og "hvordan gik det" dét, folk kommer efter; før løbet findes ingen af delene, og siden ser ud som før.
+- **Resultatet står åbent**, ikke i en `Disclosure` som på etapesiderne: komponenten tegner først sit indhold ved klik, så et foldet resultat slet ikke står i den HTML, Google læser.
+- **Rækkerne deles med etapesiderne** gennem `app/[slug]/ResultList.tsx`, så de to sider ikke kan vise samme resultat forskelligt.
+- **Favoritter rangordnes efter UCI-ranking**, ikke efter databasens rækkefølge — ellers manglede Evenepoel og Ciccone på Il Lombardia.
+- `ClimbProfile` er genbrugt direkte fra etapesiderne, så hel-etape-profilen og hver enkelt stigning vises samme sted som i et etapeløb.
+
+---
+
 ## Referater — pr. etape og for hele ræset
 
 - **`agents/stage_recap_agent.py`** — skriver `stages.stage_recap`: et kort dansk referat af, hvordan en kørt etape forløb. Kilde er PCS' LiveStats-tidslinje på `…/race/<løb>/<år>/stage-N/live`.

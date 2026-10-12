@@ -670,6 +670,21 @@ async def run(target_slug: str | None = None, oneday: bool = False,
             traceback.print_exc()
             continue
 
+        # Et endagsløb køres på løbets egen dato, så en tom `date` kan udfyldes
+        # fra vores egen verificerede races-række i stedet for at blive
+        # stående som NULL. Den tomme dato var ikke kosmetisk: stage_recap_
+        # agent.py udvælger kørte etaper med `date <= i dag`, så Il Lombardia
+        # 2026's ene etape var usynlig for referat-trinnet, og jobbet svarede
+        # "ingen etaper mangler et referat" (opdaget 2026-10-12). PCS'
+        # løbsforside viser ikke altid datoen som `.title`/`.value`-par —
+        # samme fælde som DATA-005.
+        if er_endagsloeb and stages and not stages[0].get("date"):
+            rows = sb_get("races", f"id=eq.{race_id}&select=start_date&limit=1")
+            race_date = rows[0].get("start_date") if rows else None
+            if race_date:
+                stages[0]["date"] = race_date
+                print(f"  [dato] PCS oplyste ingen dato — bruger løbets start_date {race_date}")
+
         if stages:
             save_stages(race_id, stages)
         else:

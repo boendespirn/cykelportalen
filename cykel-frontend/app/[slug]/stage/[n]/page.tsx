@@ -6,6 +6,7 @@ import Link from "next/link";
 import StageMapLoader from "./StageMapLoader";
 import ClimbProfile from "./ClimbProfile";
 import Disclosure from "../../Disclosure";
+import ResultList, { type ResultEntry } from "../../ResultList";
 import ClassificationTabs, { type StandingEntry } from "../../ClassificationTabs";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
@@ -146,12 +147,8 @@ async function getBroadcast(slug: string): Promise<Broadcast[]> {
   } catch { return []; }
 }
 
-type StageResult = {
-  position: number;
-  time_seconds: number | null;
-  time_gap_seconds: number | null;
-  riders: { name: string; slug: string; nationality: string | null; photo_url: string | null } | null;
-};
+// Resultatrækkens form hører til den komponent, der tegner den (ResultList).
+type StageResult = ResultEntry;
 
 async function getStageResults(slug: string, n: string): Promise<StageResult[]> {
   try {
@@ -819,45 +816,10 @@ export default async function StagePage(props: {
             subtitle={`Top ${stageResults.length}`}
             accentColor="text-emerald-400"
           >
-            <div className="divide-y divide-slate-800/40">
-              {stageResults.map((r) => {
-                const rider = r.riders;
-                if (!rider) return null;
-                const flag = rider.nationality?.length === 2
-                  ? rider.nationality.toUpperCase().split("").map((c: string) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5)).join("")
-                  : "";
-                const podiumColors: Record<number, string> = {
-                  1: "text-yellow-400 font-bold",
-                  2: "text-slate-300 font-semibold",
-                  3: "text-amber-600 font-semibold",
-                };
-                const gapSec = r.time_gap_seconds ?? 0;
-                const gap = gapSec > 0
-                  ? `+${Math.floor(gapSec / 3600) > 0 ? Math.floor(gapSec / 3600) + ":" : ""}${String(Math.floor((gapSec % 3600) / 60)).padStart(Math.floor(gapSec / 3600) > 0 ? 2 : 1, "0")}:${String(gapSec % 60).padStart(2, "0")}`
-                  : null;
-                const isTop3 = r.position <= 3;
-                return (
-                  <div key={r.position} className={`flex items-center gap-3 px-5 py-2.5 ${isTop3 ? "bg-slate-900/30" : ""}`}>
-                    <span className={`text-sm w-6 text-right flex-shrink-0 font-mono ${podiumColors[r.position] ?? "text-slate-600"}`}>
-                      {r.position}.
-                    </span>
-                    <span className="text-sm flex-shrink-0">{flag}</span>
-                    <Link
-                      href={`/riders/${rider.slug}`}
-                      className={`flex-1 text-sm hover:text-emerald-300 transition-colors truncate ${isTop3 ? "font-semibold text-slate-100" : "text-slate-300"}`}
-                    >
-                      {rider.name}
-                    </Link>
-                    {gap
-                      ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{gap}</span>
-                      : r.position === 1 && r.time_seconds
-                        ? <span className="text-xs text-slate-500 font-mono flex-shrink-0">{Math.floor(r.time_seconds / 3600)}:{String(Math.floor((r.time_seconds % 3600) / 60)).padStart(2, "0")}:{String(r.time_seconds % 60).padStart(2, "0")}</span>
-                        : null
-                    }
-                  </div>
-                );
-              })}
-            </div>
+            {/* Rækkerne deles med endagsløbenes landingsside (ResultList.tsx),
+                så de to sider ikke kan komme til at vise samme resultat
+                forskelligt. */}
+            <ResultList entries={stageResults} />
           </Disclosure>
         )}
 
