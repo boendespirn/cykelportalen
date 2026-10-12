@@ -1,4 +1,4 @@
-"""
+﻿"""
 results_agent.py
 Scraper etaperesultater og GC-klassement fra PCS for igangvaerende loeb.
 Gemmer i startlists-tabellen (status, dnf_stage_number) og opdaterer
@@ -53,7 +53,7 @@ def get_ongoing_races() -> list[dict]:
 
 def get_race(slug: str) -> dict | None:
     res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/races?slug=eq.{slug}&select=id,name,slug,pcs_url&limit=1",
+        f"{SUPABASE_URL}/rest/v1/races?slug=eq.{slug}&select=id,name,slug,pcs_url,race_type&limit=1",
         headers=AUTH,
     )
     data = res.json()
@@ -93,7 +93,7 @@ def get_all_stages(race_id: str) -> list[dict]:
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/stages"
         f"?race_id=eq.{race_id}"
-        f"&select=id,stage_number,pcs_stage_url,date"
+        f"&select=id,stage_number,pcs_stage_url,source_url,date"
         f"&order=stage_number.asc",
         headers=AUTH,
     )
@@ -259,90 +259,8 @@ def _resolve_gap(is_leader: bool, time_str: str, last_gap: int) -> int:
     return secs if secs else last_gap
 
 
-def _parse_pcs_row(row) -> dict | None:
-    """Udtræk position, slug og navn fra en PCS tabelrække."""
-    tds = row.find_all("td", recursive=False)
-    if not tds:
-        return None
-    try:
-        pos = int(tds[0].get_text(strip=True))
-    except (ValueError, IndexError):
-        return None
-    rider_td = row.find("td", class_="ridername")
-    if not rider_td:
-        return None
-    rider_link = rider_td.find("a", href=True)
-    if not rider_link:
-        return None
-    slug = rider_link["href"].replace("rider/", "").strip("/")
-    name = rider_link.get_text(separator=" ", strip=True).upper()
-    return {"pos": pos, "slug": slug, "name": name}
 
-
-def _extract_time(td) -> str:
-    """Udtræk tid fra PCS td — fjern dublet fra skjult span."""
-    if not td:
-        return ""
-    font = td.find("font")
-    raw = font.get_text(strip=True) if font else td.get_text(strip=True)
-    # PCS duplikerer tekst via skjult span: "1:561:56" → "1:56"
-    m = re.match(r"(\d+:\d+(?::\d+)?)", raw)
-    return m.group(1) if m else raw
-
-
-def _find_resultscont_tables(soup: BeautifulSoup) -> list:
-    """
-    Finder de reelle rytter-ranglister inde i #resultsCont, parret med nærmeste
-    forudgående fane-overskriftstekst (fx "Youth day classification").
-
-    PCS' faste tabel-indekser (0=etape, 1=GC, 2=point, 6=bjerge, 7=ungdom) holder
-    IKKE altid: nogle etaper (fx holdenkeltstarter) har et varierende antal
-    per-hold rytterliste-widgets FØR de rigtige tabeller, hvilket forskyder alle
-    efterfølgende indekser. Vi finder i stedet tabeller med td.ridername og
-    mindst 5 rækker (udelukker små 1-2 rækkers "leder"-preview-widgets), afgrænset
-    til #resultsCont (udelukker per-hold rytterliste-widgets uden for rammen).
-    """
-    cont = soup.find(id="resultsCont")
-    if cont is None:
-        return []
-    tagged = []
-    for table in cont.find_all("table"):
-        if not table.find("td", class_="ridername"):
-            continue
-        if len(table.find_all("tr")) < 5:
-            continue
-        heading_el = table.find_previous(["a", "h2", "h3", "h4"])
-        heading = heading_el.get_text(strip=True).lower() if heading_el else ""
-        tagged.append((heading, table))
-    return tagged
-
-
-def _find_oneday_result_table(soup: BeautifulSoup):
-    """
-    Resultattabellen på PCS' ENDAGSLØBSSIDE (…/race/il-lombardia/2026/result).
-
-    Fælde af samme slags som DATA-005 (se ARKITEKTUR.md): endagsløbssiden deler
-    ikke markup med etapesiderne. Den har hverken `#resultsCont` eller
-    `td.ridername` — tabellen ligger i `div.resultCont` (ÉNTAL), rytteren står i
-    den celle, hvis `<th>` har `data-code="rider"`, og der er kun ÉN tabel, fordi
-    et endagsløb ikke har klassementer. `_find_resultscont_tables()` fandt derfor
-    nul tabeller, og agenten skrev "Ingen etaperesultat fundet (muligvis ikke
-    koert endnu)" — tavst, selv om resultatet stod på siden (Il Lombardia 2026,
-    opdaget 2026-10-12).
-    """
-    cont = soup.find("div", class_="resultCont")
-    if cont is None:
-        return None
-    for table in cont.find_all("table"):
-        if table.find("thead") is None:
-            continue
-        if len(table.find_all("tr")) < 5:
-            continue
-        return table
-    return None
-
-
-def _oneday_columns(table) -> dict[str, int]:
+def _columns(table) -> dict[str, int]:
     """
     Kolonneindeks pr. `data-code` fra tabellens `<thead>` ({'rnk': 0, 'rider': 7,
     'timelag': 12, …}).
@@ -361,9 +279,9 @@ def _oneday_columns(table) -> dict[str, int]:
     }
 
 
-def _parse_oneday_row(row, cols: dict[str, int]) -> dict | None:
+def _parse_row(row, cols: dict[str, int]) -> dict | None:
     """
-    Én række fra endagsløbstabellen → {rank, slug, name, time}.
+    Én tabelrække → {rank, slug, name, time, points}.
 
     `rank` er rå tekst, fordi feltet rummer både placeringer ("1") og udgange
     ("DNF") — kalderen skelner. Tidsfeltet kan være PCS' ",,", der betyder
@@ -378,31 +296,43 @@ def _parse_oneday_row(row, cols: dict[str, int]) -> dict | None:
     link = tds[i_rider].find("a", href=True)
     if not link:
         return None
-    i_time = cols.get("timelag")
+
+    def felt(kode: str) -> str:
+        i = cols.get(kode)
+        return tds[i].get_text(strip=True) if i is not None and len(tds) > i else ""
+
+    try:
+        point = int(felt("pnt"))
+    except ValueError:
+        point = 0
     return {
-        "rank": tds[i_rnk].get_text(strip=True),
-        "slug": link["href"].replace("rider/", "").strip("/"),
-        "name": link.get_text(separator=" ", strip=True).upper(),
-        "time": tds[i_time].get_text(strip=True) if i_time is not None and len(tds) > i_time else "",
+        "rank":   tds[i_rnk].get_text(strip=True),
+        "slug":   link["href"].replace("rider/", "").strip("/"),
+        "name":   link.get_text(separator=" ", strip=True).upper(),
+        "time":   felt("timelag"),
+        "points": point,
     }
 
 
-def _scrape_oneday_result(table) -> dict:
+def _parse_result_table(table) -> dict:
     """
-    Top 10 og udgåede ryttere fra et endagsløbs ene resultattabel.
+    Top 10 og udgåede ryttere fra en resultattabel.
 
-    Et endagsløb har ingen klassementer — de fire klassementsfelter forbliver
-    tomme, og agenten henter dem ikke (se `scrape_stage_result()`). Rækker uden
-    et tal i Rnk er udgange: kun "DNF" rapporteres videre, fordi `mark_dnf()`
-    skriver status "DNF" og en DNS/DSQ dermed ville blive gemt som noget andet,
-    end den var (CLAUDE.md §6).
+    Rækker uden et tal i Rnk er udgange: kun "DNF" rapporteres videre, fordi
+    `mark_dnf()` skriver status "DNF", og en DNS/DSQ dermed ville blive gemt
+    som noget andet, end den var (CLAUDE.md §6).
+
+    Der læses videre, indtil der er 10 GYLDIGE placeringer — ikke bare de 10
+    første rækker. PCS indsætter rækker, der ikke er en placering (nedrykkede
+    eller diskvalificerede ryttere), og et fast vindue på 10 rækker koster så
+    en rigtig rytter i bunden: Vuelta 2026 E5 fik kun 9, fordi en nedrykning
+    skubbede Wout van Aert ud af vinduet.
     """
-    cols = _oneday_columns(table)
+    cols = _columns(table)
     top10: list[dict] = []
     dnf: list[dict] = []
-    body = table.find("tbody") or table
-    for row in body.find_all("tr"):
-        parsed = _parse_oneday_row(row, cols)
+    for row in (table.find("tbody") or table).find_all("tr"):
+        parsed = _parse_row(row, cols)
         if not parsed:
             continue
         rank = parsed["rank"]
@@ -419,40 +349,55 @@ def _scrape_oneday_result(table) -> dict:
     return {"top10": top10, "dnf": dnf}
 
 
+def _parse_classification(table, med_point: bool) -> list[dict]:
+    """
+    Top 20 af ét klassement. `med_point` skelner point-/bjergklassementet
+    (rangordnet efter point) fra GC og ungdom (rangordnet efter tid).
+    """
+    cols = _columns(table)
+    ud: list[dict] = []
+    last_gap = 0
+    for row in (table.find("tbody") or table).find_all("tr"):
+        if len(ud) >= 20:
+            break
+        parsed = _parse_row(row, cols)
+        if not parsed or not parsed["rank"].isdigit():
+            continue
+        pos = int(parsed["rank"])
+        post = {"position": pos, "slug": parsed["slug"], "name": parsed["name"]}
+        if med_point:
+            post["points"] = parsed["points"]
+        else:
+            gap = _resolve_gap(pos == 1, parsed["time"], last_gap)
+            last_gap = gap
+            post["time_gap_seconds"] = gap
+        ud.append(post)
+    return ud
+
+
 def _find_first_visible_table(soup: BeautifulSoup):
     """
-    Finder den første IKKE-skjulte rytter-rangliste inde i #resultsCont — dvs.
-    den tabel PCS reelt viser som standard for denne specifikke klassements-
-    side (…/-gc, …/-points, …/-kom, …/-youth).
+    Den rangliste, PCS reelt VISER for den URL, vi har hentet.
 
-    Erstatter den tidligere overskrift-baserede `_pick_table()`, som antog at
-    klassementstypen kunne udledes af nærmeste overskriftstekst (fx "gc" i
-    teksten). Det holdt ikke: PCS' faktiske overskrifter over disse tabeller
-    er ofte generiske ("Today", "View full results") og indeholder ALDRIG
-    ordet "gc", og "point"/"kom" matcher lige så ofte en lille delvisning
-    (dagens mellemsprint/bjergspurt) som den rigtige samlede klassementstabel
-    — se RES-004. PCS' egen faneblade-mekanik markerer derimod pålideligt
-    hvilken tabel der er aktiv for URL'en via en `resTab`/`hide`-klasse, som vi
-    bruger i stedet.
+    Siden rummer alle fanebladenes tabeller på én gang — etaperesultat, GC,
+    point, bjerge, ungdom — men kun den aktive fanes `div.resultCont` står
+    UDEN klassen `hide`. Den regel er det eneste pålidelige kendetegn: PCS'
+    overskrifter over tabellerne er generiske ("Today", "View full results")
+    og indeholder aldrig ordet "gc", mens "point"/"kom" lige så ofte rammer
+    dagens mellemspurt som det samlede klassement (RES-004).
+
+    Derfor må klassementerne stadig hentes fra hver sin URL: det er URL'en,
+    der afgør hvilken fane der er aktiv, og dermed hvad tabellen betyder.
     """
-    cont = soup.find(id="resultsCont")
-    if cont is None:
-        return None
-    for table in cont.find_all("table"):
-        if not table.find("td", class_="ridername"):
+    for cont in soup.find_all("div", class_="resultCont"):
+        if "hide" in (cont.get("class") or []):
             continue
-        if len(table.find_all("tr")) < 5:
-            continue
-        el = table.parent
-        for _ in range(4):
-            if el is None:
-                break
-            classes = el.get("class") or []
-            if "resTab" in classes:
-                if "hide" not in classes:
-                    return table
-                break
-            el = el.parent
+        for table in cont.find_all("table"):
+            if table.find("thead") is None:
+                continue
+            if len(table.find_all("tr")) < 5:
+                continue
+            return table
     return None
 
 
@@ -549,25 +494,28 @@ def scrape_stage_result(pcs_stage_url: str, is_final_stage: bool = False) -> dic
             page_text = soup.get_text(" ", strip=True)
             result["cancelled"] = "stage is cancelled" in page_text.lower()
 
+            stage_table = _find_first_visible_table(soup)
+
             # ── Endagsløb ────────────────────────────────────────────────────
-            # Endagsløbssiden har sin egen markup OG ingen klassementer, så den
-            # afgøres før etapegrenen: ellers ville de fire klassementskald gå
-            # mod "…/2026-gc" — en URL, der ikke findes, og som kun kan give
-            # fire tomme opslag at læse i loggen.
-            oneday_table = _find_oneday_result_table(soup) if soup.find(id="resultsCont") is None else None
-            if oneday_table is not None:
+            # Et endagsløb har ingen klassementer. Uden denne afkortning ville
+            # de fire klassementskald gå mod "…/2026-gc" — en URL, der ikke
+            # findes, og som kun kan give fire tomme opslag at læse i loggen.
+            if "/stage-" not in base_url:
                 browser.close()
-                parsed = _scrape_oneday_result(oneday_table)
-                result["top10"] = parsed["top10"]
-                result["dnf"] = parsed["dnf"]
+                if stage_table is not None:
+                    parsed = _parse_result_table(stage_table)
+                    result["top10"] = parsed["top10"]
+                    result["dnf"] = parsed["dnf"]
                 return result
 
-            tagged = _find_resultscont_tables(soup)
-            if not tagged:
-                browser.close()
-                return result
-            # Første reelle rytter-rangliste i #resultsCont = etaperesultat.
-            stage_table = tagged[0][1]
+            # Et manglende etaperesultat stopper os IKKE her: på en
+            # holdenkeltstart er den aktive fane en HOLD-rangliste uden
+            # rytterkolonne, og en aflyst etape har slet ingen. Klassementet
+            # efter etapen findes i begge tilfælde, og uden dette hoppede vi
+            # over det og efterlod et hul i klassementshistorikken (Dauphiné
+            # 2026 E3, opdaget 2026-10-13).
+            if stage_table is None:
+                print("    [intet rytter-resultat på siden — henter kun klassementerne]")
 
             # Klassementerne hentes hver fra deres egen dedikerede PCS-side
             # (samme URL'er som faneblade-navigationen selv peger på), da
@@ -587,106 +535,23 @@ def scrape_stage_result(pcs_stage_url: str, is_final_stage: bool = False) -> dic
 
             browser.close()
 
-        # ── Etaperesultat (sorteret efter etapeplacering) ────────────────────
-        # Vi læser videre, indtil der er 10 GYLDIGE placeringer — ikke bare de
-        # 10 første rækker. PCS indsætter rækker, der ikke er en placering
-        # (nedrykkede/diskvalificerede ryttere, mellemoverskrifter), og et fast
-        # vindue på 10 rækker koster så en rigtig rytter i bunden af top 10:
-        # Vuelta 2026 E5 fik kun 9 rækker, fordi en nedrykning skubbede Wout
-        # van Aert ud af vinduet. DNF-rækker har ikke et tal i positionsfeltet
-        # og bliver sprunget over af _parse_pcs_row.
-        for row in stage_table.find_all("tr")[1:]:
-            if len(result["top10"]) >= 10:
-                break
-            parsed = _parse_pcs_row(row)
-            if not parsed:
-                continue
-            time_td = row.find("td", class_="time")
-            time_str = ""
-            if time_td:
-                font = time_td.find("font")
-                if font:
-                    time_str = font.get_text(strip=True)
-            result["top10"].append({
-                "position": parsed["pos"],
-                "slug":     parsed["slug"],
-                "name":     parsed["name"],
-                "time":     time_str,
-            })
+        # ── Etaperesultat og udgåede ryttere ─────────────────────────────────
+        if stage_table is not None:
+            etape = _parse_result_table(stage_table)
+            result["top10"] = etape["top10"]
+            result["dnf"] = etape["dnf"]
 
-        # ── DNF: rækker i etaperesultat-tabellen efter DNF-header ────────────
-        in_dnf = False
-        for row in stage_table.find_all("tr"):
-            cells = row.find_all("td")
-            if cells and any("DNF" in c.get_text() for c in cells[:2]):
-                in_dnf = True
-                continue
-            if in_dnf:
-                parsed = _parse_pcs_row(row)
-                if parsed:
-                    result["dnf"].append({"slug": parsed["slug"], "name": parsed["name"]})
-
-        # ── GC-klassement ─────────────────────────────────────────────────────
-        if gc_table is not None:
-            last_gap = 0
-            for row in gc_table.find_all("tr")[1:21]:
-                parsed = _parse_pcs_row(row)
-                if not parsed:
-                    continue
-                time_str = _extract_time(row.find("td", class_="time"))
-                gap = _resolve_gap(parsed["pos"] == 1, time_str, last_gap)
-                last_gap = gap
-                result["gc"].append({
-                    "position": parsed["pos"], "slug": parsed["slug"],
-                    "name": parsed["name"], "time_gap_seconds": gap,
-                })
-
-        # ── Pointsklassement (pnt-kolonne = td[9]) ────────────────────────────
-        if points_table is not None:
-            for row in points_table.find_all("tr")[1:21]:
-                parsed = _parse_pcs_row(row)
-                if not parsed:
-                    continue
-                tds = row.find_all("td", recursive=False)
-                try:
-                    pts = int(tds[9].get_text(strip=True)) if len(tds) > 9 else 0
-                except (ValueError, IndexError):
-                    pts = 0
-                result["points"].append({
-                    "position": parsed["pos"], "slug": parsed["slug"],
-                    "name": parsed["name"], "points": pts,
-                })
-
-        # ── Bjergklassement (pnt-kolonne = td[9]) ─────────────────────────────
-        if mountains_table is not None:
-            for row in mountains_table.find_all("tr")[1:21]:
-                parsed = _parse_pcs_row(row)
-                if not parsed:
-                    continue
-                tds = row.find_all("td", recursive=False)
-                try:
-                    pts = int(tds[9].get_text(strip=True)) if len(tds) > 9 else 0
-                except (ValueError, IndexError):
-                    pts = 0
-                result["mountains"].append({
-                    "position": parsed["pos"], "slug": parsed["slug"],
-                    "name": parsed["name"], "points": pts,
-                })
-
-        # ── Ungdomsklassement (time-kolonne = td.time, ligesom GC) ────────────
-        if youth_table is not None:
-            last_gap = 0
-            for row in youth_table.find_all("tr")[1:21]:
-                parsed = _parse_pcs_row(row)
-                if not parsed:
-                    continue
-                time_str = _extract_time(row.find("td", class_="time"))
-                gap = _resolve_gap(parsed["pos"] == 1, time_str, last_gap)
-                last_gap = gap
-                result["youth"].append({
-                    "position": parsed["pos"], "slug": parsed["slug"],
-                    "name": parsed["name"], "time_gap_seconds": gap,
-                })
+        # ── De fire klassementer ─────────────────────────────────────────────
+        # Point- og bjergklassementet rangordnes efter point, GC og ungdom
+        # efter tid — derfor `med_point`.
+        for nøgle, tabel, med_point in (
+            ("gc",        gc_table,        False),
+            ("points",    points_table,    True),
+            ("mountains", mountains_table, True),
+            ("youth",     youth_table,     False),
+        ):
+            if tabel is not None:
+                result[nøgle] = _parse_classification(tabel, med_point)
 
     except Exception as e:
         print(f"  [Scrape fejl: {e}]")
@@ -716,7 +581,7 @@ def process(race_slug: str | None, stage_number: int | None, all_stages: bool = 
             res = requests.get(
                 f"{SUPABASE_URL}/rest/v1/stages"
                 f"?race_id=eq.{race_id}&stage_number=eq.{stage_number}"
-                f"&select=id,stage_number,pcs_stage_url,date&limit=1",
+                f"&select=id,stage_number,pcs_stage_url,source_url,date&limit=1",
                 headers=AUTH,
             )
             stages = res.json() if res.ok else []
@@ -732,14 +597,25 @@ def process(race_slug: str | None, stage_number: int | None, all_stages: bool = 
 
         final_sn = get_final_stage_number(race_id)
 
+        # Et endagsløb har ingen /stage-N-URL'er: løbets forside ER etapen.
+        # Uden dette byggede nødfaldet nedenfor "…/2026/stage-1/result", som
+        # ikke findes, og resultatet blev meldt som "ikke kørt endnu".
+        er_endagsloeb = (race.get("race_type") or "").startswith("one")
+
         for stage in stages:
             sn       = stage["stage_number"]
-            pcs_url  = stage.get("pcs_stage_url")
+            # `source_url` er med, fordi de fleste endagsløb har TOM
+            # races.pcs_url OG tom stages.pcs_stage_url — den eneste PCS-URL,
+            # vi har for dem, står i source_url (samme nødfald som
+            # stage_recap_agent.py allerede brugte). Uden den kunne 6 af
+            # 2026-sæsonens 21 endagsløb ikke hentes overhovedet.
+            pcs_url  = stage.get("pcs_stage_url") or stage.get("source_url")
 
             if not pcs_url:
                 # Byg URL fra race-URL
                 if pcs_base:
-                    pcs_url = f"{pcs_base.rstrip('/')}/stage-{sn}/result"
+                    pcs_url = pcs_base.rstrip("/") if er_endagsloeb \
+                              else f"{pcs_base.rstrip('/')}/stage-{sn}/result"
                 else:
                     print(f"  E{sn}: Ingen PCS-URL")
                     continue

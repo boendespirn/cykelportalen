@@ -120,6 +120,13 @@ Overblik over hvad der er kørt, hvor gammelt det er, hvor fuldstændigt et løb
 
 ---
 
+## Løbsguider og automatisering
+
+- **`docs/loebsguides/`** — én fil pr. løb: hvilket PCS-slug kilderne kender det under, hvilke kilder der faktisk leverede data i 2026, hvad der manglede, og hvornår hvert job skal køre. [`README.md`](docs/loebsguides/README.md) rummer metoden, kildematrixen og de fem fælder, der går igen. Start dér, når et løb skal forberedes.
+- **`docs/automatisering-plan.md`** — planen for at flytte `runner.py` i skyen og give den en skemalægger, så jobs udløses af løbskalenderen i stedet for af en knap. Ikke bygget endnu.
+
+---
+
 ## Endagsløb — referenceopsætningen (Il Lombardia 2026)
 
 Il Lombardia 2026 er den opsætning, et **endagsløb** skal kopiere næste gang. Hele idéen er, at *et endagsløb læses som en etape*: løbet ER etape 1, og løbssiden `/{slug}` er dets eneste side, fordi `/{slug}/stage/1` 308-redirecter hertil (SEO-021). Alt, der ellers ville stå på en etapeside, skal derfor findes og vises her.
