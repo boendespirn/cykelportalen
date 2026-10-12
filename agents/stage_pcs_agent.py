@@ -1,4 +1,4 @@
-"""
+﻿"""
 stage_pcs_agent.py
 Scraper etapedata fra ProCyclingStats for UCI WorldTour-løb.
 Bruger Playwright pga. Cloudflare-beskyttelse.
@@ -21,6 +21,10 @@ import asyncio
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+
+# Kalenderen og PCS-slugget læses ét sted fra (DATA-007).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pcs_source  # noqa: E402
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
@@ -140,6 +144,10 @@ PCS_TO_DB_SLUG: dict[str, str] = {
     "cadel-evans-great-ocean-road-race": "mapei-cadel-evans-great-ocean-road-race-men",
     "tour-down-under":          "santos-tour-down-under",
     "milan-san-remo":           "milano-sanremo",
+    # Uden denne ville get_race_id() ikke finde vores række og i stedet OPRETTE
+    # et tomt "volta-a-catalunya-2026" ved siden af det rigtige løb (fundet
+    # 2026-10-13, før backfillen af de tomme etapeløb).
+    "volta-a-catalunya":        "volta-ciclista-a-catalunya",
     "tour-auvergne-rhone-alpes":  "criterium-du-dauphine",
     "dwars-door-vlaanderen":      "dwars-door-vlaanderen-a-travers-la-flandre",
     "e3-saxo-bank-classic":       "e3-saxo-classic",
@@ -167,10 +175,24 @@ def is_oneday_race(race_id: str) -> bool:
 
 
 def get_race_id(pcs_slug: str) -> str | None:
+    """Vores races-id for et PCS-slug.
+
+    `races.pcs_url` spørges FØRST (DATA-007): det er det eneste sted, PCS-navnet
+    står, og uden opslaget skulle hvert nyt eller omdøbt løb tilføjes
+    `PCS_TO_DB_SLUG` i hånden — glemmes det, opretter funktionen nedenfor et
+    TOMT dublet-løb ved siden af det rigtige, og dataen lander et sted, ingen
+    kigger.
+    """
+    fra_db = pcs_source.loeb_for_pcs_slug(pcs_slug, YEAR)
+    if fra_db:
+        return fra_db["id"]
+
     db_base = PCS_TO_DB_SLUG.get(pcs_slug, pcs_slug)
     our_slug = f"{db_base}-{YEAR}"
     rows = sb_get("races", f"slug=eq.{our_slug}&select=id&limit=1")
     if rows:
+        print(f"  [kilde] '{pcs_slug}' fundet via den gamle liste, ikke via "
+              f"races.pcs_url — sæt pcs_url på {our_slug}")
         return rows[0]["id"]
 
     # Opret løbet med minimal data
@@ -230,7 +252,22 @@ def extract_info(pairs: list[dict]) -> dict:
             info["start_location"] = value
         elif "arrival" in label:
             info["finish_location"] = value
-        elif "date" in label and ":" in label:
+        elif "start time" in label:
+            # PCS skriver "13:15" (løbets lokale tid). Feltet vises i
+            # TV-boksen på etapesiden OG er det, skemalæggeren regner et
+            # forventet måltidspunkt ud fra — uden det må den falde tilbage
+            # på et bredt pollevindue (scheduler.py).
+            m = re.search(r"\d{1,2}:\d{2}", value)
+            if m:
+                info["stage_start_time"] = m.group()
+        elif label.rstrip(":").strip() == "date":
+            # Kravet var før, at labelen INDEHOLDT et kolon ("Date:"). PCS'
+            # nye etapesider skriver den uden ("Date"), og datoen gik derfor
+            # tavst tabt på samtlige etaper i backfillen 2026-10-13. En etape
+            # uden dato er usynlig for både referat-agenten (`date <= i dag`)
+            # og den kommende skemalægger. Vi matcher nu på hele labelen, så
+            # "Date" og "Date:" begge rammer, mens "Start time:" og
+            # "Avg. speed winner:" ikke gør.
             info["date"] = parse_date_pcs(value)
 
     return info
@@ -341,6 +378,31 @@ async def scrape_race_stages(pcs_slug: str, only_stage: int | None = None) -> li
                     }
                 }
 
+                // ETAPESIDERNE bruger nu samme form som loebsforsiden: labelen
+                // er en <div class="bold">Distance: </div> og vaerdien den
+                // naeste div. Scanningen ovenfor finder derfor INTET, og det
+                // gik tavst galt: distance og startby blev reddet af
+                // titel-regexet, mens DATO og HOEJDEMETER forsvandt — og en
+                // etape uden dato er usynlig for baade referat-agenten og
+                // skemalaeggeren. Samme faelde som DATA-005, nu paa
+                // etapesiderne (fundet 2026-10-13 under backfillen af de
+                // tomme etapeloeb; verificeret paa Itzulia og Paris-Nice).
+                //
+                // Koeres SIDST, saa et felt, der staar begge steder, tages fra
+                // sidens eget felt.
+                // Kolonnet er IKKE et krav: PCS skriver "Date" uden, mens
+                // "Distance:" og "Vertical meters:" har det. Vi tager derfor
+                // enhver kort div.bold-label med en vaerdi ved siden af og
+                // lader extract_info() om at vaelge de felter, den kender.
+                for (const el of document.querySelectorAll('div.bold')) {
+                    const label = el.innerText.trim();
+                    if (!label || label.length > 40) continue;
+                    const next = el.nextElementSibling;
+                    if (!next) continue;
+                    const value = next.innerText.trim();
+                    if (value) pairs.push({ title: label, value: value });
+                }
+
                 result.pairs = pairs;
                 return result;
             }""")
@@ -392,6 +454,7 @@ async def scrape_race_stages(pcs_slug: str, only_stage: int | None = None) -> li
                 "finish_location": info.get("finish_location"),
                 "elevation_gain_m": info.get("elevation_gain_m"),
                 "profile_score": info.get("profile_score"),
+                "stage_start_time": info.get("stage_start_time"),
                 "stage_type": stage_type,
                 "elevation_image_url": stage_data.get("elevation_image_url"),
                 "pcs_stage_url": url,
@@ -549,6 +612,7 @@ async def scrape_oneday_race(pcs_slug: str) -> list[dict]:
         "finish_location": info.get("finish_location"),
         "elevation_gain_m": info.get("elevation_gain_m"),
         "profile_score": info.get("profile_score"),
+        "stage_start_time": info.get("stage_start_time"),
         "stage_type": stage_type,
         "elevation_image_url": race_data.get("elevation_image_url"),
         "pcs_stage_url": url,
@@ -641,7 +705,16 @@ def save_stages(race_id: str, stages: list[dict]) -> None:
 
 async def run(target_slug: str | None = None, oneday: bool = False,
               only_stage: int | None = None):
-    slugs = [target_slug] if target_slug else PCS_RACE_SLUGS
+    # Uden et bestemt løb: sæsonens kalender fra databasen, ikke en hardkodet
+    # liste, der skal vedligeholdes i hånden hvert år (DATA-007).
+    if target_slug:
+        slugs = [target_slug]
+    else:
+        slugs = [r["pcs_slug"] for r in pcs_source.saesonens_loeb(YEAR)]
+        print(f"{len(slugs)} løb i {YEAR}-kalenderen med en PCS-URL")
+        if not slugs:
+            print("  [kilde] ingen løb med pcs_url — falder tilbage til den gamle liste")
+            slugs = PCS_RACE_SLUGS
 
     for pcs_slug in slugs:
         print(f"\n{'='*50}")
@@ -706,3 +779,4 @@ if __name__ == "__main__":
     if args.stage and args.oneday:
         p.error("--stage og --oneday udelukker hinanden: et endagsloeb har kun een etape")
     asyncio.run(run(args.slug, oneday=args.oneday, only_stage=args.stage))
+

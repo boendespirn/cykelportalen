@@ -19,6 +19,12 @@ import requests
 from slugify import slugify
 from dotenv import load_dotenv
 
+# Kalenderen og PCS-slugget læses ét sted fra (DATA-007). sys.path-linjen gør,
+# at agenten kan køres både som `python agents/startlist_agent.py` og importeres
+# af race_prep_pipeline.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pcs_source  # noqa: E402
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -126,11 +132,25 @@ PCS_TO_DB_SLUG: dict[str, str] = {
 
 
 def get_or_create_race(pcs_slug: str) -> dict | None:
-    """Finder løbet i DB ud fra PCS-slug. Opretter det hvis det ikke findes."""
+    """Finder løbet i DB ud fra PCS-slug. Opretter det hvis det ikke findes.
+
+    Slår FØRST op på `races.pcs_url`, som er den eneste kilde til, hvad et løb
+    hedder hos PCS (DATA-007). Først hvis ingen række peger på slugget, bruges
+    den gamle `PCS_TO_DB_SLUG` — og så siges det højt, for det er netop den
+    slags uenighed mellem lister, opslaget skal fjerne.
+    """
+    fra_db = pcs_source.loeb_for_pcs_slug(pcs_slug, YEAR)
+    if fra_db:
+        race = get_race(fra_db["slug"])
+        if race:
+            return race
+
     db_base = PCS_TO_DB_SLUG.get(pcs_slug, pcs_slug)
     our_slug = f"{db_base}-{YEAR}"
     race = get_race(our_slug)
     if race:
+        print(f"  [kilde] '{pcs_slug}' fundet via den gamle liste, ikke via "
+              f"races.pcs_url — sæt pcs_url på {our_slug}")
         return race
 
     # Opret løbet med minimal data — startlist_agent fylder resten
@@ -428,7 +448,23 @@ def save_startlist(race_id: str, pcs_slug: str, entries: list[dict]) -> None:
 # ── Hovedprogram ─────────────────────────────────────────────────────────────
 
 async def run(target_slug: str | None = None):
-    slugs = [target_slug] if target_slug else PCS_RACE_SLUGS
+    # Uden et bestemt løb: HELE sæsonens kalender fra databasen, ikke den
+    # hardkodede liste. Listen manglede 14 af 21 endagsløb i 2026, og et løb,
+    # der ikke står på den, får aldrig en startliste (DATA-007).
+    if target_slug:
+        slugs = [target_slug]
+    else:
+        loeb = pcs_source.saesonens_loeb(YEAR)
+        slugs = [r["pcs_slug"] for r in loeb]
+        mangler = [r["slug"] for r in pcs_source.saesonens_loeb(YEAR, kun_med_pcs=False)
+                   if not r.get("pcs_slug")]
+        print(f"{len(slugs)} løb i {YEAR}-kalenderen med en PCS-URL")
+        if mangler:
+            print(f"  [kilde] {len(mangler)} løb har ingen pcs_url og springes over: "
+                  f"{', '.join(mangler[:6])}{' …' if len(mangler) > 6 else ''}")
+        if not slugs:
+            print("  [kilde] ingen løb med pcs_url — falder tilbage til den gamle liste")
+            slugs = PCS_RACE_SLUGS
 
     for pcs_slug in slugs:
         print(f"\n{'='*50}")
