@@ -249,8 +249,14 @@ def planlaeg(fra: datetime, til: datetime) -> list[Udloeser]:
         for st in stages:
             if not st.get("date"):
                 continue            # en etape uden dato kan ikke skemalægges
-            if st.get("data_status") == "cancelled":
-                continue            # aflyst etape får aldrig et resultat
+            if st.get("data_status") in ("cancelled", "no_result"):
+                # En aflyst etape får aldrig et resultat — og det gør en
+                # HOLDENKELTSTART heller ikke: PCS' aktive fane er en
+                # holdrangliste uden rytterkolonne, og `results` er
+                # rytterbaseret (Paris-Nice og Dauphiné E3 2026). Uden dette
+                # ville skemalæggeren jage et resultat, der ikke findes, 20
+                # gange om dagen og melde etapen som manglende for evigt.
+                continue
             if st["id"] in resultater:
                 continue            # resultatet står der allerede
             for i, t in enumerate(resultat_tidspunkter(st, tv)):
@@ -321,7 +327,7 @@ def dagligt_sammendrag() -> None:
                         hent(f"results?race_id=eq.{r['id']}&select=stage_id&limit=1000")}
         for st in hent(f"stages?race_id=eq.{r['id']}&select=id,stage_number,date,data_status"
                        f"&date=lte.{i_gaar.isoformat()}&order=stage_number&limit=50"):
-            if st.get("data_status") == "cancelled" or st["id"] in med_resultat:
+            if st.get("data_status") in ("cancelled", "no_result") or st["id"] in med_resultat:
                 continue
             mangler.append(f"{r['slug']} E{st['stage_number']} ({st['date']})")
 

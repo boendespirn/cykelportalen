@@ -95,27 +95,27 @@ med mindst én placering.
 
 | Løb | Dato | Type | Etaper | Resultater | Startliste | Stigninger | TV |
 |---|---|---|---|---|---|---|---|
-| [Santos Tour Down Under](santos-tour-down-under.md) | 2026-01-20 | etape | 0 | 0/1 | 0 | 0 | 0 |
+| [Santos Tour Down Under](santos-tour-down-under.md) | 2026-01-21 | etape | 5 | 5/5 | 0 | 0 | 0 |
 | [Mapei Cadel Evans Great Ocean Road Race - Men](mapei-cadel-evans-great-ocean-road-race-men.md) | 2026-02-01 | endags | 1 | 1/1 | 0 | 0 | 0 |
-| [UAE Tour](uae-tour.md) | 2026-02-16 | etape | 0 | 0/1 | 146 | 0 | 0 |
+| [UAE Tour](uae-tour.md) | 2026-02-16 | etape | 7 | 7/7 | 146 | 0 | 0 |
 | [Omloop Nieuwsblad](omloop-nieuwsblad.md) | 2026-02-28 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [Strade Bianche](strade-bianche.md) | 2026-03-07 | endags | 1 | 1/1 | 0 | 0 | 0 |
-| [Paris-Nice](paris-nice.md) | 2026-03-08 | etape | 0 | 0/1 | 0 | 0 | 0 |
-| [Tirreno-Adriatico](tirreno-adriatico.md) | 2026-03-09 | etape | 0 | 0/1 | 0 | 0 | 0 |
+| [Paris-Nice](paris-nice.md) | 2026-03-08 | etape | 8 | 7/8 | 0 | 0 | 0 |
+| [Tirreno-Adriatico](tirreno-adriatico.md) | 2026-03-09 | etape | 7 | 7/7 | 0 | 0 | 0 |
 | [Milano-Sanremo](milano-sanremo.md) | 2026-03-21 | endags | 1 | 1/1 | 0 | 0 | 0 |
-| [Volta Ciclista a Catalunya](volta-ciclista-a-catalunya.md) | 2026-03-23 | etape | 0 | 0/1 | 0 | 0 | 0 |
+| [Volta Ciclista a Catalunya](volta-ciclista-a-catalunya.md) | 2026-03-23 | etape | 7 | 7/7 | 0 | 0 | 0 |
 | [Ronde Van Brugge - Tour of Bruges](ronde-van-brugge-tour-of-bruges.md) | 2026-03-25 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [E3 Saxo Classic](e3-saxo-classic.md) | 2026-03-27 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [In Flanders Fields - From Middelkerke to Wevelgem](in-flanders-fields-from-middelkerke-to-wevelgem.md) | 2026-03-29 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [Dwars door Vlaanderen - A travers la Flandre](dwars-door-vlaanderen-a-travers-la-flandre.md) | 2026-04-01 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [Ronde van Vlaanderen](ronde-van-vlaanderen.md) | 2026-04-05 | endags | 1 | 1/1 | 0 | 0 | 0 |
-| [Itzulia Basque Country](itzulia-basque-country.md) | 2026-04-06 | etape | 0 | 0/1 | 0 | 0 | 0 |
+| [Itzulia Basque Country](itzulia-basque-country.md) | 2026-04-06 | etape | 6 | 6/6 | 0 | 0 | 0 |
 | [Paris-Roubaix Hauts-de-France](paris-roubaix-hauts-de-france.md) | 2026-04-12 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [Amstel Gold Race](amstel-gold-race.md) | 2026-04-19 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [La Flèche Wallonne](la-fleche-wallonne.md) | 2026-04-22 | endags | 1 | 1/1 | 0 | 0 | 0 |
 | [Liège-Bastogne-Liège](liege-bastogne-liege.md) | 2026-04-26 | endags | 1 | 1/1 | 0 | 0 | 0 |
+| [Tour de Romandie](tour-de-romandie.md) | 2026-04-29 | etape | 5 | 5/5 | 0 | 0 | 0 |
 | [Eschborn-Frankfurt](eschborn-frankfurt.md) | 2026-05-01 | endags | 1 | 1/1 | 0 | 0 | 0 |
-| [Tour de Romandie](tour-de-romandie.md) | 2026-05-03 | etape | 0 | 0/1 | 0 | 0 | 0 |
 | [Giro d'Italia](giro-d-italia.md) | 2026-05-08 | etape | 21 | 21/21 | 184 | 40 | 33 |
 | [Tour Auvergne Rhône-Alpes (Critérium du Dauphiné)](criterium-du-dauphine.md) | 2026-06-07 | etape | 8 | 7/8 | 170 | 28 | 26 |
 | [Copenhagen Sprint](copenhagen-sprint.md) | 2026-06-14 | endags | 1 | 1/1 | 198 | 0 | 0 |
@@ -130,7 +130,7 @@ med mindst én placering.
 | [Grand Prix Cycliste de Québec](grand-prix-cycliste-de-quebec.md) | 2026-09-11 | endags | 1 | 1/1 | 7 | 0 | 0 |
 | [Grand Prix Cycliste de Montréal](grand-prix-cycliste-de-montreal.md) | 2026-09-13 | endags | 1 | 1/1 | 6 | 0 | 0 |
 | [Il Lombardia](il-lombardia.md) | 2026-10-10 | endags | 1 | 1/1 | 174 | 9 | 3 |
-| [Tour of Guangxi](tour-of-guangxi.md) | 2026-10-13 | etape | 6 | 0/6 | 1 | 0 | 0 |
+| [Tour of Guangxi](tour-of-guangxi.md) | 2026-10-13 | etape | 6 | 0/6 | 158 | 0 | 0 |
 
 ## 6. Hvad 2026 lærte os
 
@@ -145,6 +145,8 @@ med mindst én placering.
   verificér, dokumentér, og byg på det, vi selv kan tegne ud fra GPX.
 - **Den dyreste fejltype er den tavse.** Fire af årets fem største datahuller
   blev meldt som "ingen data endnu" af en agent, der kørte grønt igennem.
+
+
 
 
 

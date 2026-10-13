@@ -1,6 +1,6 @@
 # Volta Ciclista a Catalunya — kildeguide
 
-*Etapeløb · UCI WorldTour · kørt 2026-03-23 – 2026-03-23 i 2026.*
+*Etapeløb · UCI WorldTour · kørt 2026-03-23 – 2026-03-29 i 2026.*
 
 Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — men **verificér URL'erne igen**, før sæsonen går i gang: PCS skifter slugs uden varsel.
 
@@ -9,12 +9,12 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 | Felt | Værdi |
 |---|---|
 | Vores DB-slug | `volta-ciclista-a-catalunya-2027` |
-| PCS-slug | `—` |
-| PCS-løbsside | **mangler** |
-| PCS-resultat | **mangler** |
+| PCS-slug | `volta-a-catalunya` |
+| PCS-løbsside | https://www.procyclingstats.com/race/volta-a-catalunya/2026 |
+| PCS-resultat | https://www.procyclingstats.com/race/volta-a-catalunya/2026/stage-N/result |
 | GPX (cyclingstage) | konfigureret |
 | ASO-roadbook | nej (ikke et ASO-løb) |
-| Kendt af startliste-agenten | **nej — tilføj PCS-slug til `startlist_agent.PCS_RACE_SLUGS`** |
+| Kendt af startliste-agenten | ja |
 | Kendt af TV-agenten | **nej — tilføj nøgleord til `tv_agent.RACE_KEYWORDS`** |
 
 ## Hvad vi fik i 2026
@@ -22,19 +22,19 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 | Data | Status |
 |---|---|
 | Startliste | 0 ryttere |
-| Etaper i databasen | 0 |
-| Etaper med distance | 0 |
+| Etaper i databasen | 7 |
+| Etaper med distance | 7 |
 | Etaper med GPX-rute | 0 |
 | Egengenereret højdeprofil | 0 |
 | Stigninger | 0 (0 med profil) |
-| Etaper med resultat | 0 / 0 |
-| Klassementsrækker | 0 |
+| Etaper med resultat | 7 / 7 |
+| Klassementsrækker | 500 |
 | Etapereferater | 0 |
 | TV-sendinger | 0 |
 
 ## Noter
 
-- Løbet står i databasen som en **tom placeholder**: ingen etaper, og `end_date` er sat lig `start_date`. Hele forberedelsen mangler — begynd med at rette datoerne og hente etapedataen.
+- Ingen løbsspecifikke fælder registreret. Følg standardrækkefølgen i [README.md](README.md).
 
 ## Tjekliste til 2027
 

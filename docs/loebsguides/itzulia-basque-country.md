@@ -1,6 +1,6 @@
 # Itzulia Basque Country — kildeguide
 
-*Etapeløb · UCI WorldTour · kørt 2026-04-06 – 2026-04-06 i 2026.*
+*Etapeløb · UCI WorldTour · kørt 2026-04-06 – 2026-04-11 i 2026.*
 
 Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — men **verificér URL'erne igen**, før sæsonen går i gang: PCS skifter slugs uden varsel.
 
@@ -9,9 +9,9 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 | Felt | Værdi |
 |---|---|
 | Vores DB-slug | `itzulia-basque-country-2027` |
-| PCS-slug | `—` |
-| PCS-løbsside | **mangler** |
-| PCS-resultat | **mangler** |
+| PCS-slug | `itzulia-basque-country` |
+| PCS-løbsside | https://www.procyclingstats.com/race/itzulia-basque-country/2026 |
+| PCS-resultat | https://www.procyclingstats.com/race/itzulia-basque-country/2026/stage-N/result |
 | GPX (cyclingstage) | konfigureret |
 | ASO-roadbook | nej (ikke et ASO-løb) |
 | Kendt af startliste-agenten | **nej — tilføj PCS-slug til `startlist_agent.PCS_RACE_SLUGS`** |
@@ -22,19 +22,19 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 | Data | Status |
 |---|---|
 | Startliste | 0 ryttere |
-| Etaper i databasen | 0 |
-| Etaper med distance | 0 |
+| Etaper i databasen | 6 |
+| Etaper med distance | 6 |
 | Etaper med GPX-rute | 0 |
 | Egengenereret højdeprofil | 0 |
 | Stigninger | 0 (0 med profil) |
-| Etaper med resultat | 0 / 0 |
-| Klassementsrækker | 0 |
+| Etaper med resultat | 6 / 6 |
+| Klassementsrækker | 444 |
 | Etapereferater | 0 |
 | TV-sendinger | 0 |
 
 ## Noter
 
-- Løbet står i databasen som en **tom placeholder**: ingen etaper, og `end_date` er sat lig `start_date`. Hele forberedelsen mangler — begynd med at rette datoerne og hente etapedataen.
+- Ingen løbsspecifikke fælder registreret. Følg standardrækkefølgen i [README.md](README.md).
 
 ## Tjekliste til 2027
 

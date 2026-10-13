@@ -1,6 +1,6 @@
 # UAE Tour — kildeguide
 
-*Etapeløb · UCI WorldTour · kørt 2026-02-16 – 2026-02-16 i 2026.*
+*Etapeløb · UCI WorldTour · kørt 2026-02-16 – 2026-02-22 i 2026.*
 
 Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — men **verificér URL'erne igen**, før sæsonen går i gang: PCS skifter slugs uden varsel.
 
@@ -22,19 +22,19 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 | Data | Status |
 |---|---|
 | Startliste | 146 ryttere |
-| Etaper i databasen | 0 |
-| Etaper med distance | 0 |
+| Etaper i databasen | 7 |
+| Etaper med distance | 7 |
 | Etaper med GPX-rute | 0 |
 | Egengenereret højdeprofil | 0 |
 | Stigninger | 0 (0 med profil) |
-| Etaper med resultat | 0 / 0 |
-| Klassementsrækker | 0 |
+| Etaper med resultat | 7 / 7 |
+| Klassementsrækker | 417 |
 | Etapereferater | 0 |
 | TV-sendinger | 0 |
 
 ## Noter
 
-- Løbet står i databasen som en **tom placeholder**: ingen etaper, og `end_date` er sat lig `start_date`. Hele forberedelsen mangler — begynd med at rette datoerne og hente etapedataen.
+- Ingen løbsspecifikke fælder registreret. Følg standardrækkefølgen i [README.md](README.md).
 
 ## Tjekliste til 2027
 

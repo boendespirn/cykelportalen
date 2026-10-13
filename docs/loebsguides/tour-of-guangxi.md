@@ -21,7 +21,7 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 
 | Data | Status |
 |---|---|
-| Startliste | 1 ryttere |
+| Startliste | 158 ryttere |
 | Etaper i databasen | 6 |
 | Etaper med distance | 6 |
 | Etaper med GPX-rute | 0 |
@@ -34,7 +34,8 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 
 ## Noter
 
-- Ingen løbsspecifikke fælder registreret. Følg standardrækkefølgen i [README.md](README.md).
+- **Sæsonens sidste løb og den første prøve på automatiseringen** — startlisten (151 ryttere) blev hentet af workeren i skyen 2026-10-13, uden at nogen trykkede.
+- Syv kinesiske ryttere i startlisten findes ikke i `riders` og står derfor uden profil (HU Haijie, LIU Chenglu, LIU Zhicheng, MA Binyan, SHEN Yutao, WANG Ruidong, ZHAO Chenli).
 
 ## Tjekliste til 2027
 

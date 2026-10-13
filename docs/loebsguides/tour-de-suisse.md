@@ -34,7 +34,7 @@ Skrevet ud fra 2026-sæsonen 2026-10-12. Brug den som udgangspunkt for 2027 — 
 
 ## Noter
 
-- Kun 5 af 8 etaper nåede databasen i 2026 — etapedataen skal hentes igen, før resultaterne kan hænge på noget.
+- Løbet havde **fem** etaper i 2026 — ikke otte. Verificeret 2026-10-13: PCS har ingen etape 6. En tidligere note om tre manglende etaper var forkert.
 
 ## Tjekliste til 2027
 
