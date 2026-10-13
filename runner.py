@@ -447,7 +447,10 @@ def run_one(run: dict) -> None:
     # den måde, fejl faktisk blev opdaget på: at ejeren så dem i vinduet.
     # Kun fejlede kørsler og negative domme sendes; en kanal, der bipper ved
     # hvert normalt job, holder man op med at læse.
-    if exit_code != 0 or verdict == "failed":
+    # "error" er validatorens dom for en kørsel, der gik galt — kolonnen er
+    # CHECK-begrænset til ok/warning/error/skipped, så et tjek på "failed"
+    # ville aldrig kunne være sandt og tavst slå halvdelen af beskederne fra.
+    if exit_code != 0 or verdict == "error":
         hale = "\n".join(output.strip().splitlines()[-6:])
         etape = f" E{stage}" if stage else ""
         notify.send(

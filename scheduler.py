@@ -108,10 +108,14 @@ def _url_tid(t: datetime) -> str:
 
 def koeede_jobs(fra: datetime, til: datetime) -> list[dict]:
     """Jobs, skemalæggeren selv har lagt i kø i perioden — grundlaget for, at
-    den samme regel ikke kan lægge det samme job i kø to gange."""
-    return hent(f"agent_runs?select=job_key,race_slug,stage_number,trigger,status,queued_at"
+    den samme regel ikke kan lægge det samme job i kø to gange.
+
+    `trigger` er en CHECK-begrænset kolonne ('button', 'cli', 'schedule'), så
+    reglens navn kan ikke stå dér. Det ligger i `args.regel` i stedet.
+    """
+    return hent(f"agent_runs?select=job_key,race_slug,stage_number,args,status,queued_at"
                 f"&queued_at=gte.{_url_tid(fra)}&queued_at=lte.{_url_tid(til)}"
-                f"&trigger=like.skema:*&order=queued_at.desc&limit=1000")
+                f"&trigger=eq.schedule&order=queued_at.desc&limit=1000")
 
 
 def laeg_i_koe(job_key: str, race_slug: str | None, stage_number: int | None,
@@ -121,7 +125,7 @@ def laeg_i_koe(job_key: str, race_slug: str | None, stage_number: int | None,
     r = requests.post(
         f"{SUPABASE_URL}/rest/v1/agent_runs",
         json={"job_key": job_key, "race_slug": race_slug, "stage_number": stage_number,
-              "status": "queued", "trigger": f"skema:{regel}"},
+              "status": "queued", "trigger": "schedule", "args": {"regel": regel}},
         headers=SKRIV, timeout=30,
     )
     if not r.ok:
@@ -271,7 +275,7 @@ def koer_en_gang(tør: bool) -> int:
     # tidspunktet passerede.
     udloesere = planlaeg(tid - timedelta(hours=2), tid)
     allerede = {(k["job_key"], k["race_slug"], k["stage_number"],
-                 (k["trigger"] or "").removeprefix("skema:"))
+                 (k.get("args") or {}).get("regel"))
                 for k in koeede_jobs(tid - timedelta(days=2), tid)}
 
     lagt = 0
