@@ -314,9 +314,14 @@ def dagligt_sammendrag() -> None:
         return
     _sidste_digest = i_dag
 
+    # Vinduet er I GÅR — ikke "fra i går og frem". Den første udgave talte
+    # også nattens kørsler med og meldte dem som gårsdagens: ejeren fik
+    # 2026-10-13 besked om en fejlet startliste, der i virkeligheden var en
+    # prøvekørsel samme nat, afbrudt af et deploy.
     i_gaar = i_dag - timedelta(days=1)
     koersler = hent(f"agent_runs?select=job_key,race_slug,status,exit_code"
-                    f"&queued_at=gte.{i_gaar.isoformat()}&limit=500")
+                    f"&queued_at=gte.{i_gaar.isoformat()}&queued_at=lt.{i_dag.isoformat()}"
+                    f"&limit=500")
     fejlede = [k for k in koersler if k.get("status") == "failed"]
 
     # Kørte etaper uden resultat — det hul, ingen opdager af sig selv.

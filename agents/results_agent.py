@@ -408,11 +408,24 @@ def _fetch_soup(browser, headers: dict, url: str) -> BeautifulSoup:
     side-skabelon, og en baggrunds-JS-proces derfra ser ud til aldrig at gå i
     ro igen efter første goto — genbrug af page fik `wait_until="networkidle"`
     til at time ud på alle efterfølgende navigationer (verificeret ved fejl).
+
+    Ventestrategien er `domcontentloaded` + et kort ophold — IKKE `networkidle`.
+    PCS' sider holder forbindelser åbne (annoncer og statistik-widgets), så
+    "netværket i ro" indtræffer sent eller aldrig: målt hjemmefra tog den
+    **24,5 sekunder** mod 4,0 for `domcontentloaded`, altså et halvt sekund
+    fra loftet på 25. Fra Railway lå den over, og så timede HVER eneste
+    resultathentning ud — Tour of Guangxis etape 1 fik fem forsøg i træk, der
+    alle meldte "ingen etaperesultat fundet (muligvis ikke koert endnu)",
+    mens resultatet stod på siden hele tiden (2026-10-13).
+
+    Indholdet er det samme med begge strategier (verificeret: 152 rækker).
     """
     page = browser.new_page()
     page.set_extra_http_headers(headers)
     try:
-        page.goto(url, wait_until="networkidle", timeout=25_000)
+        page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+        # Tabellerne står i det leverede HTML; opholdet er alene for de få
+        # felter, PCS udfylder med JavaScript lige efter indlæsning.
         time.sleep(2)
         return BeautifulSoup(page.content(), "html.parser")
     finally:
