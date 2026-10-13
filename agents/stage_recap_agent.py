@@ -98,33 +98,64 @@ def fetch_timeline_html(url: str) -> list[str]:
     """
     Returnerer HTML-fragmenter, der tilsammen udgør HELE tidslinjen:
     live-sidens egen <ul class="timeline3"> plus alle "view more events"-batches.
+
+    Hentes gennem en RIGTIG BROWSER, ikke med `requests`.
+
+    Hvorfor: PCS afviser almindelige HTTP-klienter fra datacentre. Hjemmefra
+    svarede `…/stage-1/live` 200 med `requests`; fra Railway svarede den
+    **403** på hvert eneste forsøg, og referat-trinnet kunne derfor slet ikke
+    køre i skyen (fundet 2026-10-13, da automatiseringen tog sin første
+    etape). Resultatagenten rammer ikke samme mur, fordi den altid har brugt
+    Playwright.
+
+    `side.request.post()` sender fra browserens egen kontekst — med dens
+    cookies, dens User-Agent og dens TLS-fingeraftryk — så "view more"-kaldet
+    ser ud som det, siden selv laver. Det er hele pointen i at bruge browseren
+    frem for at forsøge at efterligne den med håndsatte headers.
     """
-    r = requests.get(url, headers=PCS_HEADERS, timeout=40)
-    r.raise_for_status()
-    page = r.text
-    fragments = [page]
+    from playwright.sync_api import sync_playwright
 
-    race_id = re.search(r"var id = (\d+);", page)
-    if not race_id:
-        return fragments
-    race_id = race_id.group(1)
+    fragments: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        side = browser.new_page(user_agent=PCS_HEADERS["User-Agent"])
+        try:
+            # domcontentloaded, ikke networkidle: PCS holder forbindelser
+            # åbne, så "i ro" indtræffer sent eller aldrig — det var dét, der
+            # fik resultathentningen til at time ud fra skyen.
+            side.goto(url, wait_until="domcontentloaded", timeout=40_000)
+            side.wait_for_timeout(2_000)
+            page = side.content()
+            fragments.append(page)
 
-    seqnr = re.search(r'data-last_seqnr="(\d+)"', page)
-    # Maks. 10 batches — endpointet leverer i praksis resten i ét svar, men et
-    # loft forhindrer en uendelig løkke, hvis PCS ændrer paginering.
-    for _ in range(10):
-        if not seqnr:
-            break
-        resp = requests.post(
-            VIEWMORE_URL,
-            data={"action": "timeline", "race": race_id, "seqnr": seqnr.group(1)},
-            headers={**PCS_HEADERS, "X-Requested-With": "XMLHttpRequest", "Referer": url},
-            timeout=40,
-        )
-        if not resp.ok or not resp.text.strip():
-            break
-        fragments.append(resp.text)
-        seqnr = re.search(r'data-last_seqnr="(\d+)"', resp.text)
+            race_id = re.search(r"var id = (\d+);", page)
+            if not race_id:
+                return fragments
+            race_id = race_id.group(1)
+
+            seqnr = re.search(r'data-last_seqnr="(\d+)"', page)
+            # Maks. 10 batches — endpointet leverer i praksis resten i ét svar,
+            # men et loft forhindrer en uendelig løkke, hvis PCS ændrer
+            # paginering.
+            for _ in range(10):
+                if not seqnr:
+                    break
+                svar = side.request.post(
+                    VIEWMORE_URL,
+                    form={"action": "timeline", "race": race_id, "seqnr": seqnr.group(1)},
+                    headers={"X-Requested-With": "XMLHttpRequest", "Referer": url},
+                    timeout=40_000,
+                )
+                if not svar.ok:
+                    break
+                tekst = svar.text()
+                if not tekst.strip():
+                    break
+                fragments.append(tekst)
+                seqnr = re.search(r'data-last_seqnr="(\d+)"', tekst)
+        finally:
+            side.close()
+            browser.close()
 
     return fragments
 
@@ -480,7 +511,11 @@ def run_race(race: dict, stage_numbers: list[int] | None, force: bool,
         url = live_url(pcs_url)
         try:
             fragments = fetch_timeline_html(url)
-        except requests.RequestException as e:
+        except Exception as e:
+            # Bredt med vilje: hentningen sker nu gennem Playwright, som
+            # kaster sine egne fejltyper (TimeoutError, Error). Blev der kun
+            # fanget requests-fejl, ville én utilgængelig etape vælte hele
+            # kørslen i stedet for at springe den over.
             print(f"    [HENT FEJL] {type(e).__name__}: {e}")
             failed += 1
             continue
