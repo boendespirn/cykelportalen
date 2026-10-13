@@ -40,6 +40,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import quote
 
 import requests
 from dotenv import load_dotenv
@@ -94,11 +95,22 @@ def hent(sti: str) -> list:
     return r.json()
 
 
+def _url_tid(t: datetime) -> str:
+    """Tidsstempel klar til en URL.
+
+    `isoformat()` slutter på '+00:00', og PLUS betyder MELLEMRUM i en
+    query-streng — tidsstemplet nåede derfor PostgREST som ugyldigt, og hele
+    opslaget svarede 400. Fejlen var usynlig lokalt, hvor køen var tom, og
+    dukkede først op i workerens log.
+    """
+    return quote(t.isoformat(), safe="")
+
+
 def koeede_jobs(fra: datetime, til: datetime) -> list[dict]:
     """Jobs, skemalæggeren selv har lagt i kø i perioden — grundlaget for, at
     den samme regel ikke kan lægge det samme job i kø to gange."""
     return hent(f"agent_runs?select=job_key,race_slug,stage_number,trigger,status,queued_at"
-                f"&queued_at=gte.{fra.isoformat()}&queued_at=lte.{til.isoformat()}"
+                f"&queued_at=gte.{_url_tid(fra)}&queued_at=lte.{_url_tid(til)}"
                 f"&trigger=like.skema:*&order=queued_at.desc&limit=1000")
 
 
