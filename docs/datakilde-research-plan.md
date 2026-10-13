@@ -1,7 +1,7 @@
 # Datakilde-research — plan
 
 **Status:** forslag, afventer ejerens go. Skrevet 2026-10-14.
-**Issue:** DATA-006 (ny). Beslægtet: DATA-003 (udækkede løb), OPS-010 (automatisering).
+**Issue:** DATA-010 (ny). Beslægtet: DATA-003 (udækkede løb), OPS-010 (automatisering).
 
 Målet er en worker, der **selv opdager, hvilke løb der mangler hvilke data, finder kilderne, verificerer dem og husker både held og uheld** — så et nyt løb kan tilføjes med en linje, og dataene kommer af sig selv.
 
