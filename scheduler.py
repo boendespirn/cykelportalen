@@ -44,6 +44,8 @@ from datetime import date, datetime, timedelta, timezone
 import requests
 from dotenv import load_dotenv
 
+import notify
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -273,6 +275,52 @@ def koer_en_gang(tør: bool) -> int:
     return lagt
 
 
+DIGEST_TIME_UTC = 6          # kl. 07/08 dansk tid
+_sidste_digest: date | None = None
+
+
+def dagligt_sammendrag() -> None:
+    """Én besked om morgenen: hvad kørte i går, hvad fejlede, hvad mangler.
+
+    Det er dét, der ville have fanget Vuelta-hullet samme dag i stedet for en
+    måned senere. Fejlede kørsler melder sig selv med det samme (runner.py);
+    sammendraget fanger den anden slags — dét, der ALDRIG kørte.
+    """
+    global _sidste_digest
+    i_dag = nu().date()
+    if _sidste_digest == i_dag or nu().hour != DIGEST_TIME_UTC:
+        return
+    _sidste_digest = i_dag
+
+    i_gaar = i_dag - timedelta(days=1)
+    koersler = hent(f"agent_runs?select=job_key,race_slug,status,exit_code"
+                    f"&queued_at=gte.{i_gaar.isoformat()}&limit=500")
+    fejlede = [k for k in koersler if k.get("status") == "failed"]
+
+    # Kørte etaper uden resultat — det hul, ingen opdager af sig selv.
+    mangler: list[str] = []
+    for r in hent(f"races?select=id,slug&end_date=gte.{(i_dag - timedelta(days=4)).isoformat()}"
+                  f"&start_date=lte.{i_dag.isoformat()}&limit=50"):
+        med_resultat = {x["stage_id"] for x in
+                        hent(f"results?race_id=eq.{r['id']}&select=stage_id&limit=1000")}
+        for st in hent(f"stages?race_id=eq.{r['id']}&select=id,stage_number,date,data_status"
+                       f"&date=lte.{i_gaar.isoformat()}&order=stage_number&limit=50"):
+            if st.get("data_status") == "cancelled" or st["id"] in med_resultat:
+                continue
+            mangler.append(f"{r['slug']} E{st['stage_number']} ({st['date']})")
+
+    linjer = [f"📋 Klassementet — {i_dag.isoformat()}",
+              f"{len(koersler)} kørsler i går, {len(fejlede)} fejlede"]
+    if fejlede:
+        linjer += [f"  ❌ {k['job_key']} · {k.get('race_slug') or '—'}" for k in fejlede[:8]]
+    if mangler:
+        linjer.append(f"Mangler resultat ({len(mangler)}):")
+        linjer += [f"  • {m}" for m in mangler[:8]]
+    if not fejlede and not mangler:
+        linjer.append("Ingen fejl, ingen huller.")
+    notify.send("\n".join(linjer))
+
+
 def vis_plan(dage: int) -> None:
     tid = nu()
     udloesere = planlaeg(tid, tid + timedelta(days=dage))
@@ -311,6 +359,7 @@ if __name__ == "__main__":
             print(f"\n[{nu():%Y-%m-%d %H:%M} UTC]")
             try:
                 koer_en_gang(args.tør)
+                dagligt_sammendrag()
             except Exception as e:
                 print(f"  [FEJL] {type(e).__name__}: {e}")
             time.sleep(TJEK_INTERVAL)

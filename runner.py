@@ -67,6 +67,7 @@ import requests
 from dotenv import load_dotenv
 
 import agent_catalog
+import notify
 import run_validator
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -441,6 +442,20 @@ def run_one(run: dict) -> None:
 
     finish_job(run["id"], exit_code, output, verdict, note)
     log(f"[faerdig] {job_key} -> exit {exit_code}" + (f" - {verdict}: {note}" if verdict else ""))
+
+    # Besked ved fejl — ikke ved held. Da runneren flyttede i skyen, forsvandt
+    # den måde, fejl faktisk blev opdaget på: at ejeren så dem i vinduet.
+    # Kun fejlede kørsler og negative domme sendes; en kanal, der bipper ved
+    # hvert normalt job, holder man op med at læse.
+    if exit_code != 0 or verdict == "failed":
+        hale = "\n".join(output.strip().splitlines()[-6:])
+        etape = f" E{stage}" if stage else ""
+        notify.send(
+            f"❌ {job_key} fejlede\n"
+            f"{race_slug or 'uden løb'}{etape} · exit {exit_code}\n"
+            + (f"{verdict}: {note}\n" if verdict else "")
+            + (f"\n{hale}" if hale else "")
+        )
 
 
 # ── Hoved ─────────────────────────────────────────────────────────────────────
