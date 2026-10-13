@@ -203,6 +203,9 @@ def digitize_stage_profile(
         report["error"] = f"ingen ankre for etape {stage_number}"
         return None, report
 
+    if cfg.get("style") == "edgecycling":
+        return _digitize_edgecycling(cfg, st, report, n_samples, verbose)
+
     url = cfg["source_url_pattern"].format(stage=stage_number)
     report["source_url"] = url
     im = _fetch_image(url)
@@ -369,3 +372,245 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ── stil: "edgecycling" (Tour of Guangxi m.fl.) ───────────────────────────────
+# Arrangoerens profilbillede er RODT fyld paa HVID bund med en rigtig, lineaer
+# y-akse. Det giver en mere direkte kalibrering end Pologne-stilens spredte
+# ankre: vi laeser aksen i stedet for at udlede den. Tre ting er ikke-aabenlyse
+# og kostede hver en fejlaflaesning, foer de blev haandteret:
+#
+#  1. Den NEDERSTE y-tick er komprimeret paa alle etaper ("0 M" ligger kun ét
+#     interval under naeste vaerdi, selv om der er 100-200 m imellem). Tages den
+#     med i kalibreringen, skraenes hele skalaen. Den droppes automatisk.
+#  2. km 0 ligger IKKE ved plotfeltets venstrekant. Der tegnes 1,8-7,1 km
+#     neutral start foer km 0 — bekraeftet mod 2024-GPX'ens 6,2 km neutralzone
+#     paa etape 6. Derfor kalibreres x paa markoerlinjerne, ikke paa fyldet.
+#  3. I de yderste kolonner mangler bundslaben, og sporingen vandrer da helt op
+#     og rammer maalflagets ikon (806 m i stedet for 574 m). Derfor kraeves det,
+#     at fyldet haenger sammen med bundlinjen.
+
+
+def _edge_is_fill(px) -> bool:
+    """Roedt fyld i alle nuancer: hovedfyld, fremhaevede klatrebaand og det
+    blege pre-start-felt. Ikonerne er gule/blaa og fanges ikke."""
+    r, g, b = px
+    return r > 80 and r - g > 45 and r - b > 45 and abs(g - b) < 50
+
+
+def _edge_is_dark(px) -> bool:
+    r, g, b = px
+    return r < 110 and g < 95 and b < 95
+
+
+def _lsq(pts):
+    n = len(pts)
+    sx = sum(a for a, _ in pts)
+    sy = sum(b for _, b in pts)
+    sxx = sum(a * a for a, _ in pts)
+    sxy = sum(a * b for a, b in pts)
+    den = n * sxx - sx * sx
+    if den == 0:
+        raise ValueError("degenereret kalibrering")
+    m = (n * sxy - sx * sy) / den
+    return m, (sy - m * sx) / n
+
+
+def _edge_y_calibration(y_ticks):
+    """Mindste kvadrater paa aksens egne ticks, efter at den komprimerede
+    bundtick er droppet."""
+    t = [(float(y), float(m)) for y, m in y_ticks]
+    if len(t) >= 4:
+        sp = [(t[i + 1][0] - t[i][0]) / (t[i][1] - t[i + 1][1]) for i in range(len(t) - 1)]
+        avg = sum(sp[:-1]) / len(sp[:-1])
+        if abs(sp[-1] - avg) > 0.25 * avg:
+            t = t[:-1]
+    a, b = _lsq(t)
+    return a, b, t
+
+
+def _edge_x_calibration(im, px, base, x_labels, total_km):
+    """Genfinder markoerlinjerne og fitter km -> pixel. Maalflaget taelles med
+    paa nogle etaper og ikke paa andre, saa flere pakninger proeves, og den med
+    mindst residual vinder."""
+    w, h = im.size
+    axis = min(x for x in range(60, 400)
+               if sum(1 for y in range(150, base) if _edge_is_dark(px[x, y])) > (base - 150) * 0.6)
+    right = max(x for x in range(axis, w)
+                for y in range(150, base) if _edge_is_fill(px[x, y]))
+    prof = {x: sum(1 for y in range(150, base) if _edge_is_dark(px[x, y]))
+            for x in range(axis + 3, right - 2)}
+    if not prof:
+        return None
+    mx = max(prof.values())
+    labsets = [list(x_labels), list(x_labels) + [total_km],
+               [0.0] + list(x_labels), [0.0] + list(x_labels) + [total_km]]
+    best = None
+    for thr in (0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.12, 0.10):
+        cols = sorted(x for x, c in prof.items() if c > mx * thr)
+        groups, cur = [], []
+        for x in cols:
+            if cur and x - cur[-1] > 6:
+                groups.append(cur)
+                cur = []
+            cur.append(x)
+        if cur:
+            groups.append(cur)
+        cen = [sum(g) / len(g) for g in groups]
+        for labs in labsets:
+            if len(cen) != len(labs):
+                continue
+            try:
+                a, b = _lsq(list(zip(labs, cen)))
+            except ValueError:
+                continue
+            if a <= 0:
+                continue
+            res = max(abs(c - (a * k + b)) for k, c in zip(labs, cen))
+            if best is None or res < best[0]:
+                best = (res, a, b, len(cen))
+    return best
+
+
+def _edge_despike(d, win=9, max_jump=8.0):
+    xs = sorted(d)
+    out = dict(d)
+    for i, x in enumerate(xs):
+        lo = max(0, i - win // 2)
+        hi = min(len(xs), i + win // 2 + 1)
+        med = sorted(d[xs[j]] for j in range(lo, hi))[(hi - lo) // 2]
+        if abs(d[x] - med) > max_jump:
+            out[x] = med
+    return out
+
+
+def _digitize_edgecycling(cfg, st, report, n_samples, verbose):
+    total_km = float(st["total_km"])
+    url = st["source_url"]
+    report["source_url"] = url
+    im = _fetch_image(url)
+    px = im.load()
+    w, h = im.size
+
+    base = max(y for y in range(150, h)
+               if sum(1 for x in range(200, w - 50) if _edge_is_fill(px[x, y])) > w * 0.5)
+    ay, by, used = _edge_y_calibration(st["y_ticks"])
+    report["m_per_px"] = abs(ay)
+    report["n_calibration_anchors"] = len(used)
+
+    xcal = _edge_x_calibration(im, px, base, st["x_labels"], total_km)
+    if not xcal:
+        report["error"] = "x-aksens markoerlinjer kunne ikke genfindes"
+        if verbose:
+            _print_report(report)
+        return None, report
+    res_px, a, b, n_markers = xcal
+    report["x_residual_px"] = res_px
+    report["x_residual_km"] = res_px / a
+    if res_px / a > 1.5:
+        report["error"] = (f"km-kalibreringen afviger {res_px / a:.2f} km — "
+                           "markoerlinjer og km-etiketter passer ikke sammen")
+        if verbose:
+            _print_report(report)
+        return None, report
+
+    # Terraenet kan ikke ligge over oeverste tick + ét interval.
+    y_top = min(y for y, _ in used) - abs(used[0][0] - used[1][0])
+    surface = {}
+    x0, x1 = int(round(b)), int(round(a * total_km + b))
+    for x in range(max(x0, 0), min(x1, w - 1) + 1):
+        if not any(_edge_is_fill(px[x, y]) for y in range(base - 4, base)):
+            continue                                  # fyldet skal naa bundlinjen
+        y, gap = base - 1, 0
+        while y > y_top:
+            if _edge_is_fill(px[x, y]):
+                gap = 0
+            else:
+                gap += 1
+                if gap > 2:
+                    break
+            y -= 1
+        top = y + gap + 1
+        if top >= base - 2 or top <= y_top + 1:
+            continue
+        surface[x] = top
+    span = x1 - x0 + 1
+    if len(surface) < span * 0.9:
+        report["error"] = f"kun {len(surface)} af {span} kolonner kunne spores"
+        if verbose:
+            _print_report(report)
+        return None, report
+
+    elev = _edge_despike({x: ay * y + by for x, y in surface.items()})
+    xs = sorted(elev)
+    resampled = []
+    for i in range(n_samples):
+        km = total_km * i / (n_samples - 1)
+        xq = a * km + b
+        if xq <= xs[0]:
+            resampled.append((km, elev[xs[0]]))
+            continue
+        if xq >= xs[-1]:
+            resampled.append((km, elev[xs[-1]]))
+            continue
+        j = 0
+        while j < len(xs) - 1 and xs[j + 1] < xq:
+            j += 1
+        p, q = xs[j], xs[j + 1]
+        f = 0.0 if q == p else (xq - p) / (q - p)
+        resampled.append((km, elev[p] + (elev[q] - elev[p]) * f))
+
+    # Validering 1: samlet hoejdemeter mod arrangoerens eget tal. Et billede paa
+    # ~13 px/km kan ikke oploese alle smaaboelger, saa vores sum ligger
+    # systematisk UNDER det officielle (maalt -12% til -34%). Baandet fanger
+    # derfor grove skalafejl, ikke den forventede underregning.
+    gain = sum(max(0.0, resampled[i][1] - resampled[i - 1][1])
+               for i in range(1, len(resampled)))
+    official = float(st.get("official_gain_m") or 0)
+    report["gain_m"] = gain
+    report["official_gain_m"] = official
+    if official:
+        rel = (gain - official) / official
+        report["gain_rel"] = rel
+        if not (-0.50 <= rel <= 0.30):
+            report["error"] = (f"hoejdemeter {gain:.0f} afviger {rel * 100:+.0f}% fra "
+                               f"officielle {official:.0f} — kurven kan ikke verificeres")
+            if verbose:
+                _print_report(report)
+            return None, report
+
+    # Validering 2: hver kendt stigning skal kunne genfindes i kurven med
+    # nogenlunde den hoejdegevinst, arrangoeren selv angiver.
+    devs = []
+    for c in st.get("climbs", []):
+        summit = float(c["summit_km"])
+        length = float(c["length_km"])
+        want = length * float(c["avg_gradient"]) * 10.0
+        got = _interp(resampled, summit) - _interp(resampled, max(0.0, summit - length))
+        devs.append((summit, want, got, got - want))
+    report["climb_checks"] = devs
+    if devs:
+        worst = max(abs(d) for *_, d in devs)
+        report["max_climb_deviation_m"] = worst
+        if worst > 120:
+            report["error"] = (f"stigningsgevinst afviger op til {worst:.0f} m fra "
+                               "arrangoerens egne tal")
+            if verbose:
+                _print_report(report)
+            return None, report
+
+    report["points"] = len(resampled)
+    report["max_deviation_m"] = report.get("max_climb_deviation_m", 0.0)
+    report["mean_deviation_m"] = (sum(abs(d) for *_, d in devs) / len(devs)) if devs else 0.0
+    if verbose:
+        print(f"\n=== etape {report['stage']} — {url}")
+        print(f"    y-akse: {len(used)} ticks ({abs(ay):.3f} m/px); "
+              f"x-akse: {n_markers} markoerer, residual {res_px / a:.2f} km")
+        if official:
+            print(f"    hoejdemeter {gain:.0f} m mod officielle {official:.0f} m "
+                  f"({(gain - official) / official * 100:+.0f}%)")
+        for summit, want, got, d in devs:
+            print(f"    stigning km {summit:>6.1f}: officiel gevinst {want:>4.0f} m | "
+                  f"aflaest {got:>4.0f} m | afvig {d:+4.0f} m")
+        print(f"    OK {len(resampled)} punkter udtrukket")
+    return resampled, report
