@@ -123,7 +123,8 @@ Overblik over hvad der er kørt, hvor gammelt det er, hvor fuldstændigt et løb
 ## Løbsguider og automatisering
 
 - **`docs/loebsguides/`** — én fil pr. løb: hvilket PCS-slug kilderne kender det under, hvilke kilder der faktisk leverede data i 2026, hvad der manglede, og hvornår hvert job skal køre. [`README.md`](docs/loebsguides/README.md) rummer metoden, kildematrixen og de fem fælder, der går igen. Start dér, når et løb skal forberedes.
-- **`docs/automatisering-plan.md`** — planen for at flytte `runner.py` i skyen og give den en skemalægger, så jobs udløses af løbskalenderen i stedet for af en knap. Ikke bygget endnu.
+- **[`docs/automatisering.md`](docs/automatisering.md)** — **driften som den kører siden 2026-10-13:** hvilke services kører hvor, hvilke jobs udløses hvornår (7 dage / 48 t / 24 t / 6 t / start før løbet, resultater efter mål og indtil de står), hvordan beskederne virker, og hvad der stadig ikke er automatiseret. Start her, når noget ikke har kørt.
+- **`docs/automatisering-plan.md`** — planen, der lå til grund. Beholdt som baggrund for beslutningerne.
 
 ---
 
