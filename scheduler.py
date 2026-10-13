@@ -339,8 +339,13 @@ def vis_plan(dage: int) -> None:
 
 
 if __name__ == "__main__":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    # line_buffering: uden den samles udskriften i en buffer, når stdout er en
+    # pipe (som i containeren), og skemalæggeren ser død ud i Railways log,
+    # selv om den kører fint. runner.py flusher hver linje af samme grund.
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
+                                  errors="replace", line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8",
+                                  errors="replace", line_buffering=True)
 
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", dest="tør", action="store_true",
