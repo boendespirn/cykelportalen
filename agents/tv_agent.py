@@ -10,6 +10,7 @@ Kør: python tv_agent.py
 
 import os
 import re
+from difflib import SequenceMatcher
 import time
 import argparse
 import requests
@@ -53,7 +54,9 @@ LOGO_MAP = {
 
 # Nøgleord i løbstitel → DB slug (opdater ved ny sæson)
 RACE_KEYWORDS = {
-    "giro":        "giro-d-italia-2026",
+    # "giro" alene fangede ogsaa Giro del Veneto og sendte den til Giro
+    # d'Italia. "italia" er entydigt.
+    "italia":      "giro-d-italia-2026",
     "tour de fra": "tour-de-france-2026",
     "vuelta":      "la-vuelta-ciclista-a-espana-2026",
     "flandern":    "ronde-van-vlaanderen-2026",
@@ -102,7 +105,12 @@ EXTRACT_JS = """() => {
         container.querySelectorAll('tbody').forEach(tbody => {
             const timeEl = tbody.querySelector('.tv-from b');
             const titleEl = tbody.querySelector('.race-title');
-            if (!timeEl || !titleEl) return;
+            // .race-title findes KUN, naar sitet selv har koblet udsendelsen
+            // til sin egen loebsdatabase. Gjorde den ikke det, stod tv-kanalens
+            // egen titel i ren tekst - og raekken blev kasseret. Tour of Guangxi
+            // sendtes paa HBO Max, men stod som "Tour of Guangxi | 2. etape"
+            // uden .race-title (fundet 2026-10-14).
+            if (!timeEl) return;
             const logos = [...tbody.querySelectorAll('.tv-logo')].map(el => {
                 const m = el.style.backgroundImage.match(/tv-logos\\/([^"')\\s]+)/);
                 return m ? m[1] : null;
@@ -110,7 +118,10 @@ EXTRACT_JS = """() => {
             results.push({
                 date: dateStr,
                 time: timeEl.innerText.trim(),
-                race: titleEl.innerText.replace(/\\s+/g, ' ').trim(),
+                race: (titleEl
+                        ? titleEl.innerText
+                        : (tbody.innerText || '').replace(timeEl.innerText.trim(), '')
+                      ).replace(/\\s+/g, " ").trim(),
                 channels: logos.map(l => LOGO_MAP[l] || l)
             });
         });
@@ -179,12 +190,35 @@ def parse_stage_number(race_str: str, oneday: bool = False) -> int | None:
     return 1 if oneday else None
 
 
-def match_race_slug(race_str: str, race_slugs: set[str]) -> str | None:
+def match_race_slug(race_str: str, race_slugs: set[str],
+                    race_names: dict[str, str] | None = None) -> str | None:
+    """RACE_KEYWORDS foerst, derefter et LOEST navnematch.
+
+    Noeglerne kan ikke undvaeres: de oversaetter de danske tv-titler
+    ("flandern", "schweiz"), som intet navnematch vil kunne gaette. Men de er
+    haandholdte, og et loeb uden en noegle var dermed usynligt for agenten -
+    Veneto Classic sendes paa HBO Max uden at staa paa listen. Fallbacken er
+    rent additiv: alt der matchede foer, matcher stadig praecis det samme.
+    """
     low = race_str.lower()
     for keyword, slug in RACE_KEYWORDS.items():
         if keyword in low:
             return slug if (slug and slug in race_slugs) else None
-    return None
+
+    if not race_names:
+        return None
+    # Etape-suffikset hoerer til programtitlen, ikke til loebsnavnet.
+    clean = re.sub(r"\[[^]]*\]", " ", low)
+    clean = re.split(r"[|\-]\s*(?:\d+\.\s*etape|prolog)", clean)[0]
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if len(clean) < 5:
+        return None
+    best, best_ratio = None, 0.0
+    for slug, name in race_names.items():
+        ratio = SequenceMatcher(None, clean, (name or "").lower()).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = slug, ratio
+    return best if best_ratio >= 0.80 else None
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
@@ -244,10 +278,11 @@ def scrape(dry_run: bool) -> None:
     # match_race_slug(). Vi henter ogsaa race_type, fordi etapenummeret for et
     # endagsloeb ikke staar i programtitlen og maa udledes af loebstypen.
     res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/races?select=slug,race_type&limit=1000", headers=AUTH
+        f"{SUPABASE_URL}/rest/v1/races?select=slug,name,race_type&limit=1000", headers=AUTH
     )
     raekker = res.json() if res.ok else []
     race_slugs = {r["slug"] for r in raekker}
+    race_names = {r["slug"]: r.get("name") or "" for r in raekker}
     # Begge stavemaader findes i kolonnen ("oneday" fra 2026, "one_day" foer).
     oneday_slugs = {r["slug"] for r in raekker
                     if (r.get("race_type") or "").startswith("one")}
@@ -287,7 +322,7 @@ def scrape(dry_run: bool) -> None:
 
         # Loebet foerst: uden at vide HVILKET loeb det er, kan vi ikke afgoere,
         # om en manglende "N. etape" betyder "endagsloeb" eller "uforstaaelig".
-        slug = match_race_slug(prog["race"], race_slugs)
+        slug = match_race_slug(prog["race"], race_slugs, race_names)
         if not slug:
             spring_over("loebet kendes ikke (se RACE_KEYWORDS)", prog)
             continue
