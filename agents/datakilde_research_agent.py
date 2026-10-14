@@ -210,9 +210,15 @@ def current_status(race: dict, stage_ids: list[str],
 
 # ── Spaerretid ───────────────────────────────────────────────────────────────
 
-def is_due(row: dict, race: dict) -> tuple[bool, str]:
+def is_due(row: dict, race: dict, force: bool = False) -> tuple[bool, str]:
     """Ejerens regler: 1/md. normalt, 1/uge under en maaned til start,
-    1/dag den sidste uge."""
+    1/dag den sidste uge.
+
+    `force` springer KUN kadencen over — altsaa "er der gaaet laenge nok siden
+    sidste forsoeg". De to oevrige regler staar fast: en raekke, der ikke er et
+    hul, og en tidsbunden type paa et koert loeb, springes stadig over. Flaget
+    er til, naar ejeren beder om en soegning NU og ikke vil vente paa, at koen
+    naar frem af sig selv."""
     if row["status"] != STATUS_MISSING:
         return False, "ikke et hul"
 
@@ -230,6 +236,9 @@ def is_due(row: dict, race: dict) -> tuple[bool, str]:
     if (days_to_start is not None and days_to_start < -14
             and row["data_type"] in ("streaming", "live_text")):
         return False, "loebet er koert (tidsbunden type)"
+
+    if force:
+        return True, "tvunget (--force)"
 
     last = row.get("last_attempt_at")
     if not last:
@@ -479,6 +488,30 @@ def probe_streaming(race: dict) -> dict:
             "tried": [SOURCE_LABEL]}
 
 
+def pcs_side_mangler(res) -> bool:
+    """PCS svarer 200 OK paa et loeb, der ikke findes, og skriver "Page not
+    found" i selve siden. Maalt 2026-10-14: 23 af vores 24 cross-slugs gav
+    HTTP 200 med praecis 12476 bytes og den tekst. Et tjek paa statuskode og
+    laengde kan altsaa ikke staa alene — uden dette ville hver af dem blive
+    gemt som en gyldig PCS-kilde."""
+    if res is None:
+        return True
+    head = res.text[:4000].lower()
+    return "page not found" in head or "<title>404" in head
+
+
+def pcs_url_for_cross(slug: str) -> str:
+    """PCS' cross-loeb ligger paa /race/<slug> med aarstallet INDE i slug'en —
+    ikke /race/<slug>/<aar>, som landevejsloebene bruger (PCS_URL_MOENSTER i
+    pcs_source.py). Og slug'en er den samme som vores egen: PCS kalder
+    24/10-loebet "hg-cross-heerderstrand-2026", praecis som vi goer.
+
+    PCS opretter foerst siden taet paa loebsdagen — 2026-10-14 fandtes kun ét
+    af vores 24. Derfor er dette en probe, der skal koere igen og igen, ikke
+    en engangsudfyldning."""
+    return f"https://www.procyclingstats.com/race/{slug}"
+
+
 def probe(row: dict, race: dict) -> dict:
     """Trin 1-3 + 5. Skriver intet. `found` saettes KUN, naar en URL er hentet
     og kontrolleret."""
@@ -492,9 +525,22 @@ def probe(row: dict, race: dict) -> dict:
     if dt in ("results", "stage_info", "startlist") and race.get("pcs_url"):
         res = fetch(race["pcs_url"])
         tried.append(race["pcs_url"])
-        if res is not None and res.status_code == 200 and len(res.text) > 2000:
+        if (res is not None and res.status_code == 200
+                and len(res.text) > 2000 and not pcs_side_mangler(res)):
             return {"found": True, "url": race["pcs_url"], "source_name": "procyclingstats",
                     "verification": {"http": 200, "bytes": len(res.text)}, "tried": tried}
+
+    # Trin 1b: cykelcross har intet pcs_url, men PCS bruger vores egen slug.
+    if dt in ("results", "stage_info", "startlist") and race.get("race_type") == "cyclocross":
+        url = pcs_url_for_cross(race["slug"])
+        res = fetch(url)
+        tried.append(url)
+        if (res is not None and res.status_code == 200
+                and len(res.text) > 2000 and not pcs_side_mangler(res)):
+            return {"found": True, "url": url, "source_name": "procyclingstats",
+                    "verification": {"http": 200, "bytes": len(res.text),
+                                     "moenster": "cross: /race/<slug>"},
+                    "tried": tried}
 
     # Trin 2-3: arrangoerens eget site.
     base = race.get("source_url") or ""
@@ -583,6 +629,11 @@ def verify_url(url: str, race: dict) -> dict | None:
         return None
     res = fetch(url)
     if res is None or res.status_code != 200 or len(res.text) < 400:
+        return None
+    # PCS svarer 200 OK med "Page not found" paa et loeb, der ikke findes.
+    # Navneord-tjekket nedenfor fanger det som regel, men ikke altid: en side,
+    # hvis navigation tilfaeldigvis rummer loebets ord, ville slippe igennem.
+    if pcs_side_mangler(res):
         return None
     # To fejl boede i den foerste udgave, og begge lod en forkert side slippe
     # igennem som Veneto Classics streamingkilde (fanget 2026-10-14):
@@ -674,7 +725,7 @@ def llm_calls_this_month() -> int:
 
 
 def cmd_run(season: int | None, write: bool, use_llm: bool,
-            slug: str | None = None) -> None:
+            slug: str | None = None, force: bool = False) -> None:
     races = {r["id"]: r for r in races_in_scope(season, slug)}
     rows = [r for r in sb("GET", f"race_data_sources?status=eq.{STATUS_MISSING}"
                                  "&is_backup=eq.false&select=*"
@@ -700,7 +751,7 @@ def cmd_run(season: int | None, write: bool, use_llm: bool,
             print("\n(loebs-loft naaet)")
             break
         race = races[row["race_id"]]
-        due, why = is_due(row, race)
+        due, why = is_due(row, race, force)
         if not due:
             continue
         seen.add(row["race_id"])
@@ -765,6 +816,8 @@ def main() -> None:
     ap.add_argument("--season", type=int, default=None)
     ap.add_argument("--race", default=None, help="kun dette DB-slug")
     ap.add_argument("--write", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="se bort fra spaerretiden og proev hullerne nu")
     args = ap.parse_args()
 
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -773,7 +826,7 @@ def main() -> None:
     if args.seed:
         cmd_seed(args.season, args.write, args.race)
     elif args.run:
-        cmd_run(args.season, args.write, args.use_llm, args.race)
+        cmd_run(args.season, args.write, args.use_llm, args.race, args.force)
     elif args.status:
         cmd_status(args.season, args.race)
     else:
