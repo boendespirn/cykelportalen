@@ -38,6 +38,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import requests
+from urllib.parse import quote
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -109,9 +110,14 @@ def sb(method: str, path: str, _tries: int = 4, **kw):
     return []
 
 
-def races_in_scope(season: int | None) -> list[dict]:
-    flt = (f"&start_date=gte.{season}-01-01&start_date=lte.{season}-12-31"
-           if season else "")
+def races_in_scope(season: int | None, slug: str | None = None) -> list[dict]:
+    """--race er til lige efter, at et loeb er tilfoejet: saet workeren paa
+    netop det, i stedet for at vente paa at koeen naar frem til det."""
+    if slug:
+        flt = f"&slug=eq.{slug}"
+    else:
+        flt = (f"&start_date=gte.{season}-01-01&start_date=lte.{season}-12-31"
+               if season else "")
     return sb("GET", "races?select=id,slug,name,race_type,start_date,pcs_url,source_url"
                      f"&order=start_date{flt}")
 
@@ -276,6 +282,10 @@ def find_api_host(html: str, root: str) -> list[str]:
 ORG_PATHS = {
     "route_gpx": ("/route", "/parcours", "/stages", "/percorso"),
     "stage_info": ("/route", "/stages", "/etapes", "/percorso"),
+    # Stigningsprofilerne ligger normalt paa rutesiden, ikke paa en egen side —
+    # uden denne linje kunne proben pr. definition aldrig finde dem, og hvert
+    # loeb ville koste et LLM-kald for ingenting (fundet paa Veneto Classic).
+    "climbs": ("/percorso", "/route", "/climbs", "/salite", "/stages"),
     "startlist": ("/startlist", "/riders", "/start-list"),
     "teams": ("/teams", "/squadre", "/equipes"),
     "streaming": ("/tv", "/live", "/broadcast"),
@@ -385,17 +395,37 @@ def verify_url(url: str, race: dict) -> dict | None:
     res = fetch(url)
     if res is None or res.status_code != 200 or len(res.text) < 400:
         return None
-    body = res.text.lower()
+    # To fejl boede i den foerste udgave, og begge lod en forkert side slippe
+    # igennem som Veneto Classics streamingkilde (fanget 2026-10-14):
+    #  1. der blev matchet mod RAA HTML, saa WordPress-klassen
+    #     "classic-theme-styles" taltes som et traef paa ordet "classic";
+    #  2. der blev matchet paa substring, saa "classica" ogsaa gav traef.
+    # Nu matches der paa ordgraenser i den SYNLIGE tekst.
+    visible = re.sub(r"<(?:script|style)[^>]*>.*?</(?:script|style)>", " ",
+                     res.text, flags=re.S | re.I)
+    visible = re.sub(r"<[^>]+>", " ", visible).lower()
+    # Hele ord, ikke substrings: en ordmaengde i stedet for et regex pr. ord
+    # (og dermed heller ingen escape-faelder).
+    tokens = set(re.split(r"[^a-z0-9]+", visible))
     words = [w for w in re.split(r"[^a-zA-Z]+", race["name"].lower()) if len(w) > 3]
+    hits = sum(1 for w in words if w in tokens)
+    ratio = hits / len(words) if words else 0.0
+    year = (race.get("start_date") or "")[:4]
+    # Mindst 3/4 af navneordene OG aarstallet. Den foerste udgave kraevede kun
+    # ÉT navneord, og Claudes forslag til Veneto Classics streaming var derfor
+    # en side om Giro del Veneto — samme arrangoer, andet loeb, og ordet
+    # "veneto" alene var nok til at slippe igennem (fanget 2026-10-14).
     return {"http": res.status_code, "bytes": len(res.text),
-            "navneord_fundet": sum(1 for w in words if w in body),
-            "aar_paa_siden": (race.get("start_date") or "")[:4] in res.text}
+            "navneord_fundet": hits, "navneord_i_alt": len(words),
+            "andel": round(ratio, 2),
+            "aar_paa_siden": year in visible,
+            "godkendt": ratio >= 0.75 and year in res.text}
 
 
 # ── Kommandoer ───────────────────────────────────────────────────────────────
 
-def cmd_seed(season: int | None, write: bool) -> None:
-    races = races_in_scope(season)
+def cmd_seed(season: int | None, write: bool, slug: str | None = None) -> None:
+    races = races_in_scope(season, slug)
     print(f"{len(races)} loeb i omfang\n")
     created = updated = 0
     for race in races:
@@ -428,8 +458,8 @@ def cmd_seed(season: int | None, write: bool) -> None:
     print(f"{'skrev' if write else 'ville skrive'}: {created} nye, {updated} opdaterede")
 
 
-def cmd_status(season: int | None) -> None:
-    races = {r["id"]: r for r in races_in_scope(season)}
+def cmd_status(season: int | None, slug: str | None = None) -> None:
+    races = {r["id"]: r for r in races_in_scope(season, slug)}
     rows = [r for r in sb("GET", "race_data_sources?is_backup=eq.false&select=*")
             if r["race_id"] in races]
     by_type: dict[str, dict[str, int]] = {}
@@ -448,12 +478,15 @@ def cmd_status(season: int | None) -> None:
 
 def llm_calls_this_month() -> int:
     start = now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    return len(sb("GET", "race_data_sources?select=id"
-                         f"&last_llm_attempt_at=gte.{start.isoformat()}"))
+    # "+00:00" skal kodes: et raat + i en query-streng betyder mellemrum, og
+    # PostgREST svarer 400 paa den dato.
+    stamp = quote(start.isoformat(), safe="")
+    return len(sb("GET", f"race_data_sources?select=id&last_llm_attempt_at=gte.{stamp}"))
 
 
-def cmd_run(season: int | None, write: bool, use_llm: bool) -> None:
-    races = {r["id"]: r for r in races_in_scope(season)}
+def cmd_run(season: int | None, write: bool, use_llm: bool,
+            slug: str | None = None) -> None:
+    races = {r["id"]: r for r in races_in_scope(season, slug)}
     rows = [r for r in sb("GET", f"race_data_sources?status=eq.{STATUS_MISSING}"
                                  "&is_backup=eq.false&select=*"
                                  "&order=last_attempt_at.asc.nullsfirst")
@@ -495,7 +528,7 @@ def cmd_run(season: int | None, write: bool, use_llm: bool) -> None:
             if s and s.get("url"):
                 ver = verify_url(s["url"], race)
                 result.setdefault("tried", []).append(s["url"])
-                if ver and ver["navneord_fundet"] > 0:
+                if ver and ver.get("godkendt"):
                     result = {"found": True, "url": s["url"],
                               "source_name": s.get("source_name") or "ukendt",
                               "verification": {**ver, "via": "claude"},
@@ -541,6 +574,7 @@ def main() -> None:
     ap.add_argument("--status", action="store_true", help="vis hvad der mangler")
     ap.add_argument("--use-llm", action="store_true", help="tillad Claude-trinnet (koster)")
     ap.add_argument("--season", type=int, default=None)
+    ap.add_argument("--race", default=None, help="kun dette DB-slug")
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
 
@@ -548,11 +582,11 @@ def main() -> None:
         sys.exit("✗ SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY mangler")
 
     if args.seed:
-        cmd_seed(args.season, args.write)
+        cmd_seed(args.season, args.write, args.race)
     elif args.run:
-        cmd_run(args.season, args.write, args.use_llm)
+        cmd_run(args.season, args.write, args.use_llm, args.race)
     elif args.status:
-        cmd_status(args.season)
+        cmd_status(args.season, args.race)
     else:
         ap.print_help()
 
