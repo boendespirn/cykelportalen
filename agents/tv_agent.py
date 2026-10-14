@@ -190,8 +190,34 @@ def parse_stage_number(race_str: str, oneday: bool = False) -> int | None:
     return 1 if oneday else None
 
 
+def rens_programtitel(low: str) -> str:
+    """Programtitlen reduceret til selve loebsnavnet.
+
+    Tv-titlen pakker navnet ind i tre lag, der alle skal vaek, foer et
+    navnematch kan ramme:
+      "Cyklecross: HG Cross Meulebeke - Berencross (tidl. Exact Cross) [M]"
+       ^disciplin                                   ^tidligere navn      ^koen
+
+    Disciplin-praefikset alene var nok til at vaelte hvert eneste cross-match:
+    maalt 2026-10-14 gav "cyklecross: superprestige diegem" ratio 0,769 mod
+    "Superprestige Diegem" - under taersklen paa 0,80 - mens den rensede titel
+    giver 1,000. Det var grunden til, at broadcast_schedule stod tom for alle
+    24 cross-loeb.
+    """
+    clean = re.sub(r"\[[^]]*\]", " ", low)
+    # Etape-suffikset hoerer til programtitlen, ikke til loebsnavnet.
+    clean = re.split(r"[|\-]\s*(?:\d+\.\s*etape|prolog)", clean)[0]
+    # Disciplin-praefiks: "Cyklecross:", "Cykling:", "BANE:".
+    clean = re.sub(r"^\s*[^\W\d_]+\s*:\s*", " ", clean)
+    # Tidligere navn i parentes: "(tidl. Exact Cross)".
+    clean = re.sub(r"\([^)]*\)", " ", clean)
+    return re.sub(r"\s+", " ", clean).strip()
+
+
 def match_race_slug(race_str: str, race_slugs: set[str],
-                    race_names: dict[str, str] | None = None) -> str | None:
+                    race_names: dict[str, str] | None = None,
+                    broadcast_date: date | None = None,
+                    race_dates: dict[str, tuple] | None = None) -> str | None:
     """RACE_KEYWORDS foerst, derefter et LOEST navnematch.
 
     Noeglerne kan ikke undvaeres: de oversaetter de danske tv-titler
@@ -199,6 +225,12 @@ def match_race_slug(race_str: str, race_slugs: set[str],
     haandholdte, og et loeb uden en noegle var dermed usynligt for agenten -
     Veneto Classic sendes paa HBO Max uden at staa paa listen. Fallbacken er
     rent additiv: alt der matchede foer, matcher stadig praecis det samme.
+
+    Navnematchet maa afgoeres paa DATO til sidst. Et loebsnavn er ikke unikt -
+    "Il Lombardia" staar i databasen for hver aargang - og uden datofiltret
+    vandt den foerste udgave i vilkaarlig raekkefoelge: maalt 2026-10-14 pegede
+    "Cykling: Il Lombardia [M]" paa il-lombardia-2022. Det er samme fejl som
+    79d5cf0 ("kunne skrive dem paa det forkerte loeb"), blot i fallbacken.
     """
     low = race_str.lower()
     for keyword, slug in RACE_KEYWORDS.items():
@@ -207,18 +239,43 @@ def match_race_slug(race_str: str, race_slugs: set[str],
 
     if not race_names:
         return None
-    # Etape-suffikset hoerer til programtitlen, ikke til loebsnavnet.
-    clean = re.sub(r"\[[^]]*\]", " ", low)
-    clean = re.split(r"[|\-]\s*(?:\d+\.\s*etape|prolog)", clean)[0]
-    clean = re.sub(r"\s+", " ", clean).strip()
+    clean = rens_programtitel(low)
     if len(clean) < 5:
         return None
-    best, best_ratio = None, 0.0
+
+    kandidater = []
     for slug, name in race_names.items():
         ratio = SequenceMatcher(None, clean, (name or "").lower()).ratio()
-        if ratio > best_ratio:
-            best, best_ratio = slug, ratio
-    return best if best_ratio >= 0.80 else None
+        if ratio >= 0.80:
+            kandidater.append((ratio, slug))
+    if not kandidater:
+        return None
+
+    def dage_fra(slug: str) -> int:
+        """Afstand i dage fra udsendelsen til loebets vindue."""
+        start, slut = (race_dates or {}).get(slug, (None, None))
+        if not (start and broadcast_date):
+            return 10 ** 6
+        s = date.fromisoformat(start)
+        e = date.fromisoformat(slut) if slut else s
+        if s <= broadcast_date <= e:
+            return 0
+        return min(abs((broadcast_date - s).days), abs((broadcast_date - e).days))
+
+    # Bedste navnematch, og blandt lige gode: det, der ligger taettest paa
+    # udsendelsesdatoen.
+    _, bedste = min(kandidater, key=lambda k: (dage_fra(k[1]), -k[0]))
+    # En udsendelse hoerer til et loeb, der koeres nu — ikke om en maaned.
+    # Vinduet skal vaere SMALT, fordi loeb i samme serie hedder naesten det
+    # samme: datakilde_research_agent havde 0,72 som eneste krav og udnaevnte
+    # derfor Meulebekes udsendelse 17/10 til dokumentation for Lokeren 21/11
+    # og Mol 17/12. Her er navnetaersklen 0,80, saa de to slap igennem — men
+    # kun fordi tallet laa der. Datoen er den haarde betingelse.
+    # En uge rummer baade etapeloebs-vinduet (dage_fra giver 0 inde i det) og
+    # et optakts- eller sammendragsprogram taet paa loebet. Uden datoer at gaa
+    # efter (dage_fra == 10**6) falder matchet vaek, frem for at gaette paa en
+    # tilfaeldig aargang.
+    return bedste if dage_fra(bedste) <= 7 else None
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
@@ -278,14 +335,23 @@ def scrape(dry_run: bool) -> None:
     # match_race_slug(). Vi henter ogsaa race_type, fordi etapenummeret for et
     # endagsloeb ikke staar i programtitlen og maa udledes af loebstypen.
     res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/races?select=slug,name,race_type&limit=1000", headers=AUTH
+        f"{SUPABASE_URL}/rest/v1/races?select=slug,name,race_type,start_date,end_date"
+        f"&limit=1000", headers=AUTH
     )
     raekker = res.json() if res.ok else []
     race_slugs = {r["slug"] for r in raekker}
     race_names = {r["slug"]: r.get("name") or "" for r in raekker}
-    # Begge stavemaader findes i kolonnen ("oneday" fra 2026, "one_day" foer).
+    # Datoerne afgoer, HVILKEN aargang af et loebsnavn en udsendelse hoerer til.
+    race_dates = {r["slug"]: (r.get("start_date"), r.get("end_date")) for r in raekker}
+    # Loeb paa EN dag, modelleret som etape 1. Begge stavemaader findes i
+    # kolonnen ("oneday" fra 2026, "one_day" foer), og cykelcross hoerer med:
+    # et cross-loeb har praecis en etape, og programtitlen ("Superprestige
+    # Diegem") rummer lige saa lidt et etapenummer som et endagsloebs. Uden
+    # cross her blev hvert cross-program kasseret med "intet etapenummer" —
+    # samme fejl som endagsloebene ramte 2026-10-06.
     oneday_slugs = {r["slug"] for r in raekker
-                    if (r.get("race_type") or "").startswith("one")}
+                    if (r.get("race_type") or "").startswith("one")
+                    or (r.get("race_type") or "") == "cyclocross"}
     race_id_cache: dict[str, str | None] = {}
 
     with sync_playwright() as p:
@@ -320,9 +386,18 @@ def scrape(dry_run: bool) -> None:
             spring_over("ulaeselig dato", prog)
             continue
 
+        # [K] er kvindeloeb. Ejeren har fravalgt dameloeb, saa de findes ikke i
+        # databasen (verificeret 2026-10-14: 0 raekker) — og uden dette filter
+        # ville "HG Cross Meulebeke [K]" fuzzy-matche HERRE-loebet med samme
+        # navn og skrive kvindernes starttid paa herresiden.
+        if re.search(r"\[\s*k\s*\]", prog["race"], re.IGNORECASE):
+            spring_over("kvindeloeb (findes ikke i databasen)", prog)
+            continue
+
         # Loebet foerst: uden at vide HVILKET loeb det er, kan vi ikke afgoere,
         # om en manglende "N. etape" betyder "endagsloeb" eller "uforstaaelig".
-        slug = match_race_slug(prog["race"], race_slugs, race_names)
+        slug = match_race_slug(prog["race"], race_slugs, race_names,
+                               broadcast_date=d, race_dates=race_dates)
         if not slug:
             spring_over("loebet kendes ikke (se RACE_KEYWORDS)", prog)
             continue
@@ -355,7 +430,11 @@ def scrape(dry_run: bool) -> None:
                 "is_live":        True,
                 "notes":          prog["race"],
             }
-            print(f"  [{date_str}] E{stage_num:02d} {prog['time']} {channel}")
+            # Slug'en med i loggen: "E01 13:42 HBO Max" fortalte ikke HVILKET
+            # loeb raekken landede paa, og et forkert match saa derfor praecis
+            # ud som et rigtigt (jf. 79d5cf0). Nu kan en dry-run laeses.
+            print(f"  [{date_str}] E{stage_num:02d} {prog['time']:>5} "
+                  f"{channel:<12} -> {slug}")
             if not dry_run:
                 if save_broadcast(entry):
                     saved += 1

@@ -121,8 +121,8 @@ def races_in_scope(season: int | None, slug: str | None = None) -> list[dict]:
     else:
         flt = (f"&start_date=gte.{season}-01-01&start_date=lte.{season}-12-31"
                if season else "")
-    return sb("GET", "races?select=id,slug,name,race_type,start_date,pcs_url,source_url"
-                     f"&order=start_date{flt}")
+    return sb("GET", "races?select=id,slug,name,race_type,start_date,end_date,"
+                     f"pcs_url,source_url&order=start_date{flt}")
 
 
 # ── Hvad HAR vi allerede? ────────────────────────────────────────────────────
@@ -424,9 +424,40 @@ def probe_streaming(race: dict) -> dict:
         return {"found": False, "tried": [SOURCE_LABEL],
                 "failure": "tv-oversigten kunne ikke hentes"}
     name = race["name"].lower()
+    # Rensningen genbruges fra tv_agent, saa de to agenter ikke kan naa
+    # modsatte svar paa det samme program. Den fjerner ogsaa disciplin-
+    # praefikset ("Cyklecross:") og parentes-tilfoejelser ("(tidl. Exact
+    # Cross)") — uden dem faldt hvert cross-loeb ud med navnematch 0,66 og
+    # blev meldt som "ikke paa dansk tv", selv om HBO Max sender det.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from tv_agent import parse_date, rens_programtitel
+
+    # DATOEN er den haarde betingelse, navnet kun den bloede. Loeb i samme
+    # serie hedder naesten det samme ("HG Cross Meulebeke - Berencross" mod
+    # "HG Cross Lokeren - Rapencross" gav 0,77), saa navnematch alene
+    # udnaevnte Meulebekes udsendelse 17/10 til dokumentation for Lokeren
+    # 21/11 og Mol 17/12. En udsendelse paa en anden dato end loebet kan
+    # ikke dokumentere loebet — uanset hvor ens navnene er.
+    start = race.get("start_date")
+    slut = race.get("end_date") or start
+
+    def paa_loebsdagen(prog) -> bool:
+        if not start:
+            return True
+        d = parse_date(str(prog.get("date") or ""))
+        return bool(d and start <= d.isoformat() <= slut)
+
     best, best_ratio = None, 0.0
     for prog in progs:
-        title = re.sub(r"\[[^]]*\]", " ", str(prog.get("race") or "")).strip().lower()
+        raa = str(prog.get("race") or "")
+        # [K] er kvindeloebet. Databasen rummer kun herreloeb, og de to
+        # programmer har samme navn — uden dette ville kvindernes kanal og
+        # klokkeslaet kunne ende som dokumentation paa herreloebet.
+        if re.search(r"\[\s*k\s*\]", raa, re.IGNORECASE):
+            continue
+        if not paa_loebsdagen(prog):
+            continue
+        title = rens_programtitel(raa.lower())
         if not title:
             continue
         ratio = SequenceMatcher(None, name, title).ratio()
