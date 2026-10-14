@@ -66,7 +66,20 @@ forsøges aldrig.
 
 | Tidspunkt | Hvad |
 |---|---|
+| **03:00 UTC dagligt** | `datakilde_research` — gennemgår løbene og leder efter de kilder, der mangler. Kun gratis probes; søgetrinnet (`datakilde_research_llm`) koster penge og startes manuelt |
+| **04:00 UTC dagligt** | `tv_tider` — hele sendeplanen hentes forfra |
 | **06:00 UTC dagligt** | Telegram-sammendrag: hvad kørte i går, hvad fejlede, hvilke kørte etaper mangler stadig resultat |
+
+De to workers deler opgaven om TV mellem sig: **`datakilde_research` finder
+kilden** (står løbet på den danske tv-oversigt, og med hvilken kanal?), og
+**`tv_tider` henter dataen** (kanal og klokkeslæt ind i `broadcast_schedule`).
+
+`tv_tider` kører dagligt *og* 24 timer før hvert løb. Det er ikke dobbeltarbejde:
+`tv_agent` scraper hele oversigten i én kørsel og kan ikke begrænses til ét løb,
+og kanalerne offentliggør 2-3 uger frem. Med kun 24-timers-reglen stod et løb med
+en forlængst kendt sendetid alligevel som "sendeplanen er ikke offentliggjort
+endnu" indtil dagen før. Den daglige kørsel fylder dem ud, så snart de findes;
+24-timers-reglen er sikkerhedsnettet for sene ændringer.
 
 ## 3. Beskeder
 

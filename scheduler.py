@@ -164,6 +164,14 @@ FOER_LOEB = [
 # om runneren (den tager ét job ad gangen).
 DAGLIGE_GLOBALE = [
     (3, "datakilde_research", "dagligt-0300"),
+    # tv_agent scraper HELE sendeplanen i én kørsel og kan ikke begrænses til
+    # ét løb. Derfor hører den også hjemme her, ikke kun 24 timer før hvert
+    # løb: kanalerne offentliggør 2-3 uger frem, og med kun "24t-tv"-reglen
+    # stod et løb med en kendt sendetid alligevel som "sendeplanen er ikke
+    # offentliggjort endnu" indtil dagen før. Det rammer cross hårdest — 24
+    # løb fra oktober til december, hvor sendetiden er dét, brugeren kommer
+    # efter. Reglen "24t-tv" beholdes som sikkerhedsnet tæt på løbet.
+    (4, "tv_tider", "dagligt-0400"),
 ]
 
 

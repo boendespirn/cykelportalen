@@ -1,7 +1,21 @@
 # Automatisering — plan for kørsel uden hænder
 
-Skrevet 2026-10-12. **Intet af dette er bygget endnu** — det er planen, der skal
-godkendes, før der røres ved driften.
+Skrevet 2026-10-12. **Bygget og i drift siden 2026-10-13.**
+
+> **Denne fil er historik — ikke driftsdokumentation.** Den beskriver, hvad der
+> blev foreslået, og hvorfor. Vil du vide, hvad der *faktisk kører* — hvilke job
+> udløses hvornår, hvor de kører, og hvordan du ser efter dem — så står det i
+> [`automatisering.md`](automatisering.md).
+>
+> Planen blev gennemført som beskrevet: skemalægger (`scheduler.py`) og runner
+> (`runner.py`) kører side om side i Railway-servicen `worker`, køen er
+> `agent_runs` i Supabase, og fejl samt dagligt sammendrag går til Telegram.
+> Ejerens PC indgår ikke længere. Se commits `0da9b28` (skemalægger),
+> `7497432` (Railway-worker) og `8419436` (Telegram).
+>
+> Linjen "intet af dette er bygget endnu" blev stående her, til den 2026-10-14
+> fik en session til at konkludere, at automatiseringen manglede. Et plandokument,
+> der ikke lukkes, når planen er ført ud i livet, er værre end ingen plan.
 
 Målet, med ejerens ord: *alt info og agenter inden, imens og efter et ræs kører
 automatisk og online, så det ikke afhænger af, at computeren er tændt.*
