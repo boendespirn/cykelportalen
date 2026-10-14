@@ -391,10 +391,21 @@ if __name__ == "__main__":
 #     at fyldet haenger sammen med bundlinjen.
 
 
+# Hvilken slags fyld billedet bruger. Saettes pr. koersel af
+# _digitize_edgecycling ud fra konfigurationens "fill"-noegle.
+#   "red_on_white" — Tour of Guangxi: roedt fyld paa hvid bund
+#   "grey"         — Veneto Classic: lysere graat fyld paa graa bund, med gul
+#                    konturlinje. Den gule farve holdes UDE af fyldtesten med
+#                    vilje: markoererne er lodrette gule linjer, der gaar fra
+#                    terraenet og helt til tops, saa sporingen ville foelge dem
+#                    ud af grafen (samme faelde som Guangxis maalflag).
+_FILL_MODE = "red_on_white"
+
+
 def _edge_is_fill(px) -> bool:
-    """Roedt fyld i alle nuancer: hovedfyld, fremhaevede klatrebaand og det
-    blege pre-start-felt. Ikonerne er gule/blaa og fanges ikke."""
     r, g, b = px
+    if _FILL_MODE == "grey":
+        return r > 160 and abs(r - g) < 14 and abs(g - b) < 14
     return r > 80 and r - g > 45 and r - b > 45 and abs(g - b) < 50
 
 
@@ -427,6 +438,31 @@ def _edge_y_calibration(y_ticks):
             t = t[:-1]
     a, b = _lsq(t)
     return a, b, t
+
+
+def _edge_x_from_labels(px, base, axis, right, x_labels):
+    """Kalibrér x paa x-aksens EGNE etiketter i stedet for markoerlinjerne.
+    Noedvendigt naar markoererne er gule (Veneto Classic): de ville blive
+    forvekslet med kurven, og en moerk-linje-detektor finder dem slet ikke.
+    Etiketterne staar som moerke tekstklumper lige under aksen."""
+    band = range(base + 6, base + 70)
+    cols = [x for x in range(axis - 20, right + 30)
+            if any(_edge_is_dark(px[x, y]) for y in band)]
+    groups, cur = [], []
+    for x in cols:
+        if cur and x - cur[-1] > 9:
+            groups.append(cur); cur = []
+        cur.append(x)
+    if cur:
+        groups.append(cur)
+    cen = [(min(g) + max(g)) / 2 for g in groups if max(g) - min(g) > 12]
+    if len(cen) != len(x_labels):
+        return None
+    a, b = _lsq(list(zip([float(k) for k in x_labels], cen)))
+    if a <= 0:
+        return None
+    res = max(abs(c - (a * float(k) + b)) for k, c in zip(x_labels, cen))
+    return res, a, b, len(cen)
 
 
 def _edge_x_calibration(im, px, base, x_labels, total_km):
@@ -485,6 +521,8 @@ def _edge_despike(d, win=9, max_jump=8.0):
 
 
 def _digitize_edgecycling(cfg, st, report, n_samples, verbose):
+    global _FILL_MODE
+    _FILL_MODE = cfg.get("fill", "red_on_white")
     total_km = float(st["total_km"])
     url = st["source_url"]
     report["source_url"] = url
@@ -492,13 +530,23 @@ def _digitize_edgecycling(cfg, st, report, n_samples, verbose):
     px = im.load()
     w, h = im.size
 
-    base = max(y for y in range(150, h)
-               if sum(1 for x in range(200, w - 50) if _edge_is_fill(px[x, y])) > w * 0.5)
+    # Nogle billeder har et lyst felt under selve grafen (Veneto Classics
+    # bundbaand), og "bredeste fyldraekke" rammer da ved siden af. Derfor kan
+    # bundlinjen angives eksplicit i konfigurationen.
+    if st.get("baseline_y"):
+        base = int(st["baseline_y"])
+    else:
+        base = max(y for y in range(150, h)
+                   if sum(1 for x in range(200, w - 50) if _edge_is_fill(px[x, y])) > w * 0.5)
     ay, by, used = _edge_y_calibration(st["y_ticks"])
     report["m_per_px"] = abs(ay)
     report["n_calibration_anchors"] = len(used)
 
-    xcal = _edge_x_calibration(im, px, base, st["x_labels"], total_km)
+    if st.get("x_source") == "labels":
+        xcal = _edge_x_from_labels(px, base, int(st["axis_x"]), int(st["right_x"]),
+                                   st["x_labels"])
+    else:
+        xcal = _edge_x_calibration(im, px, base, st["x_labels"], total_km)
     if not xcal:
         report["error"] = "x-aksens markoerlinjer kunne ikke genfindes"
         if verbose:

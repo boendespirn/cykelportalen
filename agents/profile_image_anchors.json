@@ -800,5 +800,75 @@
         ]
       }
     }
+  },
+  "veneto-classic-2026": {
+    "_note": [
+      "Veneto Classic har ingen GPX. Arrangoeren (venetoclassic.com/percorso)",
+      "udgiver en officiel hel-rute-hoejdeprofil, som digitaliseres her.",
+      "GRAA STIL: lysere graat fyld (177) paa graa bund (146), gul konturlinje.",
+      "Den gule farve holdes ude af fyldtesten — markoererne er lodrette gule",
+      "linjer fra terraenet og til tops, og sporingen ville ellers foelge dem.",
+      "DISTANCE: arrangoerens programtekst siger 158 km, mens grafen tegner",
+      "161 km (formentlig neutral start). Vi bruger den OFFICIELLE 158 km, saa",
+      "siden er intern konsistent; forskellen er 1,9 % — godt inden for den",
+      "tolerance, vi i forvejen accepterer for GPX-ruter."
+    ],
+    "style": "edgecycling",
+    "fill": "grey",
+    "source_note": "https://venetoclassic.com/percorso — grafico-altimetria-generale.png. Aflaest 2026-10-14.",
+    "max_deviation_m": 60,
+    "stages": {
+      "1": {
+        "total_km": 158.0,
+        "official_gain_m": 2200,
+        "source_url": "https://venetoclassic.com/cms-contents/uploads/grafico-altimetria-generale.png",
+        "y_ticks": [
+          [
+            1116.5,
+            500
+          ],
+          [
+            1212.5,
+            400
+          ],
+          [
+            1307.5,
+            300
+          ],
+          [
+            1402.5,
+            200
+          ],
+          [
+            1493.5,
+            100
+          ],
+          [
+            1583.5,
+            0
+          ]
+        ],
+        "x_labels": [
+          11,
+          18,
+          30,
+          45,
+          55,
+          66,
+          80,
+          91,
+          105,
+          117,
+          129,
+          143,
+          151
+        ],
+        "climbs": [],
+        "baseline_y": 1587,
+        "x_source": "labels",
+        "axis_x": 201,
+        "right_x": 1951
+      }
+    }
   }
 }
