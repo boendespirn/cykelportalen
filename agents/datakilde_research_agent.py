@@ -69,14 +69,14 @@ SOURCE_LABEL = "https://cykelkalenderen.dk"
 # Ingen CHECK-constraint i databasen paa disse (en CHECK paa agent_runs.trigger
 # kostede en tavs fejl i commit 8776e0d) — listen haandhaeves her.
 DATA_TYPES = {
-    "stage_info": {"label": "Etapeinfo", "races": ("stage_race", "oneday")},
-    "route_gpx": {"label": "Rute (GPX)", "races": ("stage_race", "oneday")},
-    "climbs": {"label": "Stigninger", "races": ("stage_race", "oneday")},
-    "startlist": {"label": "Startliste", "races": ("stage_race", "oneday")},
-    "teams": {"label": "Holdlister", "races": ("stage_race", "oneday")},
-    "results": {"label": "Resultater", "races": ("stage_race", "oneday")},
-    "live_text": {"label": "Skriftlig kommentering", "races": ("stage_race", "oneday")},
-    "streaming": {"label": "Streaming", "races": ("stage_race", "oneday")},
+    "stage_info": {"label": "Etapeinfo", "races": ("stage_race", "oneday", "cyclocross")},
+    "route_gpx": {"label": "Rute (GPX)", "races": ("stage_race", "oneday", "cyclocross")},
+    "climbs": {"label": "Stigninger", "races": ("stage_race", "oneday", "cyclocross")},
+    "startlist": {"label": "Startliste", "races": ("stage_race", "oneday", "cyclocross")},
+    "teams": {"label": "Holdlister", "races": ("stage_race", "oneday", "cyclocross")},
+    "results": {"label": "Resultater", "races": ("stage_race", "oneday", "cyclocross")},
+    "live_text": {"label": "Skriftlig kommentering", "races": ("stage_race", "oneday", "cyclocross")},
+    "streaming": {"label": "Streaming", "races": ("stage_race", "oneday", "cyclocross")},
 }
 
 STATUS_FOUND = "found"
@@ -154,6 +154,11 @@ def current_status(race: dict, stage_ids: list[str],
     rid = race["id"]
     out: dict[str, tuple[str, str | None]] = {}
 
+    # Et cross-loeb er 5-8 omgange paa en bane paa 2-3 km. Rute og stigninger
+    # giver ingen mening, og uden denne undtagelse ville hvert cross-loeb staa
+    # som to permanente huller i koeen og i race_completeness.
+    is_cx = race.get("race_type") == "cyclocross"
+
     has_distance = any((s.get("distance_km") or 0) > 0 for s in stages)
 
     out["stage_info"] = (STATUS_FOUND, "pcs") if has_distance else (STATUS_MISSING, None)
@@ -162,7 +167,9 @@ def current_status(race: dict, stage_ids: list[str],
     # ruten hentes on demand, ikke gemt pr. etape. Den autoritative liste er
     # CYCLINGSTAGE_GPX_PAGES. Uden dette opslag ville 33 af 36 loeb staa som
     # "mangler GPX", og workeren ville bruge et LLM-kald paa hvert af dem.
-    if race["slug"] in _gpx_configured():
+    if is_cx:
+        out["route_gpx"] = (STATUS_NA, None)
+    elif race["slug"] in _gpx_configured():
         out["route_gpx"] = (STATUS_FOUND, "cyclingstage")
     elif any(s.get("route_points") for s in stages):
         out["route_gpx"] = (STATUS_FOUND, "db")
@@ -172,7 +179,10 @@ def current_status(race: dict, stage_ids: list[str],
     climbs = False
     if stage_ids:
         climbs = _any(f"stage_climbs?stage_id=in.({','.join(stage_ids[:40])})&select=id")
-    out["climbs"] = (STATUS_FOUND, "pcs") if climbs else (STATUS_MISSING, None)
+    if is_cx:
+        out["climbs"] = (STATUS_NA, None)
+    else:
+        out["climbs"] = (STATUS_FOUND, "pcs") if climbs else (STATUS_MISSING, None)
 
     out["startlist"] = ((STATUS_FOUND, "pcs")
                         if _any(f"startlists?race_id=eq.{rid}&select=id")
@@ -192,6 +202,9 @@ def current_status(race: dict, stage_ids: list[str],
     out["live_text"] = ((STATUS_MISSING, None)
                         if race.get("race_type") == "stage_race"
                         else (STATUS_NA, None))
+    if is_cx:
+        out["stage_info"] = ((STATUS_FOUND, "cykelkalenderen")
+                             if stages else (STATUS_MISSING, None))
     return out
 
 
