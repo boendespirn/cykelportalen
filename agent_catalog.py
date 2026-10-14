@@ -301,6 +301,36 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
                      "kun, og fundene står i loggen.",
          est_minutes=6),
 
+    # Modstykket til scannet: scannet RAPPORTERER, denne VEDLIGEHOLDER en
+    # tilstand (race_data_sources) og arbejder en prioriteret koe. Spaerretiden
+    # ligger i agenten (1/md., 1/uge naar der er under en maaned til start),
+    # saa jobbet kan koere dagligt uden at gentage sig selv. --use-llm er
+    # bevidst IKKE med i det daglige trin: det koster penge, og det slaas til
+    # her, naar ejeren vil have den til at soege.
+    _job("datakilde_research", "Datakilde-research — find manglende kilder", PHASE_GLOBAL, [
+            _step("datakilde_research_agent.py", ["--seed", "--write"], stage=None,
+                  label="Opdaterer hvilke kilder hvert loeb har og mangler"),
+            _step("datakilde_research_agent.py", ["--run", "--write"], stage=None,
+                  label="Leder efter de manglende kilder (gratis probes)"),
+         ], needs_race=False,
+         description="Gennemgaar loebene, noterer hvilke datakilder der mangler, og "
+                     "leder efter dem. Husker hvad der er proevet og hvornaar, saa "
+                     "aldrig-forsoegte huller kommer foerst. Skriver kun til "
+                     "race_data_sources — aldrig til loebs- eller etapedata.",
+         est_minutes=10),
+
+    # Samme agent, men med Claude-trinnet slaaet til. Eget job, fordi det koster
+    # penge: lofterne staar i agentens LIMITS (10 kald/koersel, 150/md.).
+    _job("datakilde_research_llm", "Datakilde-research MED soegning (koster)",
+         PHASE_GLOBAL, [
+            _step("datakilde_research_agent.py", ["--run", "--write", "--use-llm"],
+                  stage=None, label="Soeger efter kilder, probes ikke kunne finde"),
+         ], needs_race=False,
+         description="Som Datakilde-research, men spoerger Claude med websoegning, "
+                     "naar de gratis probes giver op. Ca. 0,05 USD pr. hul; hoejst "
+                     "10 pr. koersel og 150 pr. maaned.",
+         est_minutes=8),
+
     _job("daglig_pipeline", "Daglig kørsel (hele pipelinen)", PHASE_GLOBAL, [
             _step("daily_pipeline.ps1", [], cwd="root", runner="powershell",
                   stage=None, label="Daglig kørsel"),

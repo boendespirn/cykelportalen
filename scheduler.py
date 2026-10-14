@@ -159,6 +159,14 @@ FOER_LOEB = [
 ]
 
 
+# Job uden løb: de kører på klokkeslæt, ikke på kalenderen. Tidspunktet er i
+# UTC og lagt uden for løbstimerne, så de aldrig konkurrerer med resultathentning
+# om runneren (den tager ét job ad gangen).
+DAGLIGE_GLOBALE = [
+    (3, "datakilde_research", "dagligt-0300"),
+]
+
+
 def forventet_maal(stage: dict, tv: list[dict]) -> datetime | None:
     """Hvornår etapen ventes at være i mål — eller None, hvis vi ikke ved det.
 
@@ -225,6 +233,16 @@ def planlaeg(fra: datetime, til: datetime) -> list[Udloeser]:
                 f"&start_date=lte.{(til + timedelta(days=30)).date()}"
                 f"&order=start_date&limit=500")
     ud: list[Udloeser] = []
+
+    # Løbsløse job først — de hænger ikke på nogen kalenderpost.
+    dag = fra.date()
+    while dag <= til.date():
+        for time_utc, job, regel in DAGLIGE_GLOBALE:
+            t = datetime(dag.year, dag.month, dag.day, time_utc,
+                         tzinfo=timezone.utc)
+            if fra <= t <= til:
+                ud.append(Udloeser(t, job, "", None, regel))
+        dag += timedelta(days=1)
 
     for r in loeb:
         slug = r["slug"]
