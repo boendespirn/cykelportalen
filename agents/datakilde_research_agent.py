@@ -312,6 +312,71 @@ ORG_PATHS = {
 # Siden svarer HTTP 454 paa et almindeligt kald, saa den KRAEVER browser.
 # Derfor hentes den hoejst én gang pr. koersel og caches.
 
+
+# tv_agents EXTRACT_JS kraever et .race-title-element og kasserer alt andet:
+#
+#     const titleEl = tbody.querySelector('.race-title');
+#     if (!timeEl || !titleEl) return;
+#
+# Men .race-title findes KUN, naar cykelkalenderen selv har koblet udsendelsen
+# til sin egen loebsdatabase. Har den ikke det, staar programmet med tv-kanalens
+# egen titel i ren tekst — og ryger ud. Tour of Guangxi sendes paa HBO Max
+# kl. 07:40, men staar som "Tour of Guangxi | 2. etape" uden .race-title og
+# blev derfor meldt som "ikke paa dansk tv" (fundet 2026-10-14).
+#
+# Her er udtrakket derfor tolerant: titlen tages fra .race-title naar den
+# findes, ellers fra raekkens egen tekst med klokkeslaettet og etape-suffikset
+# klippet af. LOGO_MAP genbruges fra tv_agent — kanalkortet skal kun ét sted.
+#
+# SAMME FEJL SIDDER I tv_agent.py. Den er bevidst uroert her: den henter
+# tv-tider for Tour de France, og rettelsen skal godkendes foerst.
+PERMISSIVE_JS = r"""(LOGO_MAP) => {
+    const out = [];
+    document.querySelectorAll('tbody').forEach(tb => {
+        const timeEl = tb.querySelector('.tv-from b');
+        if (!timeEl) return;
+        const logos = [...tb.querySelectorAll('.tv-logo')].map(el => {
+            const m = (el.style.backgroundImage || '').match(/tv-logos\/([^"')\s]+)/);
+            return m ? m[1] : null;
+        }).filter(Boolean);
+        const titleEl = tb.querySelector('.race-title');
+        let title;
+        if (titleEl) {
+            title = titleEl.innerText;
+        } else {
+            title = (tb.innerText || '')
+                .replace(/\s+/g, ' ')
+                .replace(timeEl.innerText.trim(), '')
+                .split('|')[0];
+        }
+        title = (title || '').replace(/\s+/g, ' ').trim();
+        if (!title) return;
+        // Datoen staar i en overskrift FOER raekken ("I dag", "Loerdag d. 17/10").
+        // Uden den kunne et loeb matches til en udsendelse paa en anden dag.
+        let dateStr = null;
+        let node = tb.closest('table') || tb;
+        while (node && !dateStr) {
+            let prev = node.previousElementSibling;
+            while (prev && !dateStr) {
+                const txt = (prev.innerText || '').trim();
+                if (/^(i dag|i morgen)/i.test(txt) || /d\. ?\d{1,2}\/\d{1,2}/.test(txt)) {
+                    dateStr = txt.split(String.fromCharCode(10))[0].trim().slice(0, 40);
+                }
+                prev = prev.previousElementSibling;
+            }
+            node = node.parentElement;
+        }
+        out.push({
+            date: dateStr,
+            time: timeEl.innerText.trim(),
+            race: title,
+            channels: logos.map(l => LOGO_MAP[l] || l),
+            linked: !!titleEl
+        });
+    });
+    return out;
+}"""
+
 _TV_CACHE: list | None = None
 
 
@@ -330,7 +395,7 @@ def _tv_programmes() -> list:
             page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 Klassementet/1.0"})
             page.goto(tv_agent.SOURCE_URL, wait_until="networkidle", timeout=30_000)
             time.sleep(2)
-            _TV_CACHE = page.evaluate(tv_agent.EXTRACT_JS) or []
+            _TV_CACHE = page.evaluate(PERMISSIVE_JS, tv_agent.LOGO_MAP) or []
             browser.close()
     except Exception as exc:                      # noqa: BLE001
         print(f"    (kunne ikke hente tv-oversigten: {exc})")
