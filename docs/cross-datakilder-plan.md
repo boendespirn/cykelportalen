@@ -46,6 +46,24 @@ altså ikke udledes af vores slug, men den står i `races.name`
 ("X2O Trofee **Oudenaarde** - Koppenbergcross"). Koblingen laves én gang og
 verificeres med løbsdatoen, ikke med navnet alene.
 
+> ### BLOKERET 2026-10-14 — cyclocross24 kan ikke scrapes
+>
+> Siden ligger bag **Cloudflares bot-beskyttelse**. Målt samme dag:
+> almindelige HTTP-kald svarer **403**, og en headless browser får
+> *"Performing security verification — this website uses a security service
+> to protect against malicious bots"*.
+>
+> Det er en udtrykkelig besked om, at siden ikke ønsker automatiseret
+> adgang. **Der bygges ikke en omgåelse** — hverken stealth-browser,
+> proxy-rotation eller lignende. Det ville stride mod CLAUDE.md §7
+> ("kun lovlige handlinger") og mod sidens egne vilkår. At enkelte manuelle
+> opslag kom igennem under research er ikke et grundlag for en scraper, der
+> skal køre dagligt.
+>
+> **Konsekvens:** afsnit 3's punkt 1 og de fleste rækker i afsnit 4 kan ikke
+> gennemføres som beskrevet. Siden er stadig den bedste kilde, der findes —
+> men den kræver en aftale, ikke en scraper. Se afsnit 6.
+
 ### 2b. KNWU via Foys-API'et — startlisterne
 
 `mijn.knwu.nl` er en JavaScript-app; hver URL svarer med den samme 6854-byte
@@ -163,14 +181,43 @@ normalt med kildeangivelse.
 
 ---
 
-## 6. Hvad ejeren skal tage stilling til
+## 6. Status efter undersøgelsen 2026-10-14
 
-1. **Bygges planen?** Omfang: tre prober i research-agenten, én ny hente-agent
-   til cyclocross24, én til KNWU/Foys, og fem nye regler i `scheduler.py`.
-2. **Seriestillingen** — skemaet og endpointet er bygget (migration
-   `classifications_series_standings`). cyclocross24 og Foys' `rankings/lookup`
-   kan begge fylde den. Skal den hentes fra cyclocross24, som dækker alle fire
-   serier?
-3. **De belgiske startlister** — skal jeg først afgøre, om Belgian Cycling
-   ligger på samme Foys-API? Hvis ikke, er alternativet at læse arrangørernes
-   deltager-PDF'er, hvilket er en større og skrøbeligere opgave.
+Planen blev godkendt til bygning. Under byggeriet faldt to af dens
+forudsætninger — begge verificeret, begge afgørende.
+
+**1. cyclocross24 er bot-beskyttet.** Den dækkede alle 24 løb og var hele
+rygraden. Den kan ikke automatiseres uden at omgå Cloudflare, og det gøres
+ikke. Se boksen i afsnit 2a.
+
+**2. Foys dækker kun Holland.** API'et er ægte, åbent og veldokumenteret af
+sin egen trafik — men det er **KNWU's eget system**. `/events` med
+`isHistoric=false&sorting=startDate` giver 145 kommende arrangementer, alle
+hollandske (Rijswijk, Arnhem, Ede, Valkenburg …). Belgian Cycling og Cycling
+Vlaanderens portal sender **ingen** kald til `api.foys.io` — det er en anden
+platform. Af vores 24 løb ligger ét i Holland.
+
+Foys kan altså dække **1 af 24 løb** — Heerderstrand 24/10. Det er verificeret
+hele vejen: event → `/races/lookup` → raceId 105128 → 30 deltagere med navn,
+nationalitet, klub og kategori.
+
+### Hvad der så kan lade sig gøre
+
+| Vej | Dækning | Indsats |
+|---|---|---|
+| Foys/KNWU som bygget-klar integration | 1 af 24 | Lille — alt er kortlagt |
+| PCS, når siden oprettes (få dage før) | Alle 24, men sent | Allerede bygget |
+| Aftale med cyclocross24 om adgang | Alle 24, rigt data | Kræver en henvendelse |
+| Arrangørernes deltager-PDF'er | De belgiske | Stor og skrøbelig |
+
+### Spørgsmål til ejeren
+
+1. **Skal jeg skrive til cyclocross24** og spørge om lov eller om et API?
+   Det er den eneste vej til deres data, og de har alt: starttider, historik
+   tilbage til 1958, seriestillinger og baneinfo for alle 24 løb.
+2. **Skal Foys-integrationen bygges nu**, selv om den kun rammer ét løb?
+   Alt forarbejde er gjort, så det er en lille opgave — men værdien er
+   begrænset, indtil flere hollandske cross-løb kommer med i kalenderen.
+3. **Er PCS godt nok indtil videre?** Den fanger alle 24, bare først få dage
+   før løbet. Kombineret med den daglige sendeplan giver det en side, der er
+   komplet til løbsdagen, men tynd ugerne før.
