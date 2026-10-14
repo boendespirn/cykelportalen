@@ -598,6 +598,52 @@ def get_classification(slug: str, classif_type: str):
     return {"after_stage": after_stage, "standings": data}
 
 
+@app.get("/races/{slug}/series-standings")
+def get_series_standings(slug: str):
+    """Den samlede stilling i den serie, et loeb hoerer til.
+
+    Findes for cykelcross, hvor de fire serier (UCI Cyclocross World Cup,
+    Superprestige, X2O Trofee, HG Cross) hver har en saesonstilling. Det er
+    den, fans foelger hen over vinteren -- ikke det enkelte loebs podie.
+
+    Stillingen hoerer til SERIEN, ikke til loebet, og ligger derfor i
+    classifications med classification_type='series' og series sat i stedet
+    for race_id/after_stage_number (migration
+    classifications_series_standings). Serien laeses af races.category, saa
+    alle udgaver af samme loeb peger paa den samme stilling uden ekstra felt.
+    """
+    race_res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/races?select=category&slug=eq.{slug}&limit=1",
+        headers=get_headers(),
+    )
+    race_data = race_res.json()
+    if not race_data:
+        return []
+    series = race_data[0].get("category")
+    if not series:
+        return []
+
+    url = (
+        f"{SUPABASE_URL}/rest/v1/classifications"
+        f"?classification_type=eq.series"
+        f"&series=eq.{requests.utils.quote(series)}"
+        f"&select=position,points,races_counted,riders(name,slug,nationality,photo_url,teams(name,slug))"
+        f"&order=position.asc&limit=20"
+    )
+    standings = requests.get(url, headers=get_headers()).json()
+    if not isinstance(standings, list) or not standings:
+        return []
+
+    # races_counted staar paa hver raekke; siden skal vise ET tal, saa den
+    # aldrig praesenterer en aeldre stilling som aktuel.
+    counted = [s["races_counted"] for s in standings if s.get("races_counted") is not None]
+    return {
+        "series": series,
+        "races_counted": max(counted) if counted else None,
+        "standings": standings,
+    }
+
+
 @app.get("/races/{slug}/dnfs")
 def get_dnfs_for_race(slug: str):
     race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"

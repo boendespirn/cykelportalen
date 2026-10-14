@@ -1,6 +1,7 @@
 export const revalidate = 60;
 
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
@@ -56,6 +57,14 @@ type GCEntry = {
 
 type ClassifEntry = {
   position: number | null; time_gap_seconds: number | null; points: number | null;
+  riders: { name: string; slug: string; nationality: string | null; photo_url: string | null; teams: { name: string; slug: string } | null } | null;
+};
+
+/** En rytters placering i en cykelcross-series samlede sæsonstilling.
+ *  Ligger i classifications med classification_type='series' — knyttet til
+ *  serien, ikke til et løb (se api.py get_series_standings). */
+type SeriesEntry = {
+  position: number | null; points: number | null; races_counted: number | null;
   riders: { name: string; slug: string; nationality: string | null; photo_url: string | null; teams: { name: string; slug: string } | null } | null;
 };
 
@@ -262,6 +271,23 @@ async function getBroadcast(slug: string): Promise<Broadcast[]> {
   } catch { return []; }
 }
 
+/** Den samlede stilling i den serie, et løb hører til.
+ *
+ *  Kun cykelcross har en: de fire serier (UCI World Cup, Superprestige,
+ *  X2O Trofee, HG Cross) har hver en sæsonstilling, og det er DEN, fans
+ *  følger hen over vinteren — ikke det enkelte løbs podie. Returnerer null,
+ *  når serien endnu ikke har en stilling, så blokken helt forsvinder frem
+ *  for at stå tom. */
+async function getSeriesStandings(slug: string):
+    Promise<{ series: string; races_counted: number | null; standings: SeriesEntry[] } | null> {
+  try {
+    const res = await fetch(`${API_BASE}/races/${slug}/series-standings`, { next: { revalidate: 300 } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.standings?.length ? data : null;
+  } catch { return null; }
+}
+
 async function getRaceHistory(slug: string): Promise<HistoryEntry[]> {
   try {
     const res = await fetch(`${API_BASE}/races/${slug}/history`, { next: { revalidate: 60 } });
@@ -320,6 +346,14 @@ function formatDate(d: string | null): string {
 function formatShortDate(d: string | null): string {
   if (!d) return "—";
   return new Date(d + "T00:00:00").toLocaleDateString("da-DK", { day: "numeric", month: "short" });
+}
+
+/** Dato med ugedag. Cross køres på hverdagsaftener og hen over julen, så
+ *  ugedagen er en reel del af svaret på "hvornår kan jeg se det". */
+function formatWeekdayDate(d: string | null): string {
+  if (!d) return "—";
+  return new Date(d + "T00:00:00").toLocaleDateString("da-DK",
+    { weekday: "long", day: "numeric", month: "long" });
 }
 
 function calculateAge(dob: string): number {
@@ -480,7 +514,13 @@ export async function generateMetadata(
   // saa vi ikke stille behandler 101 etdagsloeb som etapeloeb (fundet under
   // SEO-023-arbejdet: bl.a. alle 5 Monuments havde "one_day").
   const isOneDay = race.race_type === "oneday" || race.race_type === "one_day";
-  const description = isOneDay
+  const isCross = race.race_type === "cyclocross";
+  // Cross naevner hverken etaper, hoejdeprofil eller klassement — intet af det
+  // findes paa et cross-loeb, og en SERP-tekst der lover det, er et loefte vi
+  // ikke holder (CLAUDE.md afsnit 5: ingen clickbait).
+  const description = isCross
+    ? `${race.name} ${year}${dateRange ? ` (${dateRange})` : ""}: sendetid og kanal, startliste, baneinfo og resultat — alt om cross-løbet på Klassementet.`
+    : isOneDay
     ? `${race.name} ${year}${dateRange ? ` (${dateRange})` : ""}: favoritter, ruteinfo, højdeprofil og resultat fra dette enkeltdagsløb — se det hele på Klassementet.`
     : `${race.name} ${year}${dateRange ? ` (${dateRange})` : ""}: alle ${stages.length || ""} etaper med startliste, favoritter, højdeprofiler og klassement.`;
   return {
@@ -509,11 +549,13 @@ export async function generateMetadata(
  *  sendetider. Det var usynligt, saa laenge tv_agent heller ikke kunne gemme
  *  en sending for et endagsloeb; da agenten blev rettet, stod dataene klar i
  *  API'et uden at naa skaermen. Nu bruges den samme komponent begge steder. */
-function TvSektion({ broadcasts, today, visEtape = true }:
-    { broadcasts: Broadcast[]; today: string; visEtape?: boolean }) {
-  if (broadcasts.length === 0) return null;
+function TvSektion({ broadcasts, today, visEtape = true, tomTilstand = null }:
+    { broadcasts: Broadcast[]; today: string; visEtape?: boolean; tomTilstand?: ReactNode }) {
+  // tomTilstand sendes kun af cross-layoutet. Uden den er opførslen uændret
+  // (null), så endagsløb og etapeløb ser præcis det samme som før.
+  if (broadcasts.length === 0) return <>{tomTilstand}</>;
       const upcoming = broadcasts.filter((b) => b.broadcast_date >= today);
-      if (upcoming.length === 0) return null;
+      if (upcoming.length === 0) return <>{tomTilstand}</>;
 
       // Gruppér per kanal — vis næste udsendelse per kanal
       const byChannel = new Map<string, Broadcast>();
@@ -572,7 +614,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     notFound();
   }
 
-  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, climbs, stageDetail, history, raceNews, oneDayResults] =
+  const [race, stages, startlist, gcData, pointsData, mountainsData, youthData, dnfs, broadcasts, climbs, stageDetail, history, raceNews, oneDayResults, seriesStandings] =
     await Promise.all([
       getRace(slug),
       getStages(slug),
@@ -588,6 +630,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       getRaceHistory(slug),
       getRaceNews(slug),
       getOneDayResults(slug),
+      getSeriesStandings(slug),
     ]);
 
   if (!race) {
@@ -596,6 +639,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
   const isOngoing   = race.start_date <= today && (!race.end_date || race.end_date >= today);
   const isOneDay    = race.race_type === "oneday";
+  const isCross     = race.race_type === "cyclocross";
   const isHistoric  = isHistoricRaceSlug(race.slug);
   const singleStage = isOneDay && stages.length > 0 ? stages[0] : null;
   const completedStages = stages.filter((s) => stageStatus(s.date, today) === "completed");
@@ -685,8 +729,10 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
     "@context": "https://schema.org",
     "@type": "SportsEvent",
     name: race.name,
-    description: race.description ?? `${race.name}: etaper, ryttere, klassement og stigningsprofiler.`,
-    sport: "Cycling",
+    description: race.description ?? (isCross
+      ? `${race.name}: sendetid, startliste, baneinfo og resultat.`
+      : `${race.name}: etaper, ryttere, klassement og stigningsprofiler.`),
+    sport: isCross ? "Cyclo-cross" : "Cycling",
     startDate: race.start_date,
     endDate: race.end_date ?? race.start_date,
     location: {
@@ -695,8 +741,258 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       address: { "@type": "PostalAddress", addressCountry: race.country_code ?? "IT" },
     },
     url: `https://klassementet.dk/${race.slug}`,
-    organizer: { "@type": "Organization", name: "UCI WorldTour", url: "https://www.uci.org" },
+    // Superprestige, X2O Trofee og HG Cross er private arrangoerer, ikke UCI
+    // WorldTour. Et forkert organizer-felt er en faktafejl Google laeser.
+    organizer: isCross
+      ? { "@type": "Organization", name: race.category }
+      : { "@type": "Organization", name: "UCI WorldTour", url: "https://www.uci.org" },
   };
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CYCLOCROSS LAYOUT
+  // ══════════════════════════════════════════════════════════════════════
+  // Et cross-løb er 5-8 omgange på en bane på 2-3 km: ingen højdeprofil,
+  // intet klassement, ingen etapeliste og ingen stigninger.
+  //
+  // Indtil 2026-10-14 faldt cross i etapeløbs-grenen nedenfor, fordi
+  // race_type "cyclocross" hverken er "oneday" eller "one_day". Siden viste
+  // altså ikke bare for lidt — den viste aktivt et klassement og en
+  // etapeliste, der ikke findes (DATA-012).
+  //
+  // Rækkefølgen er bevidst: sendetid først, fordi cross køres på
+  // hverdagsaftener og hen over julen, så "hvornår kan jeg se det" er det,
+  // folk kommer med. Derefter resultat og seriestilling, der er korte og
+  // høj værdi, og til sidst den lange startliste.
+  if (isCross) {
+    const crossStage = stages.length > 0 ? stages[0] : null;
+    const erAfviklet = race.start_date < today;
+
+    // Højdeprofilen er bevidst udeladt, ikke blot fraværende:
+    // generatedProfileUrl() ville i forvejen give null, fordi cross-etaper
+    // ingen elevation_image_source har — men den beskyttelse forsvinder i
+    // samme øjeblik nogen genererer én. Derfor refereres hverken
+    // ClimbProfile, climbs eller elevation_image_url i denne gren.
+    return (
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+        <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors mb-10">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Alle løb
+        </Link>
+
+        {header}
+
+        {/* Disciplin- og dato-strip. Ugedagen står her, fordi cross køres på
+            hverdagsaftener og i julen — "onsdag 23. december" svarer på mere
+            end datoen alene. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-6 pb-6 border-b border-slate-800">
+          <span className="text-sm font-medium text-amber-400">Cykelcross</span>
+          <span className="text-sm text-slate-300">{formatWeekdayDate(race.start_date)}</span>
+          {crossStage?.stage_start_time && (
+            <span className="text-sm font-mono text-emerald-400">
+              Start {crossStage.stage_start_time.slice(0, 5)}
+            </span>
+          )}
+          {crossStage?.start_location && (
+            <span className="text-sm text-slate-400">{crossStage.start_location}</span>
+          )}
+          {crossStage?.pcs_stage_url && (
+            <a href={crossStage.pcs_stage_url} target="_blank" rel="noopener noreferrer"
+              className="ml-auto text-xs text-slate-600 hover:text-emerald-400 transition-colors">
+              PCS →
+            </a>
+          )}
+        </div>
+
+        {/* ── 1. Se det her ──
+            Øverst, fordi det er cross-fanens første spørgsmål. Mangler
+            sendeplanen, siger vi det: kanalerne offentliggør typisk først
+            2-3 uger før (docs/tv-daekning-plan.md), og en tom plads ville
+            blive læst som "sendes ikke". Efter løbsdagen falder blokken helt
+            væk — der er intet at se længere. */}
+        <TvSektion
+          broadcasts={broadcasts}
+          today={today}
+          visEtape={false}
+          tomTilstand={erAfviklet ? null : (
+            <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+                <span className="text-sm">📺</span>
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-400 font-medium">Se det her</span>
+              </div>
+              <p className="p-5 text-sm text-slate-400 leading-relaxed">
+                Sendeplanen for dette løb er ikke offentliggjort endnu. Kanalerne
+                melder typisk ud 2-3 uger før løbsdagen — vi opdaterer siden, så
+                snart kanal og starttid er bekræftet.
+              </p>
+            </div>
+          )}
+        />
+
+        {/* ── 2. Resultat ──
+            Står åbent, ikke foldet: "hvem vandt" er det, folk søger på, og
+            en Disclosure tegner først sit indhold ved klik, så det ikke ville
+            stå i den HTML, Google læser (samme begrundelse som endagsløb). */}
+        {oneDayResults.length > 0 && (
+          <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+                Resultat
+              </h2>
+              <span className="text-xs text-slate-600">Top {oneDayResults.length}</span>
+            </div>
+            <ResultList entries={oneDayResults} />
+          </section>
+        )}
+
+        {/* ── 3. Seriens samlede stilling ──
+            Det, fans reelt følger hen over vinteren. Stillingen hører til
+            serien, ikke til løbet, og hentes derfor på serien
+            (classifications.series). Findes den ikke endnu, forsvinder
+            blokken frem for at stå som en tom tabel. */}
+        {seriesStandings && (
+          <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <h2 className="text-xs uppercase tracking-[0.2em] text-amber-400 font-medium">
+                {seriesStandings.series} — samlet stilling
+              </h2>
+              {seriesStandings.races_counted != null && (
+                <span className="text-xs text-slate-600">
+                  Efter {seriesStandings.races_counted} løb
+                </span>
+              )}
+            </div>
+            <div className="divide-y divide-slate-800/40">
+              {seriesStandings.standings.map((entry) => {
+                const r = entry.riders;
+                if (!r) return null;
+                return (
+                  <Link key={r.slug} href={`/riders/${r.slug}`}
+                    className="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-900/60 transition-colors">
+                    <span className="w-6 text-right font-mono text-xs text-slate-500 flex-shrink-0">
+                      {entry.position ?? "—"}
+                    </span>
+                    <span className="w-5 text-center text-sm flex-shrink-0">{flagEmoji(r.nationality)}</span>
+                    <span className="flex-1 text-sm text-slate-200 truncate">{r.name}</span>
+                    {r.teams && (
+                      <span className="hidden sm:block text-xs text-slate-600 truncate max-w-[180px]">
+                        {r.teams.name}
+                      </span>
+                    )}
+                    {entry.points != null && (
+                      <span className="font-mono text-sm text-amber-400 flex-shrink-0">{entry.points}</span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ── 4. Baneinfo ──
+            Omgange, underlag og banelængde har ingen egen kolonne. De står
+            som fritekst i stages.description — samme felt, endagsløb bruger
+            til "Løbsinfo" (ejer-beslutning 2026-10-14), så en agent kan
+            fylde det uden en migration. */}
+        {(stageDetail?.description || stageDetail?.fun_facts?.length) && (
+          <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+              <span className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-medium">
+                Baneinfo
+              </span>
+              {crossStage?.distance_km && (
+                <span className="ml-auto text-xs font-mono text-slate-400">
+                  {crossStage.distance_km} km
+                </span>
+              )}
+            </div>
+            <div className="p-5 space-y-4">
+              {stageDetail.description && (
+                <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+                  {stageDetail.description}
+                </div>
+              )}
+              {stageDetail.fun_facts && stageDetail.fun_facts.length > 0 && (
+                <div>
+                  <p className="text-xs uppercase tracking-[0.15em] text-slate-500 mb-2">
+                    Værd at vide
+                  </p>
+                  <ul className="space-y-1.5">
+                    {stageDetail.fun_facts.map((f, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-slate-400">
+                        <span className="text-emerald-500/60 flex-shrink-0">•</span>
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── 5. Startliste ──
+            Samme komponent som landevej, men uden GC-placeringer: et
+            cross-løb har intet klassement at hente dem fra, så gcData er
+            bevidst null. */}
+        <section className="mb-10">
+          <div className="flex items-baseline justify-between mb-5">
+            <h2 className="font-display text-2xl tracking-widest text-slate-500 uppercase">
+              Startliste
+            </h2>
+            {totalRiders > 0 && (
+              <span className="text-slate-700 text-sm font-mono">{totalRiders} ryttere</span>
+            )}
+          </div>
+          {startlist.length === 0 ? (
+            <div className="rounded-xl border border-slate-800 p-10 text-center text-slate-600 text-sm">
+              Startlisten er ikke offentliggjort endnu.
+            </div>
+          ) : (
+            <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={null} />
+          )}
+        </section>
+
+        {/* ── Nyheder & analyser ── */}
+        {raceNews.length > 0 && (
+          <section className="mt-12">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-xs uppercase tracking-[0.25em] text-slate-400 font-medium">
+                Nyheder &amp; analyser
+              </h2>
+              <Link href="/nyheder" className="text-xs text-slate-600 hover:text-emerald-400 transition-colors">
+                Alle nyheder →
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {raceNews.map((article) => (
+                <Link
+                  key={article.slug}
+                  href={`/nyheder/${article.slug}`}
+                  className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-3.5 hover:border-emerald-500/30 hover:bg-slate-900 transition-all duration-150"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-200 group-hover:text-emerald-400 transition-colors leading-snug truncate">
+                      {article.title}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      {new Date(article.published_at).toLocaleDateString("da-DK", { day: "numeric", month: "short" })}
+                    </p>
+                  </div>
+                  <svg className="w-4 h-4 text-slate-700 group-hover:text-emerald-500 flex-shrink-0 transition-colors"
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
 
   // ══════════════════════════════════════════════════════════════════════
   // ONE-DAY RACE LAYOUT
