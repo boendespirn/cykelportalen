@@ -38,6 +38,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import requests
+from difflib import SequenceMatcher
 from urllib.parse import quote
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -61,6 +62,8 @@ LIMITS = {
 }
 
 MODEL_TRIAGE = "claude-haiku-4-5"
+
+SOURCE_LABEL = "https://cykelkalenderen.dk"
 
 # ── Datatyper ────────────────────────────────────────────────────────────────
 # Ingen CHECK-constraint i databasen paa disse (en CHECK paa agent_runs.trigger
@@ -293,11 +296,88 @@ ORG_PATHS = {
 }
 
 
+
+# ── Streaming: spoerg den kilde, vi allerede har ─────────────────────────────
+# Den foerste udgave proevede arrangoerens /tv og /live og gik saa til Claude,
+# som fandt en side om GIRO DEL VENETO til VENETO CLASSIC. Forkert sted at
+# lede: `tv_agent.py` laeser i forvejen danske tv-tider (HBO Max, Eurosport,
+# TV 2 Sport, Discovery+) fra cykelkalenderen.dk, og den kilde skelner
+# eksplicit mellem loeb MED og UDEN dansk tv.
+#
+# Vi genbruger tv_agents egen udtraekskode frem for at skrive den af — og
+# matcher paa LOEST navn i stedet for dens haandholdte RACE_KEYWORDS, saa et
+# nyt loeb ikke kraever en kodeaendring. (RACE_KEYWORDS er bevidst uroert: den
+# agent henter tv-tider for Tour de France, og den aendring skal godkendes.)
+#
+# Siden svarer HTTP 454 paa et almindeligt kald, saa den KRAEVER browser.
+# Derfor hentes den hoejst én gang pr. koersel og caches.
+
+_TV_CACHE: list | None = None
+
+
+def _tv_programmes() -> list:
+    global _TV_CACHE
+    if _TV_CACHE is not None:
+        return _TV_CACHE
+    _TV_CACHE = []
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import tv_agent
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 Klassementet/1.0"})
+            page.goto(tv_agent.SOURCE_URL, wait_until="networkidle", timeout=30_000)
+            time.sleep(2)
+            _TV_CACHE = page.evaluate(tv_agent.EXTRACT_JS) or []
+            browser.close()
+    except Exception as exc:                      # noqa: BLE001
+        print(f"    (kunne ikke hente tv-oversigten: {exc})")
+    return _TV_CACHE
+
+
+def probe_streaming(race: dict) -> dict:
+    """Fundet kraever BAADE et navnematch OG en aflaest kanal. Staar loebet paa
+    oversigten uden kanal, hoerer det til under "Danskernes loeb uden dansk tv"
+    — og saa er svaret et aerligt nej, ikke et gaet."""
+    progs = _tv_programmes()
+    if not progs:
+        return {"found": False, "tried": [SOURCE_LABEL],
+                "failure": "tv-oversigten kunne ikke hentes"}
+    name = race["name"].lower()
+    best, best_ratio = None, 0.0
+    for prog in progs:
+        title = re.sub(r"\[[^]]*\]", " ", str(prog.get("race") or "")).strip().lower()
+        if not title:
+            continue
+        ratio = SequenceMatcher(None, name, title).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = prog, ratio
+    if not best or best_ratio < 0.72:
+        return {"found": False, "tried": [SOURCE_LABEL],
+                "failure": f"ikke paa dansk tv-oversigt (bedste navnematch "
+                           f"{best_ratio:.2f})"}
+    channels = [c for c in (best.get("channels") or []) if c]
+    if not channels:
+        return {"found": False, "tried": [SOURCE_LABEL],
+                "failure": f"staar som '{best.get('race')}' uden dansk kanal "
+                           "— sendes formentlig ikke i Danmark"}
+    return {"found": True, "url": SOURCE_LABEL, "source_name": "cykelkalenderen",
+            "verification": {"kanaler": channels, "tid": best.get("time"),
+                             "dato": best.get("date"), "titel": best.get("race"),
+                             "navnematch": round(best_ratio, 2)},
+            "tried": [SOURCE_LABEL]}
+
+
 def probe(row: dict, race: dict) -> dict:
     """Trin 1-3 + 5. Skriver intet. `found` saettes KUN, naar en URL er hentet
     og kontrolleret."""
     dt = row["data_type"]
     tried: list[str] = []
+
+    if dt == "streaming":
+        return probe_streaming(race)
 
     # Trin 1: kilder vi allerede kender.
     if dt in ("results", "stage_info", "startlist") and race.get("pcs_url"):
