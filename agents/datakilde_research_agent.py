@@ -742,6 +742,9 @@ def cmd_run(season: int | None, write: bool, use_llm: bool,
 
     probes = llm_used = found = 0
     seen: set[str] = set()
+    # Loeb, der fik mindst én ny kilde i denne koersel — de saettes til
+    # forberedelse til sidst, ét job pr. loeb uanset antal fundne kilder.
+    nye_kilder_paa: set[str] = set()
 
     for row in rows:
         if probes >= LIMITS["MAX_PROBES_PER_RUN"]:
@@ -789,6 +792,7 @@ def cmd_run(season: int | None, write: bool, use_llm: bool,
 
         if result["found"]:
             found += 1
+            nye_kilder_paa.add(race["slug"])
             payload.update({"status": STATUS_FOUND, "url": result["url"],
                             "source_name": result["source_name"],
                             "verified_at": now().isoformat(),
@@ -805,6 +809,21 @@ def cmd_run(season: int | None, write: bool, use_llm: bool,
     print(f"\n{probes} probes, {llm_used} LLM-kald (~{llm_used * 0.05:.2f} USD), "
           f"{found} nye kilder"
           f"{'' if write else ' — intet gemt, koer med --write'}")
+
+    # En nyfundet kilde skal bruges MED DET SAMME, ikke naar kalenderen naar
+    # frem til loebet. To grunde: dataen staar klar nu, og hentningen er den
+    # eneste rigtige proeve paa, at kilden duer — en URL, der svarer 200, kan
+    # stadig vaere ubrugelig. Lykkes jobbet, er kilden bekraeftet i praksis.
+    if write and nye_kilder_paa:
+        for slug in sorted(nye_kilder_paa):
+            try:
+                sb("POST", "agent_runs", json={
+                    "job_key": "fuld_forberedelse", "race_slug": slug,
+                    "status": "queued", "trigger": "schedule",
+                    "args": {"regel": "ny-kilde"}})
+            except requests.HTTPError as exc:          # noqa: PERF203
+                print(f"  (kunne ikke koee forberedelse for {slug}: {exc})")
+        print(f"{len(nye_kilder_paa)} loeb sat til forberedelse med det samme")
 
 
 def main() -> None:

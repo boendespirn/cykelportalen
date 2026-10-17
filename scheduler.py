@@ -151,11 +151,24 @@ class Udloeser:
         return (self.job_key, self.race_slug, self.stage_number, self.regel)
 
 
+# Forberedelsen koeres FLERE gange, ikke én. Et loeb faar sine data drypvis:
+# arrangoeren lægger ruten ud uger foer, stigningerne kommer naar ruten er
+# kendt, og startlisten faa dage foer. Koerte vi kun én gang syv dage foer,
+# fik vi det, der tilfaeldigvis laa klar netop dén dag — Veneto Classic havde
+# baade GPX-kilde og stigningskilde registreret som "found", men hverken rute
+# eller stigninger hentet, da loebet var et doegn vaek (2026-10-17).
+#
+# Kadencen er ejerens (2026-10-17) og foelger, hvor hurtigt data aendrer sig:
+# sjaeldent langt ude, dagligt den sidste uge.
 FOER_LOEB = [
-    (timedelta(days=7),   "fuld_forberedelse", "7d"),
+    (timedelta(days=30),  "fuld_forberedelse", "30d"),
+    (timedelta(days=14),  "fuld_forberedelse", "14d"),
+    # Dagligt den sidste uge.
+    *[(timedelta(days=d), "fuld_forberedelse", f"{d}d") for d in range(7, 0, -1)],
     (timedelta(hours=48), "startliste",        "48t"),
     (timedelta(hours=24), "tv_tider",          "24t-tv"),
     (timedelta(hours=24), "raesinfo",          "24t-rute"),
+    (timedelta(hours=6),  "fuld_forberedelse", "6t-prep"),
     (timedelta(hours=6),  "startliste",        "6t"),
     (timedelta(0),        "startliste",        "start"),
 ]
