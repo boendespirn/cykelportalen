@@ -356,7 +356,7 @@ _sidste_digest: date | None = None
 
 
 KILDE_LABEL = {"startlist": "startliste", "results": "resultater",
-               "streaming": "tv"}
+               "streaming": "tv", "route_gpx": "GPX-rute"}
 
 # Beskeden er en HANDLELISTE til ejeren, ikke en statusrapport. Derfor kun de
 # to typer, han faktisk kan skaffe i hånden: startliste og tv.
@@ -368,7 +368,12 @@ KILDE_LABEL = {"startlist": "startliste", "results": "resultater",
 #
 # `stage_info` er også ude: den fyldes af pipelinen selv og kræver ingen
 # menneskelig kilde.
-KILDETYPER_ALTID = ("startlist", "streaming")
+# GPX er med, fordi den BLOKERER arbejde: uden den springer workeren rutekort,
+# stigninger og højdeprofil over (agent_catalog._step kraever). Den er også
+# noget, ejeren kan finde i hånden. Cykelcross rammes ikke — dér står
+# route_gpx som not_applicable, ikke missing, og vi beder aldrig om en GPX til
+# en bane på 2-3 km.
+KILDETYPER_ALTID = ("startlist", "streaming", "route_gpx")
 
 # Herfra finder ejeren kilden i hånden. Siden dækker alle cross-løb og linker
 # direkte videre til arrangørens startliste.

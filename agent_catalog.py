@@ -103,8 +103,16 @@ STEP_SOURCES = {
 
 
 def _step(script, args=(), *, whole=(), stage=(), cwd="agents",
-          runner="python", label=""):
-    """Ét trin = én kommando. Se modulets docstring for whole/stage."""
+          runner="python", label="", kraever=None):
+    """Ét trin = én kommando. Se modulets docstring for whole/stage.
+
+    `kraever` navngiver den datakilde, trinnet ikke kan undvære (fx
+    "route_gpx"). Står kilden som missing eller not_applicable for løbet,
+    springes trinnet over i stedet for at blive koert forgaeves. Et forsoeg
+    uden kilde producerer ikke data — kun fejl og stoej i loggen, som goer
+    det svaerere at se de ægte problemer. Veneto Classic 2026 koerte alle 14
+    trin "OK" og fik hverken rute eller stigninger, fordi der ingen GPX var.
+    """
     return {
         "script": script,
         "args":   list(args),
@@ -114,6 +122,7 @@ def _step(script, args=(), *, whole=(), stage=(), cwd="agents",
         "runner": runner,
         "label":  label or script,
         "source": STEP_SOURCES.get(script),
+        "kraever": kraever,
     }
 
 
@@ -177,7 +186,7 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
                   label="2/7 Højkvalitets profilbilleder (PCS /info/profiles)"),
             _step("gpx_climb_agent.py", ["--race", "{db_slug}"],
                   stage=["--stage", "{stage}"],
-                  label="3/7 Stigninger — opret stage_climbs-rækker"),
+                  label="3/7 Stigninger — opret stage_climbs-rækker", kraever="route_gpx"),
             # Stigninger findes i to former hos PCS: som tekst i HTML'en (trin 3)
             # og — langt oftere — kun som BILLEDER på /info/profiles. Trin 4
             # læser billederne og er for mange løb det eneste trin, der
@@ -192,7 +201,7 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
             _step("stage_profile_generator.py",
                   ["--race", "{db_slug}", "--write-db", "--overwrite"],
                   whole=["--all"], stage=["--stage", "{stage}"],
-                  label="6/7 Hel-etape-højdeprofil i eget design (LEG-001)"),
+                  label="6/7 Hel-etape-højdeprofil i eget design (LEG-001)", kraever="route_gpx"),
             # tv_agent.py scraper hele sendeplanen på én gang og kan ikke
             # afgrænses til én etape — derfor kun med, når hele løbet køres.
             # Den står også som selvstændig knap under "Uafhængigt af løb".
@@ -219,12 +228,12 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
     _job("stigningsprofiler", "Stigningsprofiler", PHASE_BEFORE, [
             _step("veloviewer_agent.py", ["--race", "{db_slug}", "--write-db"],
                   stage=["--stage", "{stage}"],
-                  label="1/2 Strava-segment pr. stigning (VeloViewer-embed)"),
+                  label="1/2 Strava-segment pr. stigning (VeloViewer-embed)", kraever="route_gpx"),
             _step("climb_profile_generator.py",
                   ["--race", "{db_slug}", "--style", "full", "--write-db",
                    "--kun-uden-veloviewer"],
                   whole=["--all"], stage=["--stage", "{stage}"],
-                  label="2/2 Egen stigningsprofil for dem uden VeloViewer-match"),
+                  label="2/2 Egen stigningsprofil for dem uden VeloViewer-match", kraever="route_gpx"),
          ],
          description="Finder Strava-segmentet for hver stigning (kun segment-ID'et "
                      "gemmes; frontenden bygger selv embedet). De stigninger, der "
@@ -434,6 +443,37 @@ def _cwd_path(step: dict) -> str:
     return AGENTS_DIR if step["cwd"] == "agents" else ROOT_DIR
 
 
+def _manglende_kilder(race_slug: str | None) -> set[str]:
+    """Datatyper, loebet IKKE har en kilde til.
+
+    Slaas op i race_data_sources, som research-workeren vedligeholder. Kan
+    opslaget ikke lade sig goere — ingen netvaerk, manglende noegler — antager
+    vi, at alt er til stede: et trin, der koerer forgaeves, er mindre skadeligt
+    end et trin, der aldrig koerer, fordi en opslagsfejl saa ud som en
+    manglende kilde.
+    """
+    if not race_slug:
+        return set()
+    url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not (url and key):
+        return set()
+    try:
+        import requests
+        h = {"apikey": key, "Authorization": f"Bearer {key}"}
+        r = requests.get(f"{url}/rest/v1/races?slug=eq.{race_slug}&select=id&limit=1",
+                         headers=h, timeout=20)
+        rows = r.json() if r.ok else []
+        if not rows:
+            return set()
+        d = requests.get(f"{url}/rest/v1/race_data_sources?race_id=eq.{rows[0]['id']}"
+                         "&select=data_type,status&limit=50", headers=h, timeout=20)
+        return {x["data_type"] for x in (d.json() if d.ok else [])
+                if x.get("status") in ("missing", "not_applicable")}
+    except Exception:                                  # noqa: BLE001
+        return set()
+
+
 def build_commands(job_key: str, race_slug: str | None,
                    stage_number: int | None = None) -> list[dict]:
     """Den ENESTE vej fra (job_key, løb, etape) til kommandolinjer.
@@ -472,8 +512,13 @@ def build_commands(job_key: str, race_slug: str | None,
     else:
         subs = {}
 
+    mangler = _manglende_kilder(race_slug) if job["needs_race"] else set()
+
     out: list[dict] = []
     for step in expand_steps(job_key):
+        if step.get("kraever") and step["kraever"] in mangler:
+            # Springes bevidst over. Se _step() for hvorfor.
+            continue
         extra = step["whole"] if stage_number is None else step["stage"]
         if extra is None:
             if stage_number is not None:
