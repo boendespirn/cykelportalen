@@ -327,7 +327,49 @@ DIGEST_TIME_UTC = 6          # kl. 07/08 dansk tid
 _sidste_digest: date | None = None
 
 
-def dagligt_sammendrag() -> None:
+KILDE_LABEL = {"startlist": "startliste", "results": "resultater",
+               "streaming": "tv", "stage_info": "løbsinfo"}
+
+# Kun de typer, der faktisk bærer en løbsside. route_gpx og climbs er
+# not_applicable for cross og ville bare støje i beskeden.
+KILDETYPER_DER_TAELLER = tuple(KILDE_LABEL)
+
+# Herfra finder ejeren kilden i hånden. Siden dækker alle cross-løb og linker
+# direkte videre til arrangørens startliste.
+CROSS_OPSLAG = "https://cyclocross24.com/dk/calendar/"
+
+
+def manglende_kilder(dage: int = 7) -> list[str]:
+    """Løb inden for `dage`, hvor vi stadig mangler en kilde.
+
+    Hvorfor en egen sektion: cykelcross kan agenterne ikke selv skaffe kilder
+    til. PCS opretter først sin side få dage før løbet, arrangørerne varierer
+    fra serie til serie, og cyclocross24 — som har dem alle og linker direkte
+    videre til startlisterne — ligger bag en bot-spærre, vi ikke omgår
+    (docs/cross-datakilder-plan.md). Beskeden lader derfor ejeren gøre præcis
+    dét, en agent ikke må: slå løbet op i hånden og sende kilden videre.
+    """
+    i_dag = nu().date()
+    til = i_dag + timedelta(days=dage)
+    loeb = hent("races?select=id,slug,name,start_date,race_type,category"
+                f"&start_date=gte.{i_dag.isoformat()}"
+                f"&start_date=lte.{til.isoformat()}&order=start_date&limit=100")
+
+    linjer: list[str] = []
+    for r in loeb:
+        huller = sorted({x["data_type"] for x in
+                         hent(f"race_data_sources?race_id=eq.{r['id']}"
+                              f"&status=eq.missing&select=data_type&limit=20")
+                         if x["data_type"] in KILDETYPER_DER_TAELLER})
+        if not huller:
+            continue
+        maerke = "🚲" if r.get("race_type") == "cyclocross" else "•"
+        navne = ", ".join(KILDE_LABEL.get(h, h) for h in huller)
+        linjer.append(f"  {maerke} {r['start_date']} {r['name']}\n      mangler: {navne}")
+    return linjer
+
+
+def dagligt_sammendrag(tving: bool = False) -> None:
     """Én besked om morgenen: hvad kørte i går, hvad fejlede, hvad mangler.
 
     Det er dét, der ville have fanget Vuelta-hullet samme dag i stedet for en
@@ -336,7 +378,7 @@ def dagligt_sammendrag() -> None:
     """
     global _sidste_digest
     i_dag = nu().date()
-    if _sidste_digest == i_dag or nu().hour != DIGEST_TIME_UTC:
+    if not tving and (_sidste_digest == i_dag or nu().hour != DIGEST_TIME_UTC):
         return
     _sidste_digest = i_dag
 
@@ -369,7 +411,19 @@ def dagligt_sammendrag() -> None:
     if mangler:
         linjer.append(f"Mangler resultat ({len(mangler)}):")
         linjer += [f"  • {m}" for m in mangler[:8]]
-    if not fejlede and not mangler:
+
+    # Kilder, vi ikke selv kan skaffe. Står til sidst, fordi det er en
+    # OPGAVE til ejeren, ikke en fejlmelding — og den skal kunne læses som
+    # en huskeliste, der kan afsluttes.
+    kilder = manglende_kilder(7)
+    if kilder:
+        linjer.append(f"\n🔎 Mangler kilder (næste 7 dage, {len(kilder)} løb):")
+        linjer += kilder[:10]
+        if len(kilder) > 10:
+            linjer.append(f"  … og {len(kilder) - 10} til")
+        linjer.append(f"Find dem her: {CROSS_OPSLAG}")
+
+    if not fejlede and not mangler and not kilder:
         linjer.append("Ingen fejl, ingen huller.")
     notify.send("\n".join(linjer))
 
@@ -407,9 +461,21 @@ if __name__ == "__main__":
                    help="vis planen for de næste N dage i stedet for at køre")
     p.add_argument("--loop", action="store_true",
                    help="bliv kørende og tjek hvert 5. minut")
+    p.add_argument("--sammendrag", action="store_true",
+                   help="send morgenbeskeden NU (til test); --dry-run skriver "
+                        "den kun i terminalen")
     args = p.parse_args()
 
-    if args.dage:
+    if args.sammendrag:
+        # Nulstil daglaasen, saa beskeden kan sendes paa forlangende.
+        _sidste_digest = None
+        if args.tør:
+            kilder = manglende_kilder(7)
+            print(f"Manglende kilder, naeste 7 dage ({len(kilder)} loeb):")
+            print("\n".join(kilder) if kilder else "  ingen")
+        else:
+            dagligt_sammendrag(tving=True)
+    elif args.dage:
         vis_plan(args.dage)
     elif args.loop:
         print(f"scheduler.py kører — tjekker hvert {TJEK_INTERVAL // 60}. minut. Ctrl+C for at stoppe.")

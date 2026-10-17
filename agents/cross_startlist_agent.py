@@ -264,6 +264,30 @@ def find_eller_opret_rytter(r: dict, kilde: str, toer: bool) -> str | None:
     return rows[0]["id"] if rows else None
 
 
+def markér_kilde_fundet(race: dict, antal: int, kilde: str) -> None:
+    """Fortael kataloget, at kilden findes.
+
+    Uden dette blev loebet ved med at staa som "mangler startliste" i
+    morgenbeskeden, selv om vi netop havde hentet 57 ryttere — research-agenten
+    proever foerst igen efter sin spaerretid. Hente-agenten ved det bedre og med
+    det samme, saa den skriver det selv."""
+    rows = sb_get("race_data_sources",
+                  f"race_id=eq.{race['id']}&data_type=eq.startlist&select=id&limit=1")
+    felter = {
+        "status": "found", "source_name": "organiser", "url": kilde,
+        "verification": {"ryttere": antal, "via": "arrangoer-pdf"},
+        "last_attempt_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(),
+    }
+    if rows:
+        requests.patch(f"{SUPABASE_URL}/rest/v1/race_data_sources?id=eq.{rows[0]['id']}",
+                       json=felter, headers=WRITE, timeout=45)
+    else:
+        sb_upsert("race_data_sources",
+                  [{"race_id": race["id"], "data_type": "startlist", **felter}],
+                  conflict="race_id,data_type")
+
+
 def gem(race: dict, ryttere: list[dict], kilde: str, toer: bool) -> int:
     holdcache: dict = {}
     raekker = []
@@ -328,6 +352,8 @@ def behandl(race: dict, toer: bool) -> bool:
 
     n = gem(race, ryttere, pdf, toer)
     print(f"    {'(toer) ' if toer else ''}{n} startliste-raekker")
+    if n and not toer:
+        markér_kilde_fundet(race, n, pdf)
     return n > 0
 
 
@@ -345,7 +371,11 @@ def main() -> None:
 
     loeb = cross_loeb(args.race)
     if not loeb:
-        sys.exit("ingen cross-loeb fundet")
+        # IKKE en fejl. Agenten indgaar i det faelles "startliste"-job, som
+        # ogsaa koerer paa landevejsloeb — og dér er der intet at lave. Et
+        # exit != 0 ville melde hele jobbet fejlet og sende en Telegram-alarm.
+        print(f"{args.race or 'ingen'} er ikke et cykelcross-loeb — springer over")
+        return
     print(f"cross_startlist_agent — {len(loeb)} loeb")
 
     ok = 0

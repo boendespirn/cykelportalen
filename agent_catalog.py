@@ -146,9 +146,17 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
     _job("startliste", "Startliste", PHASE_BEFORE, [
             _step("startlist_agent.py", ["{pcs_slug}", "--year", "{year}"],
                   stage=None, label="Startliste (PCS)"),
+            # Cykelcross har intet pcs_url, saa trinnet ovenfor springer dem
+            # over. Arrangoererne udgiver til gengaeld en PDF i loebsugen, og
+            # den er rigere end PCS: den har ogsaa UCI-ranking. Agenten melder
+            # paent fra og slutter med 0 paa et landevejsloeb, saa trinnet kan
+            # staa her uden at faa jobbet til at fejle.
+            _step("cross_startlist_agent.py", ["--race", "{db_slug}"],
+                  stage=None, label="Startliste (cykelcross, arrangoerens PDF)"),
          ],
-         description="Henter alle ryttere med hold og startnummer fra PCS. Gælder hele løbet.",
-         covers=["startliste"], est_minutes=3),
+         description="Henter alle ryttere med hold og startnummer. Landevej fra PCS, "
+                     "cykelcross fra arrangørens startliste-PDF. Gælder hele løbet.",
+         covers=["startliste"], est_minutes=4),
 
     # Den samlede informationspipeline. Alt det, en etapeside skal bruge for at
     # være komplet, hentes her i den rækkefølge, trinnene afhænger af hinanden:
