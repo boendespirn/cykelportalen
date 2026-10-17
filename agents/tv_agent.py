@@ -34,6 +34,26 @@ AUTH = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
 
 SOURCE_URL = "https://cykelkalenderen.dk"
 
+# Anden tv-kilde. Rettighederne til stort set al cykling i Danmark ligger hos
+# HBO Max og Eurosport, og digitalt.tv foerer deres samlede sendeplan.
+#
+# Den er bedre end cykelkalenderen paa tre punkter, maalt 2026-10-17:
+#   * den raekker ca. 10 dage frem mod kalenderens 7 — Superprestige Overijse
+#     den 25/10 stod der allerede, mens kalenderen ikke kendte den;
+#   * den maerker DISCIPLINEN eksplicit ("Sport: Cykelcross"), saa cross ikke
+#     skal gaettes ud af loebsnavnet — netop dét, der kostede os alle 24
+#     cross-loeb i foerste omgang;
+#   * den giver baade tv-kanal OG streamingtjeneste, hvor kalenderen kun har
+#     den ene.
+#
+# Den er almindelig HTML uden bot-spaerre og kraever derfor ingen browser.
+DIGITALT_TV_URL = ("https://digitalt.tv/"
+                   "sendeplan-sport-paa-discovery-og-eurosport-player/")
+
+MAANEDER = {"januar": 1, "februar": 2, "marts": 3, "april": 4, "maj": 5,
+            "juni": 6, "juli": 7, "august": 8, "september": 9,
+            "oktober": 10, "november": 11, "december": 12}
+
 # TV-logo filnavn → visningsnavn i DB/frontend
 LOGO_MAP = {
     "max-logo.png":    "HBO Max",
@@ -190,6 +210,67 @@ def parse_stage_number(race_str: str, oneday: bool = False) -> int | None:
     return 1 if oneday else None
 
 
+def hent_digitalt_tv() -> list[dict]:
+    """Sendeplanen fra digitalt.tv, i SAMME form som cykelkalenderens udtraek.
+
+    Ved at returnere {date, time, race, channels} kan de to kilder lægges
+    sammen og koere gennem den samme matchning — loebsopslag, datokontrol og
+    koensfilter gaelder dem begge, og der findes kun ét sted, hvor en raekke
+    kan blive skrevet forkert.
+
+    Siden er semantisk markup (li.seo-match-item), saa der parses paa
+    elementer frem for paa fladtekst: et regex over hele siden blodte over i
+    naeste post og hentede "HBO Max 25" som kanalnavn.
+    """
+    try:
+        r = requests.get(DIGITALT_TV_URL, headers={"User-Agent": "Mozilla/5.0 Klassementet/1.0"},
+                         timeout=45)
+        r.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"  (kunne ikke hente digitalt.tv: {type(exc).__name__})")
+        return []
+
+    ud: list[dict] = []
+    for blok in re.findall(r'<li[^>]*seo-match-item.*?</li>', r.text, re.S):
+        tid = re.search(r'seo-match-time"[^>]*>([^<]+)<', blok)
+        navn = re.search(r'itemprop="name"[^>]*>([^<]+)<', blok)
+        meta = re.search(r'seo-match-meta"[^>]*>([^<]*)<', blok)
+        if not (tid and navn):
+            continue
+
+        m = re.match(r"\s*(\d{1,2})\.\s*([a-zæøå]+)\s*(\d{4})\s+(\d{1,2}:\d{2})",
+                     tid.group(1).strip(), re.I)
+        if not m or m.group(2).lower() not in MAANEDER:
+            continue
+        d = date(int(m.group(3)), MAANEDER[m.group(2).lower()], int(m.group(1)))
+
+        meta_tekst = (meta.group(1) if meta else "")
+        # Kun cykling. Uden dette ville "Motocross" og "Trail" ryge med, og
+        # motocross staar faktisk paa siden samme dage som cross.
+        sport = re.search(r"Sport:\s*([^)]+)\)", meta_tekst)
+        if not sport or not re.search(r"cykel|cycling", sport.group(1), re.I):
+            continue
+
+        kanaler: list[str] = []
+        for felt in ("TV", "Streaming"):
+            k = re.search(rf"{felt}:\s*([^-<]+)", meta_tekst)
+            if k:
+                navn_k = k.group(1).strip().rstrip(".,")
+                if navn_k and navn_k.lower() not in ("ingen", "-"):
+                    kanaler.append(navn_k)
+        if not kanaler:
+            continue
+
+        ud.append({
+            "date": d.strftime("%d/%m"),   # samme form som kalenderens
+            "iso": d.isoformat(),          # praecis dato, saa aaret ikke gaettes
+            "time": m.group(4).zfill(5),
+            "race": navn.group(1).strip(),
+            "channels": list(dict.fromkeys(kanaler)),
+        })
+    return ud
+
+
 def rens_programtitel(low: str) -> str:
     """Programtitlen reduceret til selve loebsnavnet.
 
@@ -243,11 +324,25 @@ def match_race_slug(race_str: str, race_slugs: set[str],
     if len(clean) < 5:
         return None
 
+    # Tv-titlen er ofte en FORKORTELSE af vores loebsnavn: "Superprestige
+    # Overijse" mod "Superprestige Overijse - Vlaamse Druivencross" giver kun
+    # 0,66, selv om der ikke er tvivl om, hvilket loeb det er. Derfor godtages
+    # ogsaa et match, hvor hvert ord i den rensede titel staar i loebsnavnet.
+    # Det er ikke loesere end foer: stednavnet skiller stadig soesterloebene i
+    # samme serie ad ("Superprestige Niel" rammer ikke Overijse), og DATOEN
+    # nedenfor er under alle omstaendigheder den haarde betingelse.
+    ord_i_titel = {o for o in re.split(r"[^a-z0-9]+", clean) if len(o) > 3}
+
     kandidater = []
     for slug, name in race_names.items():
-        ratio = SequenceMatcher(None, clean, (name or "").lower()).ratio()
+        lav = (name or "").lower()
+        ratio = SequenceMatcher(None, clean, lav).ratio()
         if ratio >= 0.80:
             kandidater.append((ratio, slug))
+        elif ord_i_titel and all(o in lav for o in ord_i_titel):
+            # Scores lige under taersklen, saa et aegte navnematch altid
+            # vinder over et indeholdt.
+            kandidater.append((0.79, slug))
     if not kandidater:
         return None
 
@@ -364,7 +459,14 @@ def scrape(dry_run: bool) -> None:
         programs = page.evaluate(EXTRACT_JS)
         browser.close()
 
-    print(f"Fandt {len(programs)} programmer på siden\n")
+    # Anden kilde laegges til, foer matchningen begynder: saa gaelder
+    # loebsopslag, datokontrol og koensfilter dem begge, og der findes kun ét
+    # sted, hvor en raekke kan blive skrevet paa det forkerte loeb.
+    ekstra = hent_digitalt_tv()
+    if ekstra:
+        print(f"  + {len(ekstra)} cykelprogrammer fra digitalt.tv")
+    programs = programs + ekstra
+    print(f"Fandt {len(programs)} programmer i alt\n")
 
     saved = skipped = 0
     # Hvorfor et program blev kasseret, samles op og skrives til sidst.
@@ -381,7 +483,10 @@ def scrape(dry_run: bool) -> None:
         grunde.setdefault(grund, []).append(prog.get("race", "?"))
 
     for prog in programs:
-        d = parse_date(prog["date"])
+        # digitalt.tv leverer en praecis dato; kalenderen kun "26/05", hvor
+        # aaret maa gaettes. Brug den praecise, naar den findes.
+        d = (date.fromisoformat(prog["iso"]) if prog.get("iso")
+             else parse_date(prog["date"]))
         if not d:
             spring_over("ulaeselig dato", prog)
             continue
@@ -390,7 +495,8 @@ def scrape(dry_run: bool) -> None:
         # databasen (verificeret 2026-10-14: 0 raekker) — og uden dette filter
         # ville "HG Cross Meulebeke [K]" fuzzy-matche HERRE-loebet med samme
         # navn og skrive kvindernes starttid paa herresiden.
-        if re.search(r"\[\s*k\s*\]", prog["race"], re.IGNORECASE):
+        # Cykelkalenderen skriver [K], digitalt.tv skriver (k).
+        if re.search(r"[\[(]\s*k\s*[\])]", prog["race"], re.IGNORECASE):
             spring_over("kvindeloeb (findes ikke i databasen)", prog)
             continue
 
