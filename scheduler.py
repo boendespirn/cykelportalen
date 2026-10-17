@@ -328,11 +328,19 @@ _sidste_digest: date | None = None
 
 
 KILDE_LABEL = {"startlist": "startliste", "results": "resultater",
-               "streaming": "tv", "stage_info": "løbsinfo"}
+               "streaming": "tv"}
 
-# Kun de typer, der faktisk bærer en løbsside. route_gpx og climbs er
-# not_applicable for cross og ville bare støje i beskeden.
-KILDETYPER_DER_TAELLER = tuple(KILDE_LABEL)
+# Beskeden er en HANDLELISTE til ejeren, ikke en statusrapport. Derfor kun de
+# to typer, han faktisk kan skaffe i hånden: startliste og tv.
+#
+# `results` er bevidst UDE for kommende løb — et løb, der ikke er kørt endnu,
+# mangler selvfølgelig sit resultat, og den linje ville stå der hver eneste
+# morgen uden at nogen kunne gøre noget. Den tages kun med, når løbet ER kørt
+# og resultatet alligevel ikke er fundet; dét er et reelt hul.
+#
+# `stage_info` er også ude: den fyldes af pipelinen selv og kræver ingen
+# menneskelig kilde.
+KILDETYPER_ALTID = ("startlist", "streaming")
 
 # Herfra finder ejeren kilden i hånden. Siden dækker alle cross-løb og linker
 # direkte videre til arrangørens startliste.
@@ -351,16 +359,26 @@ def manglende_kilder(dage: int = 7) -> list[str]:
     """
     i_dag = nu().date()
     til = i_dag + timedelta(days=dage)
-    loeb = hent("races?select=id,slug,name,start_date,race_type,category"
-                f"&start_date=gte.{i_dag.isoformat()}"
-                f"&start_date=lte.{til.isoformat()}&order=start_date&limit=100")
+    # Vinduet gaar BEGGE veje: fremad for de loeb, vi skal naa at skaffe
+    # startliste og tv til, og en uge tilbage for koerte loeb, hvis resultat
+    # aldrig blev fundet.
+    fra = i_dag - timedelta(days=dage)
+    loeb = hent("races?select=id,slug,name,start_date,end_date,race_type,category"
+                f"&start_date=gte.{fra.isoformat()}"
+                f"&start_date=lte.{til.isoformat()}&order=start_date&limit=200")
 
     linjer: list[str] = []
     for r in loeb:
+        slut = r.get("end_date") or r.get("start_date")
+        er_koert = bool(slut and slut < i_dag.isoformat())
+        # Et koert loeb skal ikke staa paa listen for sin startliste eller
+        # sendetid — de er uden betydning bagefter.
+        relevante = ("results",) if er_koert else KILDETYPER_ALTID
+
         huller = sorted({x["data_type"] for x in
                          hent(f"race_data_sources?race_id=eq.{r['id']}"
                               f"&status=eq.missing&select=data_type&limit=20")
-                         if x["data_type"] in KILDETYPER_DER_TAELLER})
+                         if x["data_type"] in relevante})
         if not huller:
             continue
         maerke = "🚲" if r.get("race_type") == "cyclocross" else "•"
