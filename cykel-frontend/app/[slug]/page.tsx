@@ -324,7 +324,7 @@ async function geocodeCity(cityName: string): Promise<[number, number] | null> {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
       {
-        headers: { "User-Agent": "Klassementet/1.0 (jonasb408@gmail.com)" },
+        headers: { "User-Agent": "Klassementet/1.0 (+https://klassementet.dk)" },
         next: { revalidate: 86400 },
       }
     );

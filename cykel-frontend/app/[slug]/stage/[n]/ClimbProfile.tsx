@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSamtykke } from "@/app/Samtykke";
 
 type GradientSection = { km: number; gradient: number };
 
@@ -246,6 +247,48 @@ function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
   );
 }
 
+/**
+ * VeloViewer-embedden hentes fra veloviewer.com og sender derfor brugerens
+ * IP-adresse til tredjepart. Den må ikke indlæses uden samtykke, jf.
+ * cookiepolitikken. Her spørger vi i stedet der, hvor profilen ville have
+ * stået — så kan man sige ja til netop denne uden at åbne banneret igen.
+ *
+ * "fuld" bruges, når vi ikke har noget alternativ at vise; "tilbud" når
+ * brugeren allerede ser vores egen tegnede profil og blot kan få 3D oveni.
+ */
+function VeloViewerSamtykke({ variant }: { variant: "fuld" | "tilbud" }) {
+  const { tilladKategori } = useSamtykke();
+
+  if (variant === "tilbud") {
+    return (
+      <button
+        type="button"
+        onClick={() => tilladKategori("tredjepart")}
+        className="mt-2 text-xs text-slate-500 underline-offset-2 transition-colors hover:text-emerald-400 hover:underline"
+      >
+        Vis også den interaktive 3D-profil fra VeloViewer →
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-700 bg-slate-900/40 px-6 py-12 text-center">
+      <p className="text-sm text-slate-300">Interaktiv 3D-profil fra VeloViewer</p>
+      <p className="max-w-sm text-xs leading-relaxed text-slate-500">
+        Profilen hentes fra veloviewer.com, som derfor modtager din IP-adresse og kan sætte egne
+        cookies. Derfor indlæser vi den først, når du siger ja.
+      </p>
+      <button
+        type="button"
+        onClick={() => tilladKategori("tredjepart")}
+        className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-400 transition-colors hover:bg-emerald-500/20"
+      >
+        Vis profilen
+      </button>
+    </div>
+  );
+}
+
 function hasVisualProfile(c: Climb): boolean {
   return !!(
     c.veloviewer_segment_id ||
@@ -255,6 +298,9 @@ function hasVisualProfile(c: Climb): boolean {
 }
 
 export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
+  // Indlejret indhold fra VeloViewer må først hentes med brugerens samtykke.
+  const { harSamtykke } = useSamtykke();
+  const harVeloViewerSamtykke = harSamtykke("tredjepart");
   const [activeIdx, setActiveIdx] = useState<number>(elevationImageUrl ? -1 : 0);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Venstre-til-højre-reveal må først starte når billedet er indlæst,
@@ -382,8 +428,10 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
               )}
             </div>
 
-            {/* VeloViewer 3D-embed foretrækkes — derefter egen genereret profil (lightbox), derefter egen graf */}
-            {activeClimb.veloviewer_segment_id ? (
+            {/* VeloViewer 3D-embed foretrækkes — derefter egen genereret profil
+                (lightbox), derefter egen graf. Embedden kræver dog samtykke, så
+                uden et ja falder vi ned i kæden og tilbyder 3D som et tillæg. */}
+            {activeClimb.veloviewer_segment_id && harVeloViewerSamtykke ? (
               <iframe
                 src={`https://veloviewer.com/segments/${activeClimb.veloviewer_segment_id}/embed`}
                 style={{ width: "100%", height: 450, border: 0, borderRadius: 8 }}
@@ -391,25 +439,31 @@ export default function ClimbProfile({ climbs, elevationImageUrl }: Props) {
                 title={activeClimb.name}
               />
             ) : hasOwnProfileImage(activeClimb) ? (
-              <button
-                className="block w-full text-left cursor-zoom-in"
-                onClick={() => setLightboxUrl(activeClimb.profile_image_url!)}
-                aria-label={`Åbn profil for ${activeClimb.name}`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={activeClimb.profile_image_url!}
-                  alt={activeClimb.name}
-                  className="w-full rounded-lg"
-                />
-              </button>
+              <>
+                <button
+                  className="block w-full text-left cursor-zoom-in"
+                  onClick={() => setLightboxUrl(activeClimb.profile_image_url!)}
+                  aria-label={`Åbn profil for ${activeClimb.name}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={activeClimb.profile_image_url!}
+                    alt={activeClimb.name}
+                    className="w-full rounded-lg"
+                  />
+                </button>
+                {activeClimb.veloviewer_segment_id && <VeloViewerSamtykke variant="tilbud" />}
+              </>
             ) : activeClimb.gradient_sections && activeClimb.gradient_sections.length > 0 ? (
               <>
                 <ClimbSvg climb={activeClimb} />
                 <div className="mt-2">
                   <GradientLegend />
                 </div>
+                {activeClimb.veloviewer_segment_id && <VeloViewerSamtykke variant="tilbud" />}
               </>
+            ) : activeClimb.veloviewer_segment_id ? (
+              <VeloViewerSamtykke variant="fuld" />
             ) : null}
           </div>
         )}

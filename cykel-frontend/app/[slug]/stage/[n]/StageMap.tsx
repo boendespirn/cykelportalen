@@ -28,10 +28,14 @@ export default function StageMap({ start, finish, startName, finishName, routePo
     import("leaflet").then(({ default: L }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (L.Icon.Default.prototype as any)._getIconUrl;
+      // Markørikonerne ligger i public/leaflet/ i stedet for på unpkg.com.
+      // Et CDN i USA ville ellers få brugerens IP-adresse, hver gang et kort
+      // blev vist — en tredjelandsoverførsel vi ikke har brug for, og som vi
+      // ellers skulle oplyse om. Filerne kommer fra leaflet-pakken selv.
       L.Icon.Default.mergeOptions({
-        iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+        iconRetinaUrl: "/leaflet/images/marker-icon-2x.png",
+        iconUrl: "/leaflet/images/marker-icon.png",
+        shadowUrl: "/leaflet/images/marker-shadow.png",
       });
 
       const map = L.map(containerRef.current!, { zoomControl: true, attributionControl: false });
@@ -111,7 +115,8 @@ export default function StageMap({ start, finish, startName, finishName, routePo
         }
         .leaflet-label::before { display: none !important; }
       `}</style>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      {/* Serveres lokalt af samme grund som markørikonerne ovenfor. */}
+      <link rel="stylesheet" href="/leaflet/leaflet.css" />
       <div ref={containerRef} style={{ width: "100%", height: "280px", borderRadius: "12px", overflow: "hidden" }} />
     </>
   );

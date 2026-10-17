@@ -84,6 +84,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/riders`, changeFrequency: "weekly", priority: 0.5 },
     { url: `${BASE}/teams`, changeFrequency: "weekly", priority: 0.5 },
     { url: `${BASE}/nyheder`, changeFrequency: "daily", priority: 0.7 },
+    { url: `${BASE}/advertorials`, changeFrequency: "weekly", priority: 0.4 },
+    { url: `${BASE}/om`, changeFrequency: "yearly", priority: 0.3 },
+    { url: `${BASE}/kontakt`, changeFrequency: "yearly", priority: 0.3 },
+    // De juridiske sider skal være indekserbare — de dokumenterer, at siden er
+    // en reel, ansvarlig udgiver, og de bliver søgt frem direkte.
+    { url: `${BASE}/privatlivspolitik`, changeFrequency: "yearly", priority: 0.2 },
+    { url: `${BASE}/cookiepolitik`, changeFrequency: "yearly", priority: 0.2 },
+    { url: `${BASE}/vilkaar-og-betingelser`, changeFrequency: "yearly", priority: 0.2 },
     ...raceUrls,
     ...stageUrls,
     ...riderUrls,

@@ -14,12 +14,15 @@ const INQUIRY_TYPES = [
 
 export default function KontaktPage() {
   const [state, setState] = useState<FormState>("idle");
+  const [fejl, setFejl] = useState<string | null>(null);
   const [form, setForm] = useState({
     type: "",
     name: "",
     email: "",
     company: "",
     message: "",
+    // Honeypot: skjult for mennesker, udfyldes kun af bots.
+    website: "",
   });
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
@@ -29,10 +32,26 @@ export default function KontaktPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setState("sending");
-    // Contact form backend activated at domain launch — formspree.io or custom endpoint
-    // For now, show a "coming soon" success state
-    await new Promise(r => setTimeout(r, 800));
-    setState("success");
+    setFejl(null);
+    try {
+      const res = await fetch("/api/kontakt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Serveren bestemmer teksten, så vi aldrig afslører hvor mailen
+        // lander — heller ikke når noget går galt.
+        setFejl(data?.fejl ?? "Beskeden kunne ikke sendes. Prøv igen om lidt.");
+        setState("error");
+        return;
+      }
+      setState("success");
+    } catch {
+      setFejl("Vi kunne ikke få forbindelse. Tjek din internetforbindelse og prøv igen.");
+      setState("error");
+    }
   }
 
   return (
@@ -78,7 +97,7 @@ export default function KontaktPage() {
           <p className="text-slate-500 text-sm">Vi vender tilbage til dig hurtigst muligt.</p>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="relative space-y-5">
           {/* Inquiry type */}
           <div>
             <label className="block text-xs uppercase tracking-widest text-slate-500 mb-2">
@@ -153,6 +172,29 @@ export default function KontaktPage() {
             />
           </div>
 
+          {/* Honeypot — skjult for mennesker og skærmlæsere, synlig for bots. */}
+          <div aria-hidden="true" className="absolute left-[-9999px] h-0 w-0 overflow-hidden">
+            <label htmlFor="website">Udfyld ikke dette felt</label>
+            <input
+              id="website"
+              type="text"
+              name="website"
+              value={form.website}
+              onChange={handleChange}
+              tabIndex={-1}
+              autoComplete="off"
+            />
+          </div>
+
+          {fejl && (
+            <p
+              role="alert"
+              className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-300"
+            >
+              {fejl}
+            </p>
+          )}
+
           <button
             type="submit"
             disabled={state === "sending"}
@@ -162,8 +204,8 @@ export default function KontaktPage() {
           </button>
 
           <p className="text-xs text-slate-700 text-center">
-            Formularen aktiveres ved domæne-lancering. Vi kan kontaktes på{" "}
-            <span className="text-slate-600">kontakt@klassementet.dk</span> i mellemtiden.
+            Formularen er den eneste vej til os. Vi bruger kun din e-mailadresse til at svare —
+            se <Link href="/privatlivspolitik" className="text-slate-600 hover:text-slate-500 underline underline-offset-2">privatlivspolitikken</Link>.
           </p>
         </form>
       )}
