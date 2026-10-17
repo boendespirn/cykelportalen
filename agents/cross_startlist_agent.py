@@ -134,7 +134,7 @@ def sb_upsert(table: str, rows: list, conflict: str) -> bool:
 
 def cross_loeb(slug: str | None) -> list[dict]:
     flt = f"&slug=eq.{slug}" if slug else ""
-    return sb_get("races", "select=id,slug,name,category,start_date,race_type"
+    return sb_get("races", "select=id,slug,name,category,start_date,race_type,country_code"
                            f"&race_type=eq.cyclocross&order=start_date{flt}")
 
 
@@ -177,6 +177,68 @@ def find_loebsside(race: dict) -> tuple[str | None, list[str]]:
         if any(t in " ".join(pdfs).lower() for t in tokens):
             return side, pdfs
     return None, []
+
+
+# ── KNWU (hollandske loeb) ───────────────────────────────────────────────────
+# mijn.knwu.nl ser tom ud — hver URL svarer med den samme skal — men siden
+# henter sine data fra et AABENT API uden login. De to headere er KNWU's
+# foederations-id; uden dem svarer API'et "Entity Race ... was not found".
+#
+# Det daekker kun hollandske loeb (KNWU er det hollandske forbund), altsaa ét
+# af vores 24 cross-loeb. Men det ét er struktureret JSON i stedet for en PDF.
+FOYS = "https://api.foys.io/cycling/public-api/v1"
+KNWU_ID = "2e38d9ea-84bb-452a-b58b-669352b0a2c6"
+FOYS_H = {"User-Agent": UA, "Accept": "application/json",
+          "x-federationid": KNWU_ID, "x-organisationid": KNWU_ID,
+          "Referer": "https://mijn.knwu.nl/"}
+
+
+def _foys(sti: str, **params) -> list:
+    """Altid en liste tilbage. API'et svarer snart med {"items": [...]},
+    snart med en bar liste — og et .get() paa en liste vaeltede agenten."""
+    try:
+        r = requests.get(f"{FOYS}/{sti}", params=params, headers=FOYS_H, timeout=45)
+        if not r.ok:
+            return []
+        d = r.json()
+    except (requests.RequestException, ValueError):
+        return []
+    if isinstance(d, dict):
+        return d.get("items") or []
+    return d if isinstance(d, list) else []
+
+
+def hent_fra_knwu(race: dict) -> tuple[list[dict], str | None]:
+    """Startlisten fra KNWU, fundet paa loebsDATOen.
+
+    Vi gemmer intet KNWU-id: arrangementet slaas op paa datoen, og derefter
+    vaelges ELITE MEN-loebet inde i det. Saa virker det ogsaa for naeste
+    saesons loeb uden en manuel kobling."""
+    events = _foys("events", skipCount=0, maxResultCount=200,
+                   isRaceResult="false", isHistoric="false", sorting="startDate")
+    dag = race["start_date"]
+    traef = [e for e in events if str(e.get("startDate") or "")[:10] == dag]
+    if not traef:
+        return [], None
+
+    for ev in traef:
+        for sub in _foys("races/lookup", eventId=ev.get("id")):
+            navn = (sub.get("name") or "").upper()
+            if "ELITE" not in navn or "MEN" not in navn or "WOMEN" in navn:
+                continue
+            items = _foys("races/race-participants",
+                          raceId=sub.get("id"), maxResultCount=999)
+            ryttere = [{
+                "bib": p.get("bib") or 0,
+                "navn": (p.get("personName") or "").strip(),
+                "nat": p.get("personNationality"),
+                "hold": p.get("raceTeamName") or p.get("personLicenseOrganisationName"),
+                "uci_rank": None,
+            } for p in items if (p.get("personName") or "").strip()
+                and (p.get("status") or "").lower() != "rejected"]
+            if ryttere:
+                return ryttere, f"https://mijn.knwu.nl/calendar/races/{sub.get('id')}"
+    return [], None
 
 
 def vaelg_elite_pdf(pdfs: list[str]) -> str | None:
@@ -323,6 +385,19 @@ def gem(race: dict, ryttere: list[dict], kilde: str, toer: bool) -> int:
 
 def behandl(race: dict, toer: bool) -> bool:
     print(f"\n[{race['slug']}]  {race['start_date']}  ({race.get('category')})")
+
+    # KNWU foerst for de hollandske loeb: struktureret JSON slaar en PDF.
+    if (race.get("country_code") or "").upper() == "NL":
+        ryttere, kilde = hent_fra_knwu(race)
+        if ryttere:
+            print(f"    {len(ryttere)} ryttere fra KNWU ({kilde})")
+            n = gem(race, ryttere, kilde or "knwu", toer)
+            print(f"    {'(toer) ' if toer else ''}{n} startliste-raekker")
+            if n and not toer:
+                markér_kilde_fundet(race, n, kilde or "knwu")
+            return n > 0
+        print("    KNWU har ingen startliste endnu — proever arrangoeren")
+
     side, pdfs = find_loebsside(race)
     if not side:
         kendt = SERIE_SITES.get(race.get("category") or "")

@@ -55,8 +55,10 @@ AUTH = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
 SKRIV = {**AUTH, "Content-Type": "application/json", "Prefer": "return=representation"}
 
 TJEK_INTERVAL = 300          # sekunder mellem tjek i --loop
-RESULTAT_INTERVAL = 30 * 60  # nyt resultatforsøg hvert halve time
-RESULTAT_MAKS = 20           # loft, så en etape uden resultat ikke poller evigt
+RESULTAT_TAETTE = 3           # forsøg hver time lige efter forventet mål
+RESULTAT_BACKOFF_TIMER = 3    # derefter: ét forsøg hver tredje time
+RESULTAT_BACKOFF_FORSOEG = 4  # hvor mange af de langsomme forsøg
+RESULTAT_MAKS = 12            # loft, så en etape uden resultat ikke poller evigt
 SWEEP_FRA = 5                # UTC-time, hvor timevis-fejningen begynder
 SWEEP_TIL = 21               # UTC-time, hvor den slutter
 
@@ -222,14 +224,27 @@ def resultat_tidspunkter(stage: dict, tv: list[dict]) -> list[datetime]:
 
     maal = forventet_maal(stage, tv)
     if maal:
-        tider += [maal + timedelta(hours=1) + i * timedelta(seconds=RESULTAT_INTERVAL)
-                  for i in range(6)]
+        # Ejerens kadence (2026-10-17): én gang i timen, og efter tre forgaeves
+        # forsoeg hver tredje time. Et resultat, der ikke er kommet efter tre
+        # timer, kommer sjaeldent i det fjerde kvarter — men det kan komme
+        # timer senere, naar arrangoeren er langsom. Tidligere stod der hvert
+        # halve minut i seks forsoeg plus en timevis fejning, og Tour of
+        # Guangxi fik derfor op mod 20 forsoeg i doegnet.
+        start = maal + timedelta(hours=1)
+        tider += [start + i * timedelta(hours=1) for i in range(RESULTAT_TAETTE)]
+        tider += [start + timedelta(hours=RESULTAT_TAETTE)
+                  + i * timedelta(hours=RESULTAT_BACKOFF_TIMER)
+                  for i in range(RESULTAT_BACKOFF_FORSOEG)]
 
+    # Fejningen er sikkerhedsnettet for de loeb, hvor vi ikke kender
+    # maaltidspunktet — 20 af saesonens 36 har tom country_code. Den er nu
+    # hver tredje time i stedet for hver time: den skal fange et resultat, vi
+    # ellers ville overse, ikke vaere den primaere kilde.
     tider += [datetime(d.year, d.month, d.day, t, tzinfo=timezone.utc)
-              for t in range(SWEEP_FRA, SWEEP_TIL + 1)]
+              for t in range(SWEEP_FRA, SWEEP_TIL + 1, RESULTAT_BACKOFF_TIMER)]
     # Etaper slutter sent nok til, at resultatet kan komme efter midnat UTC
     tider += [datetime(d.year, d.month, d.day, 23, tzinfo=timezone.utc) + timedelta(hours=i)
-              for i in range(1, 4)]
+              for i in (1, 3)]
 
     return sorted(set(tider))[:RESULTAT_MAKS]
 
