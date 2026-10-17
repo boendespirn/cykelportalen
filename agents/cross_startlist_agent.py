@@ -260,7 +260,13 @@ def laes_startliste(pdf_bytes: bytes) -> list[dict]:
     Alt mellem nationen og naeste raekke er holdnavnet, og et tal til sidst er
     UCI-rankingen, som ikke alle ryttere har."""
     try:
-        import fitz  # PyMuPDF
+        # Pakken hed `fitz` indtil PyMuPDF 1.24 og advarer nu om, at navnet
+        # fjernes. Vi beder om det nye navn foerst og falder tilbage, saa
+        # agenten virker baade foer og efter den oprydning.
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
     except ImportError as exc:
         # Et manglende bibliotek er en MILJOEFEJL, ikke "ingen startliste
         # endnu". Returnerede vi bare en tom liste, meldte jobbet "OK" og
