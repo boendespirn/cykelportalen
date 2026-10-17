@@ -46,6 +46,9 @@ function generatedProfileUrl(stage: {
 type StartlistEntry = {
   bib_number: number | null; is_gc_captain: boolean; is_sprint_captain: boolean;
   status: string; role: string | null;
+  // Holdet som kilden skrev det. Cykelcross-feltet er klubber og småhold, der
+  // ikke findes i teams-tabellen, så relationen er tom for dem.
+  team_name: string | null;
   riders: { name: string; slug: string; nationality: string | null; speciality: string | null; date_of_birth: string | null; uci_ranking: number | null; photo_url: string | null } | null;
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
@@ -951,7 +954,39 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
               Startlisten er ikke offentliggjort endnu.
             </div>
           ) : (
-            <StartlistBlock teamGroups={teamGroups} totalRiders={totalRiders} gcData={null} />
+            /* Flad liste efter startnummer — IKKE grupperet på hold som
+               landevej. Et cross-felt er klubber og småhold, der ikke findes
+               i teams-tabellen, så holdgrupperingen samlede 55 af 57 ryttere
+               under "Ukendt hold" (set live 2026-10-17). Sporten præsenterer
+               også selv startlisten som en nummerliste. */
+            <div className="rounded-xl border border-slate-800 overflow-hidden divide-y divide-slate-800/40">
+              {startlist
+                .filter((e) => e.status === "active" && e.riders)
+                .map((entry) => {
+                  const r = entry.riders!;
+                  const hold = entry.teams?.name ?? entry.team_name;
+                  return (
+                    <Link key={r.slug} href={`/riders/${r.slug}`}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-900/60 transition-colors">
+                      <span className="w-7 text-right font-mono text-xs text-slate-600 flex-shrink-0">
+                        {entry.bib_number ?? "—"}
+                      </span>
+                      <span className="w-5 text-center text-sm flex-shrink-0">{flagEmoji(r.nationality)}</span>
+                      <span className="flex-1 text-sm text-slate-200 truncate">{r.name}</span>
+                      {hold && (
+                        <span className="hidden sm:block text-xs text-slate-600 truncate max-w-[220px]">
+                          {hold}
+                        </span>
+                      )}
+                      {r.uci_ranking != null && (
+                        <span className="font-mono text-xs text-amber-400 flex-shrink-0" title="UCI-ranking">
+                          #{r.uci_ranking}
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+            </div>
           )}
         </section>
 

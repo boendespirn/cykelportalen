@@ -529,7 +529,10 @@ def get_startlist_for_race(slug: str):
     url = (
         f"{SUPABASE_URL}/rest/v1/startlists"
         f"?race_id=eq.{race_id}"
-        f"&select=bib_number,is_gc_captain,is_sprint_captain,status,role,"
+        # team_name er holdet, som KILDEN skrev det. Cykelcross-feltet er
+        # klubber og smaahold, der ikke findes i teams, og uden feltet stod de
+        # alle som "Ukendt hold" paa loebssiden.
+        f"&select=bib_number,is_gc_captain,is_sprint_captain,status,role,team_name,"
         f"riders(name,slug,nationality,speciality,date_of_birth,uci_ranking,photo_url,hometown_region,training_region),"
         f"teams(name,slug,country_code)"
         f"&status=eq.active"
