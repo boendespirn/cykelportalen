@@ -37,12 +37,12 @@ const MODTAGERE = [
       "Databehandleraftale med EU-Kommissionens standardkontraktbestemmelser, hvor behandlingen sker uden for EU/EØS.",
   },
   {
-    navn: "Telegram",
+    navn: "Vores beskedtjeneste",
     rolle:
-      "Intern beskedkanal. Skriver du via kontaktformularen, videresendes din henvendelse hertil, så vi kan se og besvare den",
+      "Skriver du via kontaktformularen, sendes din henvendelse videre som en besked til teamet bag siden, så vi kan se og besvare den",
     land: "Uden for EU/EØS",
     grundlag:
-      "Telegram behandler beskeden som led i leveringen af tjenesten. Send derfor ikke fortrolige oplysninger i formularen.",
+      "Tjenesten behandler beskeden som led i at levere den videre til os. Send derfor ikke fortrolige oplysninger i formularen.",
   },
   {
     navn: "VeloViewer",
@@ -146,9 +146,10 @@ export default function PrivatlivspolitikPage() {
           bogføringsloven kræver, i 5 år fra udløbet af det regnskabsår, aftalen vedrører.
         </p>
         <p>
-          <strong>Hvordan den når os:</strong> Henvendelsen videresendes til vores interne
-          beskedkanal hos Telegram, så vi kan se og besvare den. Telegram behandler derfor
-          indholdet af din besked, og behandlingen sker uden for EU/EØS.
+          <strong>Hvordan den når os:</strong> Når du sender formularen, går din henvendelse
+          videre som en besked til ejeren og teamet bag siden, så vi kan se og besvare den. Den
+          tjeneste, vi bruger til at modtage beskeden, behandler derfor indholdet, og den
+          behandling sker uden for EU/EØS.
         </p>
         <p>
           Du bestemmer selv, hvad du skriver. Undlad at sende fortrolige oplysninger som
