@@ -261,9 +261,15 @@ def laes_startliste(pdf_bytes: bytes) -> list[dict]:
     UCI-rankingen, som ikke alle ryttere har."""
     try:
         import fitz  # PyMuPDF
-    except ImportError:
-        print("    [mangler] PyMuPDF — koer: pip install pymupdf")
-        return []
+    except ImportError as exc:
+        # Et manglende bibliotek er en MILJOEFEJL, ikke "ingen startliste
+        # endnu". Returnerede vi bare en tom liste, meldte jobbet "OK" og
+        # ejeren fik en besked, der saa ud som om kilden var tom — praecis
+        # den tavse fejl, run_validator blev bygget for at fange. Meulebeke
+        # 2026-10-17: agenten fandt fem PDF'er og kunne ikke aabne én.
+        raise RuntimeError(
+            "PyMuPDF mangler i miljoeet — tilfoej 'pymupdf' til "
+            "requirements.txt og byg workeren igen") from exc
 
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         linjer = [x.strip() for side in doc for x in side.get_text().splitlines()
@@ -454,14 +460,24 @@ def main() -> None:
     print(f"cross_startlist_agent — {len(loeb)} loeb")
 
     ok = 0
+    miljoefejl: str | None = None
     for race in loeb:
         try:
             ok += bool(behandl(race, args.toer))
+        except RuntimeError as exc:
+            # Miljoefejl rammer ALLE loeb, ikke bare dette. Den skal give en
+            # fejlet koersel, saa Telegram-alarmen gaar — ellers ser en
+            # manglende afhaengighed ud som "ingen startliste endnu".
+            miljoefejl = str(exc)
+            print(f"    [MILJOEFEJL] {exc}")
+            break
         except Exception as exc:                      # noqa: BLE001
             # Ét loeb maa ikke vaelte hele koerslen — samme grund som i
             # stage_recap_agent efter RES-010.
             print(f"    [fejl] {type(exc).__name__}: {exc}")
     print(f"\nFaerdig: {ok} af {len(loeb)} loeb fik en startliste")
+    if miljoefejl:
+        sys.exit(f"Afbrudt: {miljoefejl}")
 
 
 if __name__ == "__main__":

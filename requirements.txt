@@ -7,5 +7,9 @@ python-slugify==8.0.4
 playwright==1.59.0
 anthropic>=0.40.0
 Pillow>=10.0.0
+# Laeser arrangoerernes startliste-PDF'er (cross_startlist_agent). Manglede i
+# containeren 2026-10-17: agenten fandt Meulebekes fem PDF'er og kunne saa
+# ikke aabne dem.
+pymupdf>=1.24.0
 google-auth>=2.35.0
 google-api-python-client>=2.150.0
