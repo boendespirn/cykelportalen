@@ -37,7 +37,15 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+# Dansk tekst skal kunne skrives, ogsaa naar stdout ikke er en UTF-8-terminal.
+# Det sker med reconfigure og IKKE med `sys.stdout = io.TextIOWrapper(...)`:
+# ombrydningen laver et nyt objekt, og naar modulet importeres ind i en
+# langtlevende proces (data_sources/race_completeness slaar konstanter op her),
+# frigives processens forrige wrapper og lukker den faelles buffer. Derefter
+# doer alt print i HELE processen med "I/O operation on closed file" — det
+# vaeltede runneren 2026-10-17. reconfigure aendrer stroemmen på plads og kan
+# derfor ikke lukke noget.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")

@@ -223,17 +223,24 @@ def _gpx_source_exists(race_slug: str) -> bool:
     både til at beregne søgeboksen og til at verificere kandidaten geometrisk,
     så uden en kilde kan der pr. konstruktion ikke findes et segment.
 
-    Kan modulet ikke importeres (fx et web-miljø uden agenternes afhængigheder),
-    svarer vi ja: et tjek, der stille erklærer noget for umuligt på grund af en
+    Opslaget går gennem data_sources.gpx_pages() og IKKE gennem et direkte
+    `from climb_profile_generator import ...`. Grunden er, at agent-modulerne
+    ved import lægger processens sys.stdout om i en ny TextIOWrapper; sker det
+    inde i en langtlevende proces, frigives den forrige wrapper og lukker den
+    fælles buffer, hvorefter alt videre print dør med "I/O operation on closed
+    file". Det væltede runneren 2026-10-17 midt i resultat-jobbet for
+    tour-of-guangxi-2026. data_sources holder wrapperne i live og lægger
+    stdout tilbage; her må vi derfor aldrig importere agenten selv.
+
+    None fra gpx_pages() betyder "kan ikke afgøres" — modulet kunne ikke
+    importeres (fx et web-miljø uden agenternes afhængigheder). Så svarer vi
+    ja: et tjek, der stille erklærer noget for umuligt på grund af en
     manglende import, ville skjule en reel mangel."""
-    agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agents")
-    if agents_dir not in sys.path:
-        sys.path.insert(0, agents_dir)
-    try:
-        from climb_profile_generator import CYCLINGSTAGE_GPX_PAGES
-    except Exception:
+    import data_sources
+    pages = data_sources.gpx_pages()
+    if pages is None:
         return True
-    return race_slug in CYCLINGSTAGE_GPX_PAGES
+    return race_slug in pages
 
 
 def _climb_profile_check(climbs, race_slug):
