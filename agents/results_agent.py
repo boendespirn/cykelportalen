@@ -320,6 +320,11 @@ def _parse_row(row, cols: dict[str, int]) -> dict | None:
     }
 
 
+# Laengste tid, en etape kan tage. Bruges til at afvise en tabel, hvor
+# "tiden" i virkeligheden er et KLOKKESLAET — se _parse_result_table().
+MAKS_ETAPETID_S = 8 * 3600
+
+
 def _parse_result_table(table) -> dict:
     """
     Top 10 og udgåede ryttere fra en resultattabel.
@@ -352,6 +357,24 @@ def _parse_result_table(table) -> dict:
                 })
         elif rank.upper() == "DNF":
             dnf.append({"slug": parsed["slug"], "name": parsed["name"]})
+
+    # Er "tiden" paa foerstepladsen laengere end et helt etapeloeb, er det
+    # ikke en koeretid men et KLOKKESLAET — og saa er tabellen en STARTLISTE,
+    # ikke et resultat. PCS viser startlisten paa loebets forside, indtil
+    # resultatet er klart, og den har samme form: Rnk, Rider, en tid.
+    #
+    # Chrono des Nations 2026 blev hentet i det vindue, og startlisten blev
+    # gemt som resultat: Peyroton-Dartet stod som vinder med "14:26" læst som
+    # 14,4 timers koeretid, og felterne bagefter fik 2, 4, 6 minutter — i
+    # virkeligheden startintervallerne. Remco Evenepoel, der vandt, stod
+    # ingen steder. Hellere intet resultat end et forkert (CLAUDE.md §6).
+    if top10:
+        foerste = parse_time_to_seconds(top10[0].get("time") or "")
+        if foerste and foerste > MAKS_ETAPETID_S:
+            print(f"    [afvist: foerstepladsens tid er {foerste // 3600}t — "
+                  f"det er et klokkeslaet, saa tabellen er en startliste]")
+            return {"top10": [], "dnf": []}
+
     return {"top10": top10, "dnf": dnf}
 
 
