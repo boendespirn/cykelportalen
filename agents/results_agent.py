@@ -582,9 +582,12 @@ def _fetch_classification_table(browser, headers: dict, base_url: str,
             print(f"    [{suffix}: ingen tabel på {url}]")
             continue
         fane = _aktiv_fane(soup)
-        # Loebs-niveau-siden (sidste etape) har ikke etapefanerne og giver
-        # derfor None. Den er allerede snaevert afgraenset til is_final_stage,
-        # saa dér er URL'en selv beviset.
+        # None betyder "siden navngiver ingen klassementsfane" — den slags
+        # side afvises ikke paa det grundlag alene, for saa ville en aendring
+        # i PCS' navigation lukke al hentning ned paa én gang. Kun en side,
+        # der positivt siger noget ANDET end det bestilte, bliver afvist.
+        # (Loebs-niveau-siden for sidste etape svarer selv 'gc' — verificeret
+        # paa Tour of Guangxis slutklassement 2026-10-18.)
         if ventet and fane is not None and fane != ventet:
             print(f"    [{suffix}: {url} viser '{fane}', ikke '{ventet}' — afvist]")
             continue
