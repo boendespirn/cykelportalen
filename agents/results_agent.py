@@ -301,8 +301,14 @@ def _parse_row(row, cols: dict[str, int]) -> dict | None:
         i = cols.get(kode)
         return tds[i].get_text(strip=True) if i is not None and len(tds) > i else ""
 
+    # Pointkolonnen heder 'res_pnt' paa PCS i dag; 'pnt' er den gamle kode og
+    # beholdes som faldskaerm. Da kolonnen blev omdoebt, blev point laest som 0
+    # UDEN at noget fejlede: Tour of Guangxis pointklassement fik 13 ryttere
+    # med nul point hver, og rangordenen var dermed vilkaarlig (2026-10-18).
+    # 'pnt_won' er dagens udbytte ("+15"), ikke den samlede stilling, og maa
+    # aldrig bruges her.
     try:
-        point = int(felt("pnt"))
+        point = int(felt("res_pnt") or felt("pnt"))
     except ValueError:
         point = 0
     return {
@@ -443,8 +449,73 @@ def _race_level_url(base_url: str) -> str | None:
     return m.group(1) if m else None
 
 
+# Fanens navn paa PCS for hvert af de klassementer, vi henter. Bruges til at
+# BEKRAEFTE, at en hentet side faktisk viser det klassement, vi tror — se
+# _aktiv_fane().
+FANE_NAVN = {"gc": "gc", "points": "points", "kom": "kom", "youth": "youth"}
+
+
+def _aktiv_fane(soup) -> str | None:
+    """Hvilket klassement siden selv siger, den viser.
+
+    PCS markerer den valgte fane i sin egen navigation, og det er den eneste
+    kilde paa siden, der utvetydigt navngiver tabellen. Etaperesultatsiden har
+    ingen klassementsfane aktiv og giver derfor None — praecis den forskel, der
+    skal til for at afvise den som klassement.
+
+    Returnerer fanens navn i smaa bogstaver ("gc", "points", "kom", "youth"),
+    eller None hvis ingen klassementsfane er aktiv.
+    """
+    kendte = set(FANE_NAVN.values())
+    for a in soup.select("li.cur a, a.cur, .pageSelectNav .cur a"):
+        navn = a.get_text(strip=True).lower().rstrip("▼").strip()
+        if navn in kendte:
+            return navn
+    return None
+
+
+def _nav_klassement_urls(stage_soup, base_url: str) -> dict[str, str]:
+    """Klassements-URL'erne, som etapesidens EGEN fanenavigation peger paa.
+
+    Hvorfor vi laeser dem frem for at bygge dem: PCS bruger to forskellige
+    URL-former. Tour de France og Giro svarer paa '…/2026/stage-10-kom', mens
+    Tour of Guangxi kun svarer paa
+    '…/tour-of-guangxi-2026-gc-stage-1-general-classification'. Den byggede
+    form gav ingen tabel for Guangxi, og loebet stod derfor med ét eneste
+    klassement ud af seks etaper — GC paa sidste etape, som kom ind gennem
+    loebs-niveau-faldet (opdaget 2026-10-18).
+
+    Linkene tages kun med, naar href'en utvetydigt navngiver klassementet.
+    Fanens TEKST bruges ikke som noegle: Giros GC-fane peger paa en href med
+    'points-classification-stage' i, og et opslag paa tekst ville dermed
+    skrive den forkerte tabel ind. Hvilket klassement vi faktisk fik, afgoeres
+    alene af _aktiv_fane() paa den hentede side.
+    """
+    moenstre = {
+        "gc":     ("general-classification",),
+        "points": ("points-classification",),
+        "kom":    ("kom-classification", "mountains-classification"),
+        "youth":  ("youth-classification",),
+    }
+    rod = base_url.split("/race/")[0]
+    fundet: dict[str, str] = {}
+    for a in stage_soup.find_all("a", href=True):
+        href = a["href"]
+        # 'day-classification' og '-stage' er DAGENS tabel, ikke den
+        # akkumulerede stilling. De maa aldrig forveksles med klassementet.
+        if "day-classification" in href or href.endswith("-stage"):
+            continue
+        for noegle, nøgleord in moenstre.items():
+            if noegle in fundet:
+                continue
+            if any(k in href for k in nøgleord):
+                fundet[noegle] = href if href.startswith("http")                                  else f"{rod}/{href.lstrip('/')}"
+    return fundet
+
+
 def _fetch_classification_table(browser, headers: dict, base_url: str,
-                                suffix: str, is_final_stage: bool):
+                                suffix: str, is_final_stage: bool,
+                                nav_urls: dict[str, str] | None = None):
     """
     Henter tabellen for ét klassement (gc/points/kom/youth).
 
@@ -458,15 +529,25 @@ def _fetch_classification_table(browser, headers: dict, base_url: str,
     skrive slutstillingen ind som "efter etape 10" — en tavs datafejl af præcis
     samme slags som den, denne funktion blev skrevet for at fjerne.
 
-    Returnerer None hvis ingen af URL'erne gav en tabel. Kalderen skal så lade
-    klassementet stå tomt — aldrig substituere en anden tabel.
+    Hver kandidat BEKRAEFTES mod sidens egen aktive fane, foer tabellen
+    godtages. Det er det, der goer det forsvarligt at proeve flere URL-former:
+    rammer en kandidat en side, der viser noget andet end det bestilte
+    klassement, bliver den afvist frem for skrevet i databasen.
+
+    Returnerer None hvis ingen af URL'erne gav en bekraeftet tabel. Kalderen
+    skal så lade klassementet stå tomt — aldrig substituere en anden tabel.
     """
     urls = [f"{base_url}-{suffix}"]
+    # Etapesidens egen navigation. Staar efter den byggede form, saa de loeb,
+    # der virker i dag, henter uaendret fra samme URL som hidtil.
+    if nav_urls and suffix in nav_urls:
+        urls.append(nav_urls[suffix])
     if is_final_stage:
         race_url = _race_level_url(base_url)
         if race_url:
             urls.append(f"{race_url}/{suffix}")
 
+    ventet = FANE_NAVN.get(suffix)
     for url in urls:
         try:
             soup = _fetch_soup(browser, headers, url)
@@ -474,9 +555,17 @@ def _fetch_classification_table(browser, headers: dict, base_url: str,
             print(f"    [{suffix}: {url} fejlede — {type(e).__name__}]")
             continue
         table = _find_first_visible_table(soup)
-        if table is not None:
-            return table
-        print(f"    [{suffix}: ingen tabel på {url}]")
+        if table is None:
+            print(f"    [{suffix}: ingen tabel på {url}]")
+            continue
+        fane = _aktiv_fane(soup)
+        # Loebs-niveau-siden (sidste etape) har ikke etapefanerne og giver
+        # derfor None. Den er allerede snaevert afgraenset til is_final_stage,
+        # saa dér er URL'en selv beviset.
+        if ventet and fane is not None and fane != ventet:
+            print(f"    [{suffix}: {url} viser '{fane}', ikke '{ventet}' — afvist]")
+            continue
+        return table
     return None
 
 
@@ -541,10 +630,19 @@ def scrape_stage_result(pcs_stage_url: str, is_final_stage: bool = False) -> dic
             # for Pogačar (RES-005). Ingen af de fire klassementer må nogensinde
             # substitueres med en anden tabel: hellere tomt end forkert
             # (CLAUDE.md §6 — kan data ikke verificeres, publicér det ikke).
-            gc_table        = _fetch_classification_table(browser, headers, base_url, "gc", is_final_stage)
-            points_table    = _fetch_classification_table(browser, headers, base_url, "points", is_final_stage)
-            mountains_table = _fetch_classification_table(browser, headers, base_url, "kom", is_final_stage)
-            youth_table     = _fetch_classification_table(browser, headers, base_url, "youth", is_final_stage)
+            # Etapesidens fanenavigation er den anden kilde til URL'erne —
+            # noedvendig for de loeb, hvor den byggede form ikke svarer, og
+            # samtidig den liste, der fortaeller hvilke klassementer loebet
+            # OVERHOVEDET har. Tour of Guangxi har fx GC, point og ungdom,
+            # men intet bjergklassement; dér skal 'kom' blive tom.
+            nav_urls = _nav_klassement_urls(soup, base_url)
+            if nav_urls:
+                print(f"    [navigation: {', '.join(sorted(nav_urls))}]")
+
+            gc_table        = _fetch_classification_table(browser, headers, base_url, "gc", is_final_stage, nav_urls)
+            points_table    = _fetch_classification_table(browser, headers, base_url, "points", is_final_stage, nav_urls)
+            mountains_table = _fetch_classification_table(browser, headers, base_url, "kom", is_final_stage, nav_urls)
+            youth_table     = _fetch_classification_table(browser, headers, base_url, "youth", is_final_stage, nav_urls)
 
             browser.close()
 

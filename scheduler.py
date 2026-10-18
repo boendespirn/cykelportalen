@@ -45,6 +45,7 @@ from urllib.parse import quote
 import requests
 from dotenv import load_dotenv
 
+import agent_catalog
 import notify
 
 load_dotenv()
@@ -61,6 +62,22 @@ RESULTAT_BACKOFF_FORSOEG = 4  # hvor mange af de langsomme forsøg
 RESULTAT_MAKS = 12            # loft, så en etape uden resultat ikke poller evigt
 SWEEP_FRA = 5                # UTC-time, hvor timevis-fejningen begynder
 SWEEP_TIL = 21               # UTC-time, hvor den slutter
+
+# ── Efterslæb ─────────────────────────────────────────────────────────────────
+# resultat_tidspunkter() giver kun tidspunkter paa etapens EGEN dato. Naar de er
+# passeret, blev etapen aldrig forsoegt igen: planlaeg() kraever `fra <= t <= til`,
+# og vinduet er for længst kørt forbi. Et resultat, der ikke kom inden for
+# etapedagens forsoeg, stod derfor som hul for evigt — Tour of Guangxi E5 havde
+# nul resultater fem dage efter, og E1-E4 stod uden klassementer, mens
+# morgenbeskeden trofast meldte hullet hver dag uden at nogen lukkede det.
+#
+# Efterslæbet er den regel, der lukker dem: ét dagligt forsoeg pr. hul, indtil
+# dataen er der eller loftet er naaet. Reglen navngives med datoen, saa
+# dublet-filteret i koer_en_gang() (som ser to dage tilbage) ikke spaerrer
+# morgendagens forsoeg.
+EFTERSLAEB_TIME = 5          # UTC — foer morgenbeskeden kl. 6, saa den kan se koen
+EFTERSLAEB_DAGE = 21         # hvor laenge vi bliver ved med at proeve
+EFTERSLAEB_PR_LOEB = 4       # huller pr. loeb pr. dag; resten tages i morgen
 
 
 # ── Tid ───────────────────────────────────────────────────────────────────────
@@ -299,6 +316,13 @@ def planlaeg(fra: datetime, til: datetime) -> list[Udloeser]:
                   f"&select=stage_number,broadcast_date,end_time&limit=200")
         resultater = {x["stage_id"] for x in
                       hent(f"results?race_id=eq.{r['id']}&select=stage_id&limit=1000")}
+        # Hvilke etaper HAR et klassement. Et etapeloeb, hvor resultatet er
+        # hentet, men klassementet mangler, er ogsaa et hul — og det var
+        # praecis Guangxi E1-E4's tilstand.
+        klassementer = {x["after_stage_number"] for x in
+                        hent(f"classifications?race_id=eq.{r['id']}"
+                             f"&select=after_stage_number&limit=5000")}
+        er_etapeloeb = (r.get("race_type") or "") == "stage_race"
 
         for st in stages:
             if not st.get("date"):
@@ -317,6 +341,47 @@ def planlaeg(fra: datetime, til: datetime) -> list[Udloeser]:
                 if fra <= t <= til:
                     ud.append(Udloeser(t, "resultater", slug, st["stage_number"],
                                        f"resultat+{i}"))
+
+        # ── Efterslæb: huller bagud, som etapedagens forsoeg ikke lukkede ──
+        huller: list[dict] = []
+        for st in stages:
+            if not st.get("date"):
+                continue
+            if st.get("data_status") in ("cancelled", "no_result"):
+                continue
+            etape_dag = date.fromisoformat(st["date"])
+            if etape_dag >= til.date():
+                continue        # ikke koert endnu — de haandteres ovenfor
+            mangler_resultat = st["id"] not in resultater
+            # Klassementet kraeves kun af etapeloeb; et endagsloeb har intet.
+            mangler_klassement = er_etapeloeb and st["stage_number"] not in klassementer
+            if mangler_resultat or mangler_klassement:
+                # Rangen styrer, hvem der kommer foerst, naar loftet rammer:
+                # en etape UDEN resultat er et stoerre hul end en etape, der
+                # blot mangler sit klassement. Uden dette fyldte Guangxi
+                # E1-E4 (klassement) loftet, mens E5 — helt uden resultat —
+                # faldt ud og aldrig blev hentet.
+                huller.append({**st, "_rang": 0 if mangler_resultat else 1})
+
+        # Vigtigste hul foerst, derefter aeldste etape. Loftet pr. dag holder
+        # koeen rolig: et loeb med seks aabne etaper skal ikke laegge seks
+        # koersler paa én morgen og skubbe dagens egne etaper bagud. Resten
+        # kommer med i morgen.
+        for st in sorted(huller, key=lambda x: (x["_rang"], x["stage_number"]))[:EFTERSLAEB_PR_LOEB]:
+            etape_dag = date.fromisoformat(st["date"])
+            dag = fra.date()
+            while dag <= til.date():
+                # Loftet regnes fra etapens dato: et hul, der er aeldre end
+                # EFTERSLAEB_DAGE, er ikke et forbigaaende hul mere, men noget
+                # ejeren skal se paa. Det bliver staaende i morgenbeskeden.
+                if 0 < (dag - etape_dag).days <= EFTERSLAEB_DAGE:
+                    t = datetime(dag.year, dag.month, dag.day,
+                                 EFTERSLAEB_TIME, tzinfo=timezone.utc)
+                    if fra <= t <= til:
+                        ud.append(Udloeser(t, "resultater", slug,
+                                           st["stage_number"],
+                                           f"efterslaeb-{dag.isoformat()}"))
+                dag += timedelta(days=1)
 
         if r.get("end_date") and (r.get("race_type") or "") == "stage_race":
             slut = lokal_til_utc(date.fromisoformat(r["end_date"]), 20)
@@ -420,6 +485,115 @@ def manglende_kilder(dage: int = 7) -> list[str]:
     return linjer
 
 
+# Jobnoegler, der handler om at FORBEREDE et loeb, mod dem der henter
+# resultater undervejs. Skillelinjen er den, ejeren taenker i om morgenen:
+# hvad bliver gjort klar, og hvad bliver hentet hjem.
+FORBEREDELSE_JOB = {"fuld_forberedelse", "startliste", "raesinfo", "tv_tider",
+                    "stigningsprofiler", "rytterstats"}
+
+# Kildetyper, der BLOKERER forberedelsen. Mangler de, kan de trin, der
+# afhaenger af dem, ikke koere — og saa er det ikke en fuld forberedelse, selv
+# om jobbet staar i planen.
+BLOKERENDE_KILDER = ("startlist", "route_gpx")
+
+
+def _loebsnavne(slugs: set[str]) -> dict[str, dict]:
+    """Navn, datoer og kildehuller for de loeb, der optraeder i dagens plan."""
+    if not slugs:
+        return {}
+    liste = ",".join(f'"{x}"' for x in slugs if x)
+    if not liste:
+        return {}
+    ud: dict[str, dict] = {}
+    for r in hent(f"races?select=id,slug,name,start_date,end_date,race_type"
+                  f"&slug=in.({liste})&limit=200"):
+        huller = sorted({x["data_type"] for x in
+                         hent(f"race_data_sources?race_id=eq.{r['id']}"
+                              f"&status=eq.missing&select=data_type&limit=20")
+                         if x["data_type"] in BLOKERENDE_KILDER})
+        ud[r["slug"]] = {**r, "huller": huller}
+    return ud
+
+
+def dagens_plan() -> list[str]:
+    """Hvad workeren koerer i det naeste doegn — ejerens daglige overblik.
+
+    Hvorfor den hoerer i morgenbeskeden: indtil nu meldte beskeden kun fejl og
+    manglende kilder, altsaa udelukkende det, der var i vejen. Der stod intet
+    om, hvad der faktisk BLEV gjort — og et doegn, hvor alt gik godt, saa
+    derfor ud som et doegn, hvor intet skete. Planen vendes om: foerst hvad
+    der koeres, og for hvert loeb om kilderne raekker til det.
+
+    Tiderne er UTC som i resten af skemalaeggeren; ejeren laeser dem som
+    "i loebet af dagen", ikke som et klokkeslaet, han skal vaere klar til.
+    """
+    start = nu()
+    udloesere = planlaeg(start, start + timedelta(hours=24))
+    if not udloesere:
+        return ["📅 Dagens plan: ingen kørsler planlagt."]
+
+    pr_loeb: dict[str, list] = {}
+    for u in udloesere:
+        pr_loeb.setdefault(u.race_slug, []).append(u)
+
+    info = _loebsnavne(set(pr_loeb) - {""})
+    linjer = ["", f"📅 Dagens plan — {len(udloesere)} kørsler"]
+
+    # Loebene, sorteret saa det, der er taettest paa, staar foerst.
+    def naerhed(slug: str) -> str:
+        return (info.get(slug) or {}).get("start_date") or "9999"
+
+    for slug in sorted((x for x in pr_loeb if x), key=naerhed):
+        r = info.get(slug)
+        navn = r["name"] if r else slug
+        job = pr_loeb[slug]
+
+        forb = sorted({u.job_key for u in job if u.job_key in FORBEREDELSE_JOB})
+        res  = sorted({u.stage_number for u in job
+                       if u.job_key == "resultater" and u.stage_number})
+        efterslaeb = {u.stage_number for u in job if u.regel.startswith("efterslaeb")}
+
+        opgaver: list[str] = []
+        if forb:
+            opgaver.append(", ".join(agent_catalog.label_for(j).lower() for j in forb))
+        if res:
+            etaper = ", ".join(f"E{n}" + ("*" if n in efterslaeb else "") for n in res)
+            opgaver.append(f"resultater {etaper}")
+        for u in job:
+            if u.job_key not in FORBEREDELSE_JOB and u.job_key != "resultater":
+                opgaver.append(agent_catalog.label_for(u.job_key).lower())
+
+        naar = ""
+        if r and r.get("start_date"):
+            dage = (date.fromisoformat(r["start_date"]) - start.date()).days
+            if dage > 0:
+                naar = f" (om {dage} dag{'e' if dage != 1 else ''})"
+            elif r.get("end_date") and r["end_date"] >= start.date().isoformat():
+                naar = " (kører nu)"
+            else:
+                naar = " (kørt)"
+        linjer.append(f"  • {navn}{naar}")
+        linjer.append(f"      {'; '.join(dict.fromkeys(opgaver))}")
+
+        # Kildedommen — kun naar der faktisk forberedes noget.
+        if forb:
+            if r and r["huller"]:
+                mangler = ", ".join(KILDE_LABEL.get(h, h) for h in r["huller"])
+                linjer.append(f"      ⚠ mangler {mangler} — de trin springes over")
+            else:
+                linjer.append("      ✓ alle kilder på plads")
+
+    globale = pr_loeb.get("")
+    if globale:
+        navne = ", ".join(dict.fromkeys(
+            agent_catalog.label_for(u.job_key).lower() for u in globale))
+        linjer.append(f"  • Uden løb: {navne}")
+
+    if any(u.regel.startswith("efterslaeb") for u in udloesere):
+        linjer.append("  * = efterslæb: et hul bagud, der hentes igen")
+    return linjer
+
+
 def dagligt_sammendrag(tving: bool = False) -> None:
     """Én besked om morgenen: hvad kørte i går, hvad fejlede, hvad mangler.
 
@@ -456,12 +630,17 @@ def dagligt_sammendrag(tving: bool = False) -> None:
             mangler.append(f"{r['slug']} E{st['stage_number']} ({st['date']})")
 
     linjer = [f"📋 Klassementet — {i_dag.isoformat()}",
-              f"{len(koersler)} kørsler i går, {len(fejlede)} fejlede"]
+              f"I går: {len(koersler)} kørsler, {len(fejlede)} fejlede"]
     if fejlede:
         linjer += [f"  ❌ {k['job_key']} · {k.get('race_slug') or '—'}" for k in fejlede[:8]]
     if mangler:
         linjer.append(f"Mangler resultat ({len(mangler)}):")
         linjer += [f"  • {m}" for m in mangler[:8]]
+
+    # Dagens plan. Staar FOER kildelisten, fordi den er det, ejeren bad om at
+    # se foerst: hvad workeren gaar i gang med i dag. Kildelisten er derefter
+    # det, han selv skal handle paa.
+    linjer += dagens_plan()
 
     # Kilder, vi ikke selv kan skaffe. Står til sidst, fordi det er en
     # OPGAVE til ejeren, ikke en fejlmelding — og den skal kunne læses som
@@ -475,7 +654,7 @@ def dagligt_sammendrag(tving: bool = False) -> None:
         linjer.append(f"Find dem her: {CROSS_OPSLAG}")
 
     if not fejlede and not mangler and not kilder:
-        linjer.append("Ingen fejl, ingen huller.")
+        linjer.append("✓ Ingen fejl, ingen huller.")
     notify.send("\n".join(linjer))
 
 
