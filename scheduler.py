@@ -22,6 +22,8 @@ Reglerne (ejerens, 2026-10-12):
   ved start      startliste          (pr. løb)
   mål + 1 time   resultater          (pr. etape)
   hver ½ time    resultater          (pr. etape, indtil etapen HAR et resultat)
+  dagligt kl. 05 resultater          (pr. etape BAGUD, der mangler resultat
+                                      eller klassement — se EFTERSLAEB_*)
   slut + 3 timer raesreferat         (pr. løb)
 
 Kør:
