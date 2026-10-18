@@ -846,7 +846,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
               </h2>
               <span className="text-xs text-slate-600">Top {oneDayResults.length}</span>
             </div>
-            <ResultList entries={oneDayResults} />
+            <ResultList entries={oneDayResults} visTid={false} />
           </section>
         )}
 
@@ -1117,7 +1117,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
               </h2>
               <span className="text-xs text-slate-600">Top {oneDayResults.length}</span>
             </div>
-            <ResultList entries={oneDayResults} />
+            <ResultList entries={oneDayResults} visTid={false} />
           </section>
         )}
 

@@ -46,8 +46,20 @@ function formatTotal(seconds: number): string {
 /** Resultatlisten, som den ser ud på BÅDE etapesiderne og et endagsløbs
  *  landingsside. Ét sted, fordi et endagsløb netop skal læses som en etape —
  *  to kopier af rækkemarkup ville før eller siden vise de to ting forskelligt
- *  (CLAUDE.md §6: samme information, samme sted, samme form). */
-export default function ResultList({ entries }: { entries: ResultEntry[] }) {
+ *  (CLAUDE.md §6: samme information, samme sted, samme form).
+ *
+ *  `visTid` slås fra på endagsløb (ejerens beslutning 2026-10-18). I et
+ *  endagsløb er placeringen det, læseren kommer efter — feltet kommer ind i
+ *  grupper, og en kolonne med "+0:04" på otte af ti rækker fortæller ikke
+ *  noget, den optager kun plads. I et etapeløb betyder tiden derimod noget
+ *  for klassementet, og dér bliver den stående. */
+export default function ResultList({
+  entries,
+  visTid = true,
+}: {
+  entries: ResultEntry[];
+  visTid?: boolean;
+}) {
   return (
     <div className="divide-y divide-slate-800/40">
       {entries.map((entry) => {
@@ -74,7 +86,7 @@ export default function ResultList({ entries }: { entries: ResultEntry[] }) {
             >
               {rider.name}
             </Link>
-            {gapSec > 0 ? (
+            {!visTid ? null : gapSec > 0 ? (
               <span className="text-xs text-slate-500 font-mono flex-shrink-0">
                 {formatGap(gapSec)}
               </span>
