@@ -206,6 +206,11 @@ DAGLIGE_GLOBALE = [
     # løb fra oktober til december, hvor sendetiden er dét, brugeren kommer
     # efter. Reglen "24t-tv" beholdes som sikkerhedsnet tæt på løbet.
     (4, "tv_tider", "dagligt-0400"),
+    # Dagens nyhedskladder (ejerens ønske 2026-10-23). Kører før
+    # morgensammendraget kl. 06, så overskrifterne kan stå i beskeden og
+    # ejeren kan godkende dem, før dagen går i gang. Står efter tv_tider i
+    # listen og tages derfor efter den af runneren.
+    (4, "nyheder", "dagligt-0400-nyheder"),
 ]
 
 
@@ -445,6 +450,7 @@ KILDETYPER_ALTID = ("startlist", "streaming", "route_gpx")
 # Herfra finder ejeren kilden i hånden. Siden dækker alle cross-løb og linker
 # direkte videre til arrangørens startliste.
 CROSS_OPSLAG = "https://cyclocross24.com/dk/calendar/"
+ADMIN_URL = "https://klassementet.dk/admin"
 
 
 def manglende_kilder(dage: int = 7) -> list[str]:
@@ -596,6 +602,28 @@ def dagens_plan() -> list[str]:
     return linjer
 
 
+def nye_kladder() -> list[str]:
+    """Overskrifterne på nyhedskladder skrevet det sidste døgn, til godkendelse.
+
+    Jobbet `nyheder` kører kl. 04 UTC og skriver højst to kladder. Uden
+    overskrifterne her skulle ejeren åbne admin hver morgen for at se, om der
+    overhovedet lå noget."""
+    siden = _url_tid(nu() - timedelta(hours=24))
+    try:
+        nye = hent(f"news_articles?select=title,category&status=eq.draft"
+                   f"&created_at=gte.{siden}&order=created_at&limit=10")
+    except requests.RequestException as e:
+        # Et fejlet opslag her må ikke tage resten af morgenbeskeden med sig.
+        return [f"\n📰 Nyhedskladder: kunne ikke hentes ({e.__class__.__name__})"]
+    if not nye:
+        return []
+    ud = [f"\n📰 Nye nyhedskladder ({len(nye)}) — godkend på {ADMIN_URL}:"]
+    for a in nye:
+        maerke = " [cross]" if a.get("category") == "cykelcross" else ""
+        ud.append(f"  • {a['title']}{maerke}")
+    return ud
+
+
 def dagligt_sammendrag(tving: bool = False) -> None:
     """Én besked om morgenen: hvad kørte i går, hvad fejlede, hvad mangler.
 
@@ -643,6 +671,10 @@ def dagligt_sammendrag(tving: bool = False) -> None:
     # se foerst: hvad workeren gaar i gang med i dag. Kildelisten er derefter
     # det, han selv skal handle paa.
     linjer += dagens_plan()
+
+    # Nyhedskladder til godkendelse — også en opgave til ejeren, men en, der
+    # haster mere end kilderne: en nyhed er kun en nyhed i dag.
+    linjer += nye_kladder()
 
     # Kilder, vi ikke selv kan skaffe. Står til sidst, fordi det er en
     # OPGAVE til ejeren, ikke en fejlmelding — og den skal kunne læses som

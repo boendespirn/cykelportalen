@@ -12,8 +12,10 @@ Krav: ANTHROPIC_API_KEY i .env
 Kør: python ai_news_processor.py
      python ai_news_processor.py --limit 5          (score max 5 kandidater)
      python ai_news_processor.py --max-drafts 1      (skriv kun den allerbedste)
+     python ai_news_processor.py --dry-run          (score og vælg, skriv intet)
 
-Sæt op i Windows Task Scheduler til at køre efter rss_news_scraper.py.
+Køres hver morgen af workeren som trin 2 i jobbet `nyheder` (scheduler.py),
+lige efter rss_news_scraper.py. Overskrifterne står i morgenens Telegram-besked.
 """
 
 import os
@@ -25,6 +27,7 @@ import time
 import argparse
 import requests
 from datetime import datetime, timezone
+from urllib.parse import quote
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
@@ -42,21 +45,78 @@ DB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-MODEL              = "claude-haiku-4-5-20251001"  # hurtig og billig; skift til claude-sonnet-4-6 for højere kvalitet
+WRITE_MODEL        = "claude-sonnet-5"            # scoring og artikel — ejeren skal godkende resultatet, så kvalitet før pris
+# Claude 5 tænker, før den svarer, og tænkningen tæller med i max_tokens. Med
+# 3-4000 gik hele budgettet til tænkning, og svaret kom tomt tilbage
+# (stop_reason=max_tokens, kun en thinking-blok). Loftet er et loft, ikke et
+# forbrug — et normalt svar bruger langt mindre.
+WRITE_MAX_TOKENS   = 16000
 MIN_SCORE          = 8      # kun tophistorier scores videre (8-10)
-MAX_ARTICLES       = 15     # max artikler der SCORES per kørsel (kandidatpuljen)
+MIN_SCORE_CROSS    = 6      # cross har sit eget slot — se vaelg_kladder(); en løbsoptakt scores typisk 6
+MIN_SCORE_EKSTRA   = 9      # en ANDEN landevejsartikel samme dag kræver en reelt stor nyhed
+MAX_ARTICLES       = 80     # max artikler der SCORES per kørsel (kandidatpuljen)
 MAX_DRAFTS_PER_RUN = 2      # max artikler der rent faktisk SKRIVES per kørsel — målet er 1, se STRATEGI.md §1
+MAX_ALDER_TIMER    = 36     # ældre råartikler er gamle nyheder, når kørslen er dagligt om morgenen
 DELAY              = 0.5    # sekunder mellem API-kald
+
+# Grand Tours og monumenter skal altid kunne linkes til — også uden for deres
+# sæson. Det er dem, SEO-strategien bygger mod, og en nyhed om næste års rute
+# kommer typisk et halvt år før løbet.
+ALTID_LINKBARE = [
+    "tour-de-france", "giro-d-italia", "la-vuelta-ciclista-a-espana",
+    "milano-sanremo", "ronde-van-vlaanderen", "paris-roubaix",
+    "liege-bastogne-liege", "il-lombardia",
+]
 
 # ── Løb der linkes til internt (opdateres automatisk fra DB) ─────────────────
 
 def get_active_races() -> list[dict]:
-    """Henter igangværende og kommende løb til interne links."""
+    """Løb, en artikel må linke til: dem omkring i dag plus seneste udgave af
+    de store løb.
+
+    Den gamle udgave tog de 30 senest startende løb. I oktober var det 24
+    cross-løb og seks andre — Tour de France stod ikke på listen, så en nyhed
+    om næste års Tour kunne ikke linke til noget som helst."""
+    from datetime import date, timedelta
+    hdr = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    i_dag = date.today()
     res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/races?select=name,slug&order=start_date.desc&limit=30",
-        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        f"{SUPABASE_URL}/rest/v1/races?select=name,slug,race_type"
+        f"&end_date=gte.{(i_dag - timedelta(days=30)).isoformat()}"
+        f"&start_date=lte.{(i_dag + timedelta(days=60)).isoformat()}"
+        f"&order=start_date&limit=80",
+        headers=hdr, timeout=30,
     )
-    return res.json() if res.ok else []
+    races = res.json() if res.ok else []
+    kendte = {r["slug"] for r in races}
+    for base in ALTID_LINKBARE:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/races?select=name,slug,race_type"
+            f"&slug=like.{base}-2*&start_date=lte.{(i_dag + timedelta(days=400)).isoformat()}"
+            f"&order=start_date.desc&limit=1",
+            headers=hdr, timeout=30,
+        )
+        for row in (r.json() if r.ok else []):
+            if row["slug"] not in kendte:
+                races.append(row)
+                kendte.add(row["slug"])
+    return races
+
+
+def get_recent_titles(days: int = 4) -> list[str]:
+    """Overskrifter, vi selv har skrevet de sidste dage — uanset status.
+
+    Samme historie står i alle feeds, ofte over flere dage (en Tour-præsentation
+    kører på CyclingNews, VeloNews og WielerFlits). Uden denne liste ville
+    processoren skrive den samme nyhed igen næste morgen fra en ny kilde."""
+    from datetime import date, timedelta
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles?select=title"
+        f"&created_at=gte.{(date.today() - timedelta(days=days)).isoformat()}&limit=50",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        timeout=30,
+    )
+    return [r["title"] for r in res.json()] if res.ok else []
 
 
 def get_ongoing_startlists() -> str:
@@ -104,10 +164,24 @@ def get_ongoing_startlists() -> str:
 # ── Database ──────────────────────────────────────────────────────────────────
 
 def get_unprocessed(limit: int) -> list[dict]:
+    """Ubehandlede råartikler fra de sidste MAX_ALDER_TIMER timer.
+
+    Ældre ubehandlede markeres som behandlet i samme omgang. Processoren stod
+    stille fra juli til oktober, og uden afskæringen ville dens første kørsel
+    have scoret tre måneder gamle nyheder som dagens."""
+    from datetime import timedelta
+    graense = (datetime.now(timezone.utc) - timedelta(hours=MAX_ALDER_TIMER)).isoformat()
+    requests.patch(
+        f"{SUPABASE_URL}/rest/v1/raw_news?processed=eq.false&published_at=lt.{quote(graense)}",
+        json={"processed": True},
+        headers=DB_HEADERS, timeout=30,
+    )
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/raw_news"
-        f"?processed=eq.false&order=published_at.desc&limit={limit}",
+        f"?processed=eq.false&published_at=gte.{quote(graense)}"
+        f"&order=published_at.desc&limit={limit}",
         headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        timeout=30,
     )
     res.raise_for_status()
     return res.json()
@@ -151,12 +225,23 @@ def extract_json(text: str) -> dict:
 
 # ── Claude API ────────────────────────────────────────────────────────────────
 
-SCORE_SYSTEM = (
-    "Du vurderer relevans af cykelartikler for danske UCI WorldTour-fans. "
-    "Svar KUN med et heltal 1-10. Ingen anden tekst."
-)
+SCORE_SYSTEM = """Du er nyhedsredaktør på klassementet.dk og vurderer dagens nyhedskandidater for danske cykelfans — både landevej (UCI WorldTour, Grand Tours, klassikere) og cykelcross (World Cup, Superprestige, X2O Trofee, VM).
 
-REWRITE_SYSTEM = """Du skriver cykel-nyheder til klassementet.dk — Danmarks bedste kilde til professionel cykling og UCI WorldTour.
+Score hver kandidat 1-10 for nyhedsværdi:
+- 9-10: årets største historier — fx præsentationen af næste års Grand Tour-rute, en stor rytters holdskifte eller karrierestop, et afgørende løbsresultat
+- 7-8: klart relevant for fans: store navne, danske ryttere, vigtige løb og transfers
+- 4-6: sekundære historier, opfølgninger, mindre navne
+- 1-3: udstyr, gravel, motion, amatørløb, kåringer, spil og konkurrencer
+
+Cykelcross vurderes på egne præmisser: en sejr eller et stort navn (Van der Poel, Van Aert, Pidcock, Nys, Iserbyt, Van Empel, Brand) i et World Cup-, Superprestige- eller X2O-løb er en 7-8'er for cross-fans, selv om den ikke kan måle sig med en Tour-nyhed.
+
+DUBLETTER: Flere kandidater dækker ofte samme historie. Giv kun den mest fyldestgørende af dem (mest indhold, bedst kilde) den høje score — de øvrige får 1. Står historien allerede blandt vores egne overskrifter, får alle dens kandidater 1.
+
+"cross" er true, når kandidaten handler om cykelcross som disciplin — ikke når en landevejsrytter blot nævner crosssæsonen i forbifarten.
+
+Svar KUN med JSON: [{"i": 1, "score": 8, "cross": false}, ...] — én række pr. kandidat, ingen anden tekst."""
+
+REWRITE_SYSTEM = """Du skriver cykel-nyheder til klassementet.dk — Danmarks bedste kilde til professionel cykling: landevej og cykelcross.
 
 Regler:
 - Skriv altid på korrekt, engageret dansk (sportsmedie-tone som TV 2 Sport)
@@ -165,40 +250,65 @@ Regler:
 - LINKS — MAKSIMALT 2 links i hele artiklen:
   1. Ét link til det løb artiklen primært handler om — brug kun løbets navn som ankertekst (fx [Tour de France](/tour-de-france-2026)) og link KUN første gang løbsnavnet nævnes naturligt i brødteksten. Intet årstal i ankerteksten.
   2. Valgfrit: ét link til forsiden [Klassementet](/) hvis der er en naturlig sætning om at følge med på siden — ellers ingen.
+  - Link kun til den UDGAVE, artiklen handler om: en nyhed om Tour de France 2027 må ikke linke til /tour-de-france-2026. Står udgaven ikke på listen, så link ikke til løbet.
   - Gentag ALDRIG samme link. Skriv løbsnavnet plain text alle andre gange det nævnes.
-- Brug SEO-søgeord naturligt: "cykling", "professionel cykling", "cykelresultater", "UCI WorldTour"
+- Omvendt pyramide: det vigtigste først, derefter baggrund og detaljer
+- Lov aldrig live-dækning: klassementet.dk har ingen live-opdateringer eller live-tracking. Skriv ikke "følg med undervejs/under løbet/live" — en henvisning må kun love det, siden har: startliste, etaper, stigningsprofiler, resultater og klassement
+- Brug SEO-søgeord naturligt: løbets navn, rytternes navne, "cykling" — og "cykelcross" i cross-artikler
+- KUN FAKTA FRA KILDEN: tilføj aldrig resultater, tal, holdtilknytninger eller citater, der ikke står i originalen. Baggrund må kun være almen, sikker viden — er du i tvivl om et faktum, så udelad det
 - FAKTUEL PRÆCISION: Nævn KUN ryttere i et løb hvis de faktisk er på startlisten. Hvis du er i tvivl, undlad at nævne dem i den løbs-kontekst
 - Svar KUN med ren JSON — ingen markdown-blokke, ingen forklaringer"""
 
 
-def score_article(client: Anthropic, article: dict) -> float:
-    prompt = (
-        f"Titel: {article['title']}\n"
-        f"Kilde: {article['source']}\n"
-        f"Resume: {article['excerpt'][:300]}"
-    )
+def score_batch(client: Anthropic, articles: list[dict],
+                recent_titles: list[str]) -> list[tuple[float, bool]]:
+    """Scorer alle kandidater i ÉT kald — (score, er_cross) pr. kandidat.
+
+    Indtil 2026-10-23 fik hver kandidat sit eget Haiku-kald og ét tal tilbage.
+    Det var støjende og blindt for resten af dagens pulje: Tour de France
+    2027-ruten fik 7 og røg ud, mens en af dens seks dubletter fik 8. Set
+    samlet kan modellen sammenligne, og den kan selv samle dubletterne.
+
+    Fejler kaldet, eller mangler en kandidat i svaret, får den score 0 — en
+    nyhed skrives hellere ikke end på et gæt (CLAUDE.md §6)."""
+    linjer = []
+    for i, art in enumerate(articles, 1):
+        resume = re.sub(r"\s+", " ", (art.get("excerpt") or ""))[:240]
+        linjer.append(f"{i}. [{art['source']}, {len(art.get('content') or '')} tegn] "
+                      f"{art['title']}\n   {resume}")
+    prompt = "Dagens kandidater:\n\n" + "\n".join(linjer)
+    if recent_titles:
+        prompt += "\n\nVores egne overskrifter de sidste dage:\n" + "\n".join(
+            f"- {t}" for t in recent_titles)
+
+    ud = [(0.0, False) for _ in articles]
     try:
         resp = client.messages.create(
-            model=MODEL,
-            max_tokens=10,
+            model=WRITE_MODEL,
+            max_tokens=WRITE_MAX_TOKENS,
             system=SCORE_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = resp.content[0].text.strip()
-        m = re.search(r"\b(\d+(?:\.\d+)?)\b", raw)
-        if m:
-            val = float(m.group(1))
-            if val > 10:
-                val = val / 10
-            return min(val, 10.0)
-        return 5.0
+        if resp.stop_reason == "max_tokens":
+            print("  [SCORE AFHUGGET] svaret nåede token-loftet — ingen kandidater kvalificerer sig i dag")
+            return ud
+        text = next((b.text for b in resp.content
+                     if getattr(b, "type", None) == "text"), "")
+        # Rækkerne læses én for én i stedet for som ét JSON-dokument: én
+        # skæv række (et ekstra komma, en kommentar) må ikke tage hele dagens
+        # pulje med sig.
+        for m in re.finditer(r'\{[^{}]*?"i"\s*:\s*(\d+)[^{}]*?"score"\s*:\s*(\d+(?:\.\d+)?)'
+                             r'[^{}]*?"cross"\s*:\s*(true|false)[^{}]*\}', text):
+            i = int(m.group(1)) - 1
+            if 0 <= i < len(articles):
+                ud[i] = (min(float(m.group(2)), 10.0), m.group(3) == "true")
     except Exception as e:
-        print(f" [score fejl: {e}]", end="")
-        return 5.0
+        print(f"  [SCORE FEJL] {e} — ingen kandidater kvalificerer sig i dag")
+    return ud
 
 
 def rewrite_article(client: Anthropic, article: dict, races: list[dict], startlist_context: str) -> dict | None:
-    race_list = "\n".join(f"- {r['name']}: /{r['slug']}" for r in races[:15])
+    race_list = "\n".join(f"- {r['name']}: /{r['slug']}" for r in races)
     factcheck_block = f"""
 FAKTUEL KRYDSREFERENCE — igangværende løb og deres startlister:
 {startlist_context}
@@ -221,18 +331,26 @@ Returner præcis dette JSON:
   "title": "Dansk titel (SEO-optimeret, max 70 tegn)",
   "excerpt": "Kort resume på dansk (max 160 tegn, bruges som meta-description)",
   "content": "Fuld artikel på dansk (600-900 ord). Brug \\n\\n mellem afsnit. Dæk emnet grundigt: baggrund, context, citater, hvad det betyder fremadrettet. MAX 2 links: ét til det primære løb (første nævnelse, kun løbsnavn som ankertekst) + evt. ét til forsiden [Klassementet](/). Alle andre nævnelser af løbet skrives som plain text.",
-  "category": "resultater|startliste|transfer|profil|analyse|generelt"
+  "category": "resultater|startliste|transfer|profil|analyse|cykelcross|generelt (brug cykelcross for alle cross-nyheder)"
 }}"""
 
     try:
         resp = client.messages.create(
-            model=MODEL,
-            max_tokens=1200,
+            model=WRITE_MODEL,
+            max_tokens=WRITE_MAX_TOKENS,
             system=REWRITE_SYSTEM,
+            # Ingen temperature: parameteren er udfaset for Claude 5-modellerne
+            # og giver HTTP 400 (samme fælde som i race_recap_agent.py).
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
         )
-        return extract_json(resp.content[0].text)
+        # Et afhugget svar er en halv artikel — og ugyldig JSON. Hellere
+        # ingen kladde end en, der slutter midt i en sætning.
+        if resp.stop_reason == "max_tokens":
+            print("  [AFHUGGET] svaret nåede token-loftet — intet gemt")
+            return None
+        text = next((b.text for b in resp.content
+                     if getattr(b, "type", None) == "text"), "")
+        return extract_json(text)
     except Exception as e:
         print(f"  [REWRITE FEJL] {e}")
         return None
@@ -267,7 +385,28 @@ def sanitize_links(content: str, races: list[dict]) -> str:
 
 # ── Hoved ─────────────────────────────────────────────────────────────────────
 
-def run(limit: int, max_drafts: int) -> None:
+def vaelg_kladder(scored: list[tuple[float, dict]], max_drafts: int) -> list[tuple[float, dict]]:
+    """Dagens kladder: højst én landevej og én cross, og højst max_drafts.
+
+    Cross får sit eget slot med en lavere tærskel (MIN_SCORE_CROSS). Scoret
+    mod landevejens store navne taber en cross-nyhed altid — en Superprestige-
+    sejr bliver aldrig en 8'er ved siden af en Tour-præsentation — og så kom
+    der aldrig cross på siden, selv om sæsonen er 24 løb lang.
+
+    En anden landevejsartikel tages kun, når der ingen cross-kladde er, og
+    nyheden er en reel undtagelse (MIN_SCORE_EKSTRA, jf. STRATEGI.md §2: to
+    store, indbyrdes uafhængige nyheder samme dag)."""
+    vej   = sorted((p for p in scored if not p[1].get("_cross") and p[0] >= MIN_SCORE),
+                   key=lambda p: p[0], reverse=True)
+    cross = sorted((p for p in scored if p[1].get("_cross") and p[0] >= MIN_SCORE_CROSS),
+                   key=lambda p: p[0], reverse=True)
+    valgt = vej[:1] + cross[:1]
+    if not cross and len(vej) > 1 and vej[1][0] >= MIN_SCORE_EKSTRA:
+        valgt.append(vej[1])
+    return valgt[:max_drafts]
+
+
+def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
     if not ANTHROPIC_KEY:
         print("FEJL: ANTHROPIC_API_KEY mangler i .env")
         print("Hent nøgle på: https://console.anthropic.com/settings/keys")
@@ -277,44 +416,52 @@ def run(limit: int, max_drafts: int) -> None:
     articles          = get_unprocessed(limit)
     races             = get_active_races()
     startlist_context = get_ongoing_startlists()
+    recent_titles     = get_recent_titles()
 
-    print(f"ai_news_processor.py — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"Fandt {len(articles)} ubehandlede artikler | {len(races)} løb til interne links")
-    print(f"Max {max_drafts} artikel(er) skrives denne kørsel (mål: 1, jf. STRATEGI.md §1)")
+    print(f"ai_news_processor.py — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+          + (" — TØRKØRSEL, intet skrives" if dry_run else ""))
+    print(f"Fandt {len(articles)} ubehandlede artikler (seneste {MAX_ALDER_TIMER} t) | "
+          f"{len(races)} løb til interne links | {len(recent_titles)} egne overskrifter til dublet-tjek")
+    print(f"Max {max_drafts} artikel(er) skrives denne kørsel: én landevej + én cykelcross (jf. STRATEGI.md §2)")
     print(f"Artikler gemmes som kladder — godkend på klassementet.dk/admin\n")
 
     # ── Trin 1: Score ALLE kandidater først, før vi skriver noget ────────────
     # Vi skal kunne sammenligne dagens nyheder og vælge den allerbedste,
     # i stedet for blot at skrive den første, der overstiger tærsklen.
-    qualified = []
-    skipped = 0
-    for i, art in enumerate(articles, 1):
-        print(f"[{i}/{len(articles)}] {art['title'][:70]}")
-        score = score_article(client, art)
-        print(f"  Score: {score:.0f}/10", end="")
+    scored: list[tuple[float, dict]] = []
+    for i, (art, (score, cross)) in enumerate(
+            zip(articles, score_batch(client, articles, recent_titles)), 1):
+        art["_cross"] = cross
+        mærke = " [cross]" if cross else ""
+        print(f"[{i}/{len(articles)}] {score:>4.0f}/10{mærke}  {art['source']}: {art['title'][:70]}")
+        scored.append((score, art))
 
-        if score < MIN_SCORE:
-            print(" — for lav, springer over")
-            mark_processed(art["id"], score)
-            skipped += 1
-        else:
-            print(" — kvalificeret, sammenlignes med dagens øvrige kandidater")
-            qualified.append((score, art))
+    # Modellen giver altid mindst 1. Står alt på 0, fejlede scoringen — og så
+    # skal jobbet fejle, så runneren melder det på Telegram, i stedet for at
+    # ligne en stille dag uden nyheder. Intet er markeret som behandlet, så
+    # morgendagens kørsel tager puljen igen.
+    if scored and all(score == 0 for score, _ in scored):
+        print("\nFEJL: scoringen gav intet resultat — se [SCORE FEJL] ovenfor")
+        sys.exit(2)
 
-        time.sleep(DELAY)
-
-    # ── Trin 2: Vælg kun den/de allerbedste blandt de kvalificerede ─────────
+    # ── Trin 2: Vælg kun den/de allerbedste ─────────────────────────────────
     # Stabil sortering: ved lige score vinder den nyeste (articles kom allerede
     # i published_at-faldende rækkefølge fra get_unprocessed()).
-    qualified.sort(key=lambda pair: pair[0], reverse=True)
-    to_draft = qualified[:max_drafts]
-    not_drafted = qualified[max_drafts:]
+    to_draft = vaelg_kladder(scored, max_drafts)
+    valgte = {id(a) for _, a in to_draft}
+    skipped = len(scored) - len(to_draft)
 
-    if not_drafted:
-        titles = ", ".join(a["title"][:50] for _, a in not_drafted)
-        print(f"\n{len(not_drafted)} kvalificeret(e) artikel(er) IKKE skrevet (dagligt loft nået): {titles}")
-        for score, art in not_drafted:
-            mark_processed(art["id"], score)  # markér behandlet, så den ikke gentages i morgen
+    print(f"\nValgt til kladde ({len(to_draft)}):")
+    for score, art in to_draft:
+        print(f"  {score:.0f}/10{' [cross]' if art.get('_cross') else ''}  {art['title'][:80]}")
+    if dry_run:
+        print("\nTørkørsel — intet skrevet, intet markeret som behandlet.")
+        return
+
+    # Alt det fravalgte markeres behandlet, så det ikke kommer igen i morgen.
+    for score, art in scored:
+        if id(art) not in valgte:
+            mark_processed(art["id"], score)
 
     drafted = failed = 0
     for score, art in to_draft:
@@ -353,7 +500,7 @@ def run(limit: int, max_drafts: int) -> None:
 
         time.sleep(DELAY)
 
-    print(f"\nFærdig: {drafted} kladder gemt, {len(not_drafted)} kvalificerede-men-ikke-skrevet (dagligt loft), {skipped} for lav score, {failed} fejl")
+    print(f"\nFærdig: {drafted} kladder gemt, {skipped} fravalgt, {failed} fejl")
     print(f"Godkend på: klassementet.dk/admin")
 
 
@@ -363,5 +510,7 @@ if __name__ == "__main__":
                         help=f"Max artikler der SCORES per kørsel (default: {MAX_ARTICLES})")
     parser.add_argument("--max-drafts", type=int, default=MAX_DRAFTS_PER_RUN,
                         help=f"Max artikler der rent faktisk SKRIVES per kørsel (default: {MAX_DRAFTS_PER_RUN}, mål er 1)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Score og vælg, men skriv ingen artikel og markér intet som behandlet")
     args = parser.parse_args()
-    run(args.limit, args.max_drafts)
+    run(args.limit, args.max_drafts, args.dry_run)

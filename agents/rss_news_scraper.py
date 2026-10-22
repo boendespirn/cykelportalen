@@ -3,7 +3,7 @@ rss_news_scraper.py
 Scraper RSS-feeds fra internationale cykelmedier og gemmer råartikler i raw_news.
 
 Kør: python rss_news_scraper.py
-Sæt op i Windows Task Scheduler til at køre 4x dagligt (fx kl. 7, 11, 15, 19).
+Køres hver morgen af workeren som trin 1 i jobbet `nyheder` (scheduler.py).
 """
 
 import os
@@ -29,12 +29,17 @@ DB_HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Rettet 2026-10-23: CyclingWeeklys /feed svarer 200 med NUL artikler, og
+# BikeRadar er væk (404) og var alligevel et udstyrsmedie. Ingen af dem havde
+# leveret en eneste række til raw_news. WielerFlits er med for cykelcrossens
+# skyld: de engelske medier dækker næsten ikke cross, mens WielerFlits har
+# optakt og referat fra hvert Superprestige-, X2O- og World Cup-løb.
 FEEDS = [
     {"source": "CyclingNews",   "url": "https://www.cyclingnews.com/rss/"},
     {"source": "VeloNews",      "url": "https://www.velonews.com/feed/"},
-    {"source": "CyclingWeekly", "url": "https://www.cyclingweekly.com/feed"},
+    {"source": "CyclingWeekly", "url": "https://www.cyclingweekly.com/feeds.xml"},
     {"source": "INRNG",         "url": "https://inrng.com/feed/"},
-    {"source": "BikeRadar",     "url": "https://www.bikeradar.com/feed/"},
+    {"source": "WielerFlits",   "url": "https://www.wielerflits.nl/feed/"},
 ]
 
 MAX_PER_FEED = 15

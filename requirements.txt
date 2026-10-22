@@ -13,3 +13,5 @@ Pillow>=10.0.0
 pymupdf>=1.24.0
 google-auth>=2.35.0
 google-api-python-client>=2.150.0
+# RSS-feeds til nyhedsjobbet (agents/rss_news_scraper.py)
+feedparser>=6.0.11

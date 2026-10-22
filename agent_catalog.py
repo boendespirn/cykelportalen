@@ -294,10 +294,19 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
          description="Scraper nye rånyheder fra RSS-kilderne.", est_minutes=3),
 
     _job("nyheder_ai", "Nyheder — AI-behandling", PHASE_GLOBAL, [
-            _step("ai_news_processor.py", ["--limit", "15"], cwd="root",
-                  stage=None, label="Scoring og udvælgelse"),
+            _step("ai_news_processor.py", [], cwd="root",
+                  stage=None, label="Scoring, udvælgelse og kladde"),
          ], needs_race=False,
-         description="Scorer rånyheder og lægger de bedste i admin-køen.", est_minutes=5),
+         description="Scorer de sidste 36 timers rånyheder og skriver dagens bedste "
+                     "(én landevej + én cykelcross) som kladder i admin-køen.", est_minutes=5),
+
+    # Det, skemalæggeren kører hver morgen. Ét job i stedet for to, så
+    # scoringen aldrig kører på gårsdagens pulje, fordi RSS-trinnet lå længere
+    # nede i køen.
+    _job("nyheder", "Nyheder — hent og skriv dagens kladder", PHASE_GLOBAL,
+         ["nyheder_rss", "nyheder_ai"], needs_race=False,
+         description="Henter RSS og skriver dagens bedste nyheder som kladder. "
+                     "Overskrifterne står i morgenens Telegram-besked.", est_minutes=8),
 
     _job("tv_tider", "TV-tider", PHASE_GLOBAL, [
             _step("tv_agent.py", [], stage=None, label="Sendeplan for kommende løb"),

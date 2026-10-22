@@ -30,6 +30,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   transfer:    "Transfer",
   profil:      "Profil",
   analyse:     "Analyse",
+  cykelcross:  "Cykelcross",
   race_report: "Løbsrapport",
   interview:   "Interview",
   general:     "Nyheder",
