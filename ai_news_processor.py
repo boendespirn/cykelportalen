@@ -7,6 +7,10 @@ Behandler råartikler fra raw_news med Claude (Anthropic API):
      STRATEGI.md §1: kvalitet frem for mængde, mens vi venter på indeksering)
   3. Gemmer i news_articles som kladde (kræver godkendelse i /admin)
 
+Interne links følger linkstrategi.py: ugebudget for link-bærende artikler og
+andele pr. spand (cross, Giro, Tour, forside ...). Hvert gemt links spand
+skrives i news_articles.link_spand, så næste kørsel kan tælle.
+
 Krav: ANTHROPIC_API_KEY i .env
 
 Kør: python ai_news_processor.py
@@ -29,6 +33,7 @@ import requests
 from datetime import datetime, timezone
 from urllib.parse import quote
 from anthropic import Anthropic
+import linkstrategi
 from dotenv import load_dotenv
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -81,7 +86,7 @@ def get_active_races() -> list[dict]:
     hdr = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     i_dag = date.today()
     res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/races?select=name,slug,race_type"
+        f"{SUPABASE_URL}/rest/v1/races?select=name,slug,race_type,start_date,end_date"
         f"&end_date=gte.{(i_dag - timedelta(days=30)).isoformat()}"
         f"&start_date=lte.{(i_dag + timedelta(days=60)).isoformat()}"
         f"&order=start_date&limit=80",
@@ -91,7 +96,7 @@ def get_active_races() -> list[dict]:
     kendte = {r["slug"] for r in races}
     for base in ALTID_LINKBARE:
         r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/races?select=name,slug,race_type"
+            f"{SUPABASE_URL}/rest/v1/races?select=name,slug,race_type,start_date,end_date"
             f"&slug=like.{base}-2*&start_date=lte.{(i_dag + timedelta(days=400)).isoformat()}"
             f"&order=start_date.desc&limit=1",
             headers=hdr, timeout=30,
@@ -117,6 +122,64 @@ def get_recent_titles(days: int = 4) -> list[str]:
         timeout=30,
     )
     return [r["title"] for r in res.json()] if res.ok else []
+
+
+def get_linkstatus(periode_start: str) -> dict:
+    """Hvad linkstrategien allerede har brugt: link-bærende artikler de sidste
+    7 dage (ugebudgettet), pr. spand i indeværende periode (andelene) og
+    ankertyper pr. linkmål (ankerfordelingen). Afviste kladder tæller ikke —
+    deres links kom aldrig på siden."""
+    from datetime import date, timedelta
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles?select=created_at,link_spand,link_maal,link_ankertype"
+        f"&link_spand=not.is.null&status=neq.rejected"
+        f"&created_at=gte.{min(periode_start, (date.today() - timedelta(days=7)).isoformat())}",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        timeout=30,
+    )
+    rows = res.json() if res.ok else []
+    uge_start = (date.today() - timedelta(days=7)).isoformat()
+    spande: dict[str, int] = {}
+    for r in rows:
+        if r["created_at"][:10] >= periode_start:
+            spande[r["link_spand"]] = spande.get(r["link_spand"], 0) + 1
+    ankre = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles?select=link_maal,link_ankertype"
+        f"&link_ankertype=not.is.null&status=neq.rejected",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        timeout=30,
+    )
+    pr_maal: dict[str, list[str]] = {}
+    for r in (ankre.json() if ankre.ok else []):
+        pr_maal.setdefault(r["link_maal"], []).append(r["link_ankertype"])
+    return {
+        "uge": sum(1 for r in rows if r["created_at"][:10] >= uge_start),
+        "spande": spande,
+        "ankre": pr_maal,
+    }
+
+
+def lav_linkplan(status: dict, races: list[dict]) -> tuple[list[dict] | None, str]:
+    """Dagens linkplan: prioriterede mål med ankertype — eller None, når
+    ugebudgettet er brugt. Returnerer også en linje til loggen."""
+    from datetime import date
+    pr_uge, andele = linkstrategi.periode(date.today())
+    if status["uge"] >= pr_uge:
+        return None, f"ugebudget brugt ({status['uge']}/{pr_uge}) — ingen interne links"
+    maal = linkstrategi.linkmaal(date.today(), races)
+    raekke = linkstrategi.prioriteret(andele, status["spande"], set(maal))
+    plan = []
+    for spand in raekke:
+        for m in maal.get(spand, []):
+            if any(p["sti"] == m["sti"] for p in plan):
+                continue
+            plan.append({**m, "spand": spand,
+                         "ankertype": linkstrategi.naeste_ankertype(status["ankre"].get(m["sti"], []))})
+    andele_txt = ", ".join(f"{s} {a:.0%}" for s, a in andele.items())
+    mangler = [s for s in andele if s not in maal]
+    return plan, (f"{status['uge']}/{pr_uge} link-artikler de sidste 7 dage | andele: {andele_txt} | "
+                  f"rækkefølge: {' > '.join(raekke)}"
+                  + (f" | uden side endnu: {', '.join(mangler)}" if mangler else ""))
 
 
 def get_ongoing_startlists() -> str:
@@ -247,9 +310,11 @@ Regler:
 - Skriv altid på korrekt, engageret dansk (sportsmedie-tone som TV 2 Sport)
 - Omskriv originalen grundigt — aldrig direkte oversæt
 - Artiklerne skal være fyldestgørende: giv al vigtig information, forklar kontekst og baggrund
-- LINKS — MAKSIMALT 2 links i hele artiklen:
-  1. Ét link til det løb artiklen primært handler om — brug kun løbets navn som ankertekst (fx [Tour de France](/tour-de-france-2026)) og link KUN første gang løbsnavnet nævnes naturligt i brødteksten. Intet årstal i ankerteksten.
-  2. Valgfrit: ét link til forsiden [Klassementet](/) hvis der er en naturlig sætning om at følge med på siden — ellers ingen.
+- LINKS — følg linkplanen i opgaven:
+  - Står der "INGEN interne links", må artiklen ikke indeholde et eneste internt link.
+  - Ellers MAKSIMALT 2 interne links: (1) ét strategisk link til det FØRSTE mål i linkplanen, artiklen er reelt relevant for, med den angivne ankertype, og (2) valgfrit ét link til det løb, artiklen primært handler om, ved første naturlige omtale (kun løbsnavnet som ankertekst).
+  - Relevans er et krav: et link til et løb må kun sættes, hvis artiklen handler om løbet. Er intet løbsmål relevant, så brug forsiden — med en naturlig sætning, aldrig en påklistret henvisning.
+  - Ankerteksten skal læses som en naturlig del af sætningen — aldrig "klik her".
   - Link kun til den UDGAVE, artiklen handler om: en nyhed om Tour de France 2027 må ikke linke til /tour-de-france-2026. Står udgaven ikke på listen, så link ikke til løbet.
   - Gentag ALDRIG samme link. Skriv løbsnavnet plain text alle andre gange det nævnes.
 - Omvendt pyramide: det vigtigste først, derefter baggrund og detaljer
@@ -307,8 +372,26 @@ def score_batch(client: Anthropic, articles: list[dict],
     return ud
 
 
-def rewrite_article(client: Anthropic, article: dict, races: list[dict], startlist_context: str) -> dict | None:
-    race_list = "\n".join(f"- {r['name']}: /{r['slug']}" for r in races)
+def linkplan_tekst(plan: list[dict] | None, races: list[dict]) -> str:
+    """Linkplanen som tekst til prompten. plan=None: ugens budget er brugt."""
+    if plan is None:
+        return ("LINKPLAN: INGEN interne links i denne artikel — ugens budget for "
+                "link-bærende artikler er brugt.")
+    linjer = ["LINKPLAN — strategiske mål i prioriteret rækkefølge (brug det første, artiklen er reelt relevant for):"]
+    for m in plan:
+        if m["sti"] == "/":
+            anker = 'ankertekst "Klassementet" eller en naturlig beskrivelse af siden'
+        else:
+            anker = "ankertype: " + linkstrategi.ANKER_FORKLARING[m["ankertype"]].format(
+                navn=m["navn"], aar=m["aar"])
+        linjer.append(f"- {m['navn']}: {m['sti']} ({anker})")
+    linjer.append("\nLøbssider der må bruges til link (2) — kun hvis artiklen handler om løbet:")
+    linjer += [f"- {r['name']}: /{r['slug']}" for r in races]
+    return "\n".join(linjer)
+
+
+def rewrite_article(client: Anthropic, article: dict, races: list[dict], startlist_context: str,
+                    plan: list[dict] | None) -> dict | None:
     factcheck_block = f"""
 FAKTUEL KRYDSREFERENCE — igangværende løb og deres startlister:
 {startlist_context}
@@ -323,15 +406,15 @@ Kilde: {article['source']}
 Indhold:
 {article['content'][:3000]}
 {factcheck_block}
-Interne links der må bruges (kun hvis løbet nævnes i artiklen):
-{race_list}
+{linkplan_tekst(plan, races)}
 
 Returner præcis dette JSON:
 {{
   "title": "Dansk titel (SEO-optimeret, max 70 tegn)",
   "excerpt": "Kort resume på dansk (max 160 tegn, bruges som meta-description)",
-  "content": "Fuld artikel på dansk (600-900 ord). Brug \\n\\n mellem afsnit. Dæk emnet grundigt: baggrund, context, citater, hvad det betyder fremadrettet. MAX 2 links: ét til det primære løb (første nævnelse, kun løbsnavn som ankertekst) + evt. ét til forsiden [Klassementet](/). Alle andre nævnelser af løbet skrives som plain text.",
-  "category": "resultater|startliste|transfer|profil|analyse|cykelcross|generelt (brug cykelcross for alle cross-nyheder)"
+  "content": "Fuld artikel på dansk (600-900 ord). Brug \\n\\n mellem afsnit. Dæk emnet grundigt: baggrund, context, citater, hvad det betyder fremadrettet. Links efter linkplanen ovenfor; alle andre nævnelser af løbet skrives som plain text.",
+  "category": "resultater|startliste|transfer|profil|analyse|cykelcross|generelt (brug cykelcross for alle cross-nyheder)",
+  "linkmaal": "stien på det strategiske linkmål, du brugte, fx /, eller null"
 }}"""
 
     try:
@@ -354,6 +437,26 @@ Returner præcis dette JSON:
     except Exception as e:
         print(f"  [REWRITE FEJL] {e}")
         return None
+
+
+def interne_links(content: str) -> list[str]:
+    """Stierne på alle interne links i artiklen, i rækkefølge."""
+    stier = []
+    for url in re.findall(r"\[[^\]]+\]\(([^)]+)\)", content):
+        if url.startswith("https://klassementet.dk"):
+            url = url[len("https://klassementet.dk"):] or "/"
+        if url.startswith("/"):
+            stier.append(url)
+    return stier
+
+
+def fjern_interne_links(content: str) -> str:
+    """Interne links bliver til plain text — ugens linkbudget er brugt."""
+    def replace(match: re.Match) -> str:
+        url = match.group(2)
+        intern = url.startswith("/") or url.startswith("https://klassementet.dk")
+        return match.group(1) if intern else match.group(0)
+    return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace, content)
 
 
 def sanitize_links(content: str, races: list[dict]) -> str:
@@ -455,6 +558,12 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
     for score, art in to_draft:
         print(f"  {score:.0f}/10{' [cross]' if art.get('_cross') else ''}  {art['title'][:80]}")
     if dry_run:
+        from datetime import date
+        plan, plan_log = lav_linkplan(
+            get_linkstatus(linkstrategi.periode_fra(date.today()).isoformat()), races)
+        print(f"\nLinkplan: {plan_log}")
+        for p in plan or []:
+            print(f"  {p['spand']:>8}  {p['sti']}  ({p['ankertype']})")
         print("\nTørkørsel — intet skrevet, intet markeret som behandlet.")
         return
 
@@ -463,11 +572,17 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
         if id(art) not in valgte:
             mark_processed(art["id"], score)
 
+    from datetime import date
+    linkstatus = get_linkstatus(linkstrategi.periode_fra(date.today()).isoformat())
+    races_by_slug = {r["slug"]: r for r in races}
+
     drafted = failed = 0
     for score, art in to_draft:
         print(f"\nSkriver: {art['title'][:70]} (score {score:.0f}/10)")
+        plan, plan_log = lav_linkplan(linkstatus, races)
+        print(f"  Linkplan: {plan_log}")
 
-        result = rewrite_article(client, art, races, startlist_context)
+        result = rewrite_article(client, art, races, startlist_context, plan)
         if not result or not result.get("title") or not result.get("content"):
             print("  -> FEJL ved omskrivning")
             mark_processed(art["id"], score)
@@ -475,12 +590,29 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
             time.sleep(DELAY)
             continue
 
+        content = sanitize_links(result["content"], races)
+        if plan is None:
+            content = fjern_interne_links(content)
+        # Hvad artiklen faktisk linker til — ikke hvad modellen siger, den
+        # gjorde. Det første link til et mål i planen er det strategiske.
+        links = interne_links(content)
+        plan_stier = {p["sti"]: p for p in plan or []}
+        strategisk = next((plan_stier[s] for s in links if s in plan_stier), None)
+        link_felter = {}
+        if strategisk:
+            link_felter = {"link_spand": strategisk["spand"], "link_maal": strategisk["sti"],
+                           "link_ankertype": strategisk["ankertype"] if strategisk["sti"] != "/" else None}
+        elif links:
+            link_felter = {"link_spand": linkstrategi.spand_for(links[0], races_by_slug) or "andet",
+                           "link_maal": links[0]}
+
         slug = slug_from_title(result["title"])
         saved = save_article({
             "slug":             slug,
             "title":            result["title"],
             "excerpt":          result.get("excerpt", ""),
-            "content":          sanitize_links(result["content"], races),
+            "content":          content,
+            **link_felter,
             "meta_description": result.get("excerpt", "")[:160],
             "category":         result.get("category", "generelt"),
             "author":           "Klassementet AI",
@@ -494,6 +626,14 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
 
         if saved:
             print(f"  -> Kladde gemt: /nyheder/{slug}")
+            if link_felter:
+                print(f"     Interne links: {', '.join(links)} (spand: {link_felter['link_spand']})")
+                linkstatus["uge"] += 1
+                spand = link_felter["link_spand"]
+                linkstatus["spande"][spand] = linkstatus["spande"].get(spand, 0) + 1
+                if link_felter.get("link_ankertype"):
+                    linkstatus["ankre"].setdefault(link_felter["link_maal"], []).append(
+                        link_felter["link_ankertype"])
             drafted += 1
         else:
             failed += 1

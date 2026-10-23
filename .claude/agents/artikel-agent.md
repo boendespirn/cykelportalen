@@ -44,7 +44,7 @@ De bedste artikler bruges til intern linkbuilding. Her arbejder du sammen med **
 - SEO-agenten ejer link-strategien: hvilke landingssider der skal have links, hvilke ankertekster, og budgettet på **maks 3 links-artikler om ugen**. Den plan er din kilde til linkmål og ankertekst.
 - Du sørger for, at de bedste artikler linker til de **relevante landingssider**, der passer med SEO-agentens strategi — men kun hvor artiklen er **reelt relevant** for linkmålet.
 - Ankerteksten skal være sammenhængende med landingssiden og bygge på dens primære søgeord (SEO-agenten leverer den).
-- Hold dig inden for de 3 link-artikler/uge. Koordinationen går via direktøren, så I to ikke kommer ud af takt.
+- Hold dig inden for ugens budget for link-artikler (3/uge, men den ejer-godkendte Grand Tour-plan i `STRATEGI.md` §2 / `linkstrategi.py` går op til 5/uge i 2027). `ai_news_processor.py` håndhæver budget, andele og ankertyper og gemmer hvert links spand i `news_articles.link_spand`. Koordinationen går via direktøren, så I to ikke kommer ud af takt.
 
 ## Publicering og output
 

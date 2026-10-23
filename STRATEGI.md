@@ -46,6 +46,20 @@ Google er begyndt at indeksere siden bredt. Det betyder, at flaskehalsen skifter
   - **Max 2 artikler om dagen, mål er 1.** Vi venter stadig på indeksering — at spamme artikler ud skader både SEO'en (svag, tynd content frem for få stærke sider) og brandets løfte om kun det vigtige (jf. `CLAUDE.md` §5).
   - **Workflow:** artikel-agenten scorer alle relevante nyhedskandidater og vælger **den allerbedste** (højst dansk-relevans) til at blive skrevet — ikke alt der overstiger relevans-tærsklen. Kun i undtagelsestilfælde (to reelt store, uafhængige nyheder samme dag) skrives der 2.
   - Menneskelig godkendelse er stadig påkrævet før publicering (admin-køen på `klassementet.dk/admin`).
+- **Intern linkstrategi (ejer-godkendt 2026-10-23, mål: top 5 på Grand Tour-søgeordene i 2027).** Maskinen ligger i `linkstrategi.py`, som `ai_news_processor.py` følger; ændres planen, ændres den dér og her.
+
+  | Periode | Link-artikler/uge | Fordeling af linkene |
+  |---|---|---|
+  | 23. okt – 31. dec 2026 | 3 | Cykelcross 50 %, Giro 20 %, forside 20 %, Tour 10 % |
+  | Januar 2027 | 3 | Tour 40 %, Giro 30 %, forside 20 %, Vuelta 10 % |
+  | Feb – apr 2027 | 4 | Giro 50 %, Tour 30 %, forside og nære løb (Paris-Nice, klassikerne, Tour Auvergne-Rhône-Alpes …) 20 % |
+  | Maj – sep 2027 | 5 | Den Grand Tour, der kører eller er i sine sidste 6 uger, 50 %; den næste 30 %; forside og nære løb 20 % |
+
+  - Det giver ca. 33 links til Tour 2027, 22 til Giro og 20 til Vuelta før start — en hurtigere optrapning for Grand Tours end SEO-agentens generelle 8-10 pr. løb.
+  - **Ankertekst pr. landingsside:** 40 % løbsnavn + årstal, 30 % delvist match, 20 % beskrivende, 10 % præcist søgeord.
+  - Ugebudgettet tæller link-bærende artikler; over budget skrives artiklen helt uden interne links. Afviste kladder tæller ikke.
+  - Et link sættes kun, hvor artiklen er reelt relevant for målet, og kun til den udgave, artiklen handler om. Findes målsiden ikke endnu (Giro og Tour 2027 venter på ejerens data), går andelen midlertidigt til de andre spande.
+  - Hver kladdes linkmål står i morgenens Telegram-besked (🔗).
 - **Mål:** fortsæt indtil **hele siden er indekseret** — med få, stærke artikler frem for mange middelmådige.
 - **Det on-page/tekniske arbejde er nu i praksis gjort** (Metadata API, sitemap, JSON-LD, IndexNow — se `state/issues.md` SEO-003 til SEO-012). Seneste kontrol (2026-07-06, SEO-001) viser dog, at kun 3 af 26 tjekkede URL'er reelt er indekseret, og mønsteret ("Discovered - not indexed" / "unknown to Google") peger på et **autoritets-/intern linking-problem, ikke en teknisk blokering**.
 - **Derfor er dette ikke passiv ventetid:** research-agenten skal løbende undersøge de reelle årsager til, at Google ikke indekserer siderne (autoritetssignaler, linkbuilding-taktikker, hvordan sammenlignelige sites er kommet igennem samme flaskehals), og præsentere konkrete, eksekverbare metoder til at forbedre præcis dette punkt — som et vedvarende forbedringsspor, ikke en engangsopgave.

@@ -610,7 +610,7 @@ def nye_kladder() -> list[str]:
     overhovedet lå noget."""
     siden = _url_tid(nu() - timedelta(hours=24))
     try:
-        nye = hent(f"news_articles?select=title,category&status=eq.draft"
+        nye = hent(f"news_articles?select=title,category,link_spand,link_maal&status=eq.draft"
                    f"&created_at=gte.{siden}&order=created_at&limit=10")
     except requests.RequestException as e:
         # Et fejlet opslag her må ikke tage resten af morgenbeskeden med sig.
@@ -620,6 +620,9 @@ def nye_kladder() -> list[str]:
     ud = [f"\n📰 Nye nyhedskladder ({len(nye)}) — godkend på {ADMIN_URL}:"]
     for a in nye:
         maerke = " [cross]" if a.get("category") == "cykelcross" else ""
+        # Link-bærende kladder tæller i linkstrategiens ugebudget (linkstrategi.py).
+        if a.get("link_spand"):
+            maerke += f" 🔗 {a['link_spand']} → {a['link_maal']}"
         ud.append(f"  • {a['title']}{maerke}")
     return ud
 

@@ -28,7 +28,7 @@ Principper for al linkbuilding:
 
 Du **planlægger ikke selv artiklerne** — det gør artikel-agenten. Du ejer **link-strategien** og leverer den til artikel-agenten via direktøren:
 
-- Fastlæg budgettet: **maksimalt 3 link-bærende artikler om ugen.**
+- Fastlæg budgettet: **maksimalt 3 link-bærende artikler om ugen** — undtagen hvor den ejer-godkendte Grand Tour-plan (`STRATEGI.md` §2, maskinelt i `linkstrategi.py`) siger andet: 3/uge nov-jan, 4/uge feb-apr, 5/uge maj-sep 2027, med faste andele pr. løb. Den plan går forud for kampagnevinduerne i afsnit 1; ændringer i den kræver ejerens godkendelse.
 - Beslut, baseret på kampagnevinduerne ovenfor, hvilke **linkmål** (landingssider) der skal have links lige nu.
 - Lever den **ankertekst**, hver link skal bruge: bygget på landingssidens primære søgeord, men varieret naturligt (jf. afsnit 1).
 - Artikel-agenten sætter kun et link, hvor artiklen er **reelt relevant** for linkmålet — den relevansvurdering ligger hos den. Du leverer mål, ankertekst og budget; den udfører.
