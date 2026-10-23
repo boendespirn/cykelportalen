@@ -1,0 +1,534 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+import { API_BASE } from "@/lib/api";
+
+/** Hvilke løb en kalenderside viser. Samme layout på alle tre, så brugeren
+ *  kun skal lære siden én gang — kun filteret og teksterne skifter. */
+export type Filter = "alle" | "landevej" | "cykelcross";
+
+type Race = {
+  name: string;
+  slug: string;
+  start_date: string;
+  end_date: string | null;
+  country_code: string | null;
+  category: string;
+  race_type: string | null;
+  startlist_count: number;
+  stage_count: number;
+};
+
+type TodayStage = {
+  stage_number: number;
+  date: string;
+  stage_type: string | null;
+  start_location: string | null;
+  finish_location: string | null;
+  distance_km: string | null;
+  elevation_image_url: string | null;
+  elevation_image_source: string | null;
+};
+
+type OngoingRace = Race & {
+  total_stages: number;
+  completed_stages: number;
+  today_stage: TodayStage | null;
+};
+
+// Afsluttet løb i indeværende sæson. `startlist_count` er udeladt med vilje:
+// på et overstået løb er det vinderen, man leder efter, ikke feltets størrelse.
+type FinishedRace = Omit<Race, "startlist_count"> & {
+  winner: { name: string; slug: string; nationality: string | null } | null;
+};
+
+async function getOngoingRaces(): Promise<OngoingRace[]> {
+  try {
+    const res = await fetch(`${API_BASE}/ongoing-races`, { next: { revalidate: 60 } });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+async function getUpcomingRaces(): Promise<Race[]> {
+  try {
+    const res = await fetch(`${API_BASE}/upcoming-races`, { next: { revalidate: 60 } });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+async function getFinishedRaces(): Promise<FinishedRace[]> {
+  try {
+    // Længere revalidate end de kommende løb: et afsluttet løb ændrer sig ikke.
+    const res = await fetch(`${API_BASE}/finished-races`, { next: { revalidate: 300 } });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+/** "POGAČAR Tadej" → "Tadej Pogačar". Kilden skriver efternavnet med versaler
+ *  forrest; resten af sitet viser fornavn først, og et navn i VERSALER ville
+ *  skrige på en side, hvor alt andet er sat i almindelig skrift. */
+function formatRiderName(name: string): string {
+  const dele = name.trim().split(/\s+/);
+  if (dele.length < 2) return name;
+  const fornavn = dele[dele.length - 1];
+  const efternavn = dele
+    .slice(0, -1)
+    .join(" ")
+    .toLowerCase()
+    .replace(/(^|[\s-])(\p{L})/gu, (_, foer: string, bogstav: string) => foer + bogstav.toUpperCase());
+  return `${fornavn} ${efternavn}`;
+}
+
+function passer(race: { race_type: string | null }, filter: Filter): boolean {
+  if (filter === "alle") return true;
+  const cross = race.race_type === "cyclocross";
+  return filter === "cykelcross" ? cross : !cross;
+}
+
+/** Cross-sæsonen går hen over nytår: "2026/27" fra juli til juni. */
+export function crossSaeson(d = new Date()): string {
+  const fra = d.getMonth() >= 6 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${fra}/${String(fra + 1).slice(2)}`;
+}
+
+const FANER: { filter: Filter; href: string; label: string }[] = [
+  { filter: "alle", href: "/races", label: "Alle" },
+  { filter: "landevej", href: "/races/landevej", label: "Landevej" },
+  { filter: "cykelcross", href: "/races/cykelcross", label: "Cykelcross" },
+];
+
+function flagEmoji(code: string | null): string {
+  if (!code || code.length !== 2) return "🌍";
+  return code
+    .toUpperCase()
+    .split("")
+    .map((c) => String.fromCodePoint(c.charCodeAt(0) + 0x1f1a5))
+    .join("");
+}
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("da-DK", {
+    day: "numeric",
+    month: "long",
+  });
+}
+
+function daysUntil(dateStr: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(dateStr + "T00:00:00");
+  return Math.ceil((d.getTime() - today.getTime()) / 86400000);
+}
+
+function daysLeft(endDateStr: string): number {
+  return daysUntil(endDateStr);
+}
+
+function groupByMonth(races: Race[]): [string, Race[]][] {
+  const map = new Map<string, Race[]>();
+  for (const race of races) {
+    const key = new Date(race.start_date + "T00:00:00").toLocaleDateString("da-DK", {
+      month: "long",
+      year: "numeric",
+    });
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(race);
+  }
+  return [...map.entries()];
+}
+
+const STAGE_TYPE_LABELS: Record<string, string> = {
+  flat: "Flad",
+  hilly: "Kuperet",
+  mountain: "Bjerg",
+  tt: "Enkeltstart",
+  itt: "Enkeltstart",
+};
+
+const STAGE_TYPE_COLORS: Record<string, string> = {
+  flat: "text-emerald-400",
+  hilly: "text-yellow-400",
+  mountain: "text-red-400",
+  tt: "text-blue-400",
+  itt: "text-blue-400",
+};
+
+export default async function Kalender({
+  filter,
+  overlinje,
+  titel,
+  accent,
+  intro,
+  children,
+}: {
+  filter: Filter;
+  overlinje: string;
+  titel: string;
+  accent: string;
+  intro: string;
+  /** SEO-teksten. Den står under kalenderen, så løbene kommer først. */
+  children?: ReactNode;
+}) {
+  const [alleIgang, alleKommende, alleKoert] = await Promise.all([
+    getOngoingRaces(),
+    getUpcomingRaces(),
+    getFinishedRaces(),
+  ]);
+  const ongoingRaces = alleIgang.filter((r) => passer(r, filter));
+  const upcomingRaces = alleKommende.filter((r) => passer(r, filter));
+  const finishedRaces = alleKoert.filter((r) => passer(r, filter));
+  const months = groupByMonth(upcomingRaces);
+  const koertOverskrift =
+    filter === "cykelcross"
+      ? `Kørt i sæsonen ${crossSaeson()}`
+      : filter === "landevej"
+      ? `Kørt i ${new Date().getFullYear()}`
+      : "Allerede kørt";
+
+  return (
+    <div className="px-6 py-12">
+      <div className="mx-auto max-w-4xl">
+
+        {/* ── Igangværende løb ───────────────────────────────────────────── */}
+        {ongoingRaces.length > 0 && (
+          <section className="mb-16">
+            <div className="flex items-center gap-3 mb-5">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+              </span>
+              <h2 className="text-xs uppercase tracking-[0.25em] text-emerald-400 font-medium">
+                Igangværende løb
+              </h2>
+            </div>
+
+            <div className="space-y-4">
+              {ongoingRaces.map((race) => {
+                const remaining = race.end_date ? daysLeft(race.end_date) : null;
+                const pct = race.total_stages > 0
+                  ? Math.round((race.completed_stages / race.total_stages) * 100)
+                  : 0;
+                const ts = race.today_stage;
+                const typeLabel = ts?.stage_type ? STAGE_TYPE_LABELS[ts.stage_type] : null;
+                const typeColor = ts?.stage_type ? STAGE_TYPE_COLORS[ts.stage_type] : "text-slate-400";
+
+                return (
+                  <Link
+                    key={race.slug}
+                    href={`/${race.slug}`}
+                    className="group block rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900 to-slate-900/60 p-6 hover:border-emerald-500/40 hover:from-slate-900/90 transition-all duration-200"
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-3xl leading-none">{flagEmoji(race.country_code)}</span>
+                        <div>
+                          <p className="font-display text-2xl tracking-wide text-white group-hover:text-emerald-300 transition-colors leading-none">
+                            {race.name}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">{race.category}</p>
+                        </div>
+                      </div>
+                      {remaining !== null && remaining >= 0 && (
+                        <span className="text-xs text-slate-500 flex-shrink-0 ml-4 mt-1">
+                          {remaining === 0 ? "Sidste etape i dag" : `${remaining}d tilbage`}
+                        </span>
+                      )}
+                    </div>
+
+                    {ts ? (
+                      <div className="mb-4 rounded-xl bg-slate-800/60 border border-slate-700/60 overflow-hidden">
+                        {/* Kun egengenererede højdeprofiler vises (LEG-001) */}
+                        {ts.elevation_image_source === "generated" && ts.elevation_image_url ? (
+                          <div className="w-full bg-slate-950">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={ts.elevation_image_url}
+                              alt={`Højdeprofil for etape ${ts.stage_number}`}
+                              width={3000}
+                              height={1000}
+                              loading="lazy"
+                              decoding="async"
+                              className="w-full h-auto"
+                            />
+                          </div>
+                        ) : ts.elevation_image_url ? (
+                          <div className="h-20 flex items-center justify-center bg-slate-900/60">
+                            <span className="font-display text-xl tracking-widest text-slate-600">
+                              ETAPE {ts.stage_number}
+                            </span>
+                          </div>
+                        ) : null}
+                        <div className="px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full">
+                                I dag
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                Etape {ts.stage_number}
+                              </span>
+                              {typeLabel && (
+                                <span className={`text-xs font-medium ${typeColor}`}>
+                                  · {typeLabel}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-emerald-400 font-medium mb-1.5">
+                              Læs mere om {race.name} →
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-200">
+                            {ts.start_location}
+                            <span className="text-slate-500 mx-1.5">→</span>
+                            <span className="font-semibold text-white">{ts.finish_location}</span>
+                            {ts.distance_km && (
+                              <span className="text-slate-500 ml-2 text-xs font-mono">
+                                {parseFloat(ts.distance_km).toFixed(0)} km
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mb-4 rounded-xl bg-slate-800/40 border border-slate-700/40 px-4 py-3">
+                        <p className="text-xs text-slate-500">Hviledag</p>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-slate-500 flex-shrink-0 tabular-nums">
+                        {race.completed_stages} / {race.total_stages} etaper
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ── Hero ───────────────────────────────────────────────────────── */}
+        <header className="mb-10">
+          <p className="text-xs uppercase tracking-[0.25em] text-emerald-400 mb-4">
+            {overlinje}
+          </p>
+          <h1 className="font-display text-7xl sm:text-9xl tracking-wide leading-none text-white">
+            {titel}
+            <br />
+            <span className="text-emerald-400">{accent}</span>
+          </h1>
+          <p className="mt-5 text-slate-400 text-sm max-w-md leading-relaxed">{intro}</p>
+          <p className="mt-2 text-slate-500 text-sm">
+            {upcomingRaces.length > 0
+              ? `${upcomingRaces.length} kommende løb.`
+              : ongoingRaces.length > 0
+              ? "Alle kommende løb er vist ovenfor."
+              : "Den næste sæsons løb kommer på, så snart kalenderen er offentliggjort."}
+          </p>
+        </header>
+
+        {/* ── Filter ─────────────────────────────────────────────────────── */}
+        <nav aria-label="Vælg løbstype" className="mb-12 flex gap-2">
+          {FANER.map((f) => (
+            <Link
+              key={f.filter}
+              href={f.href}
+              aria-current={f.filter === filter ? "page" : undefined}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                f.filter === filter
+                  ? "bg-emerald-500 text-slate-950"
+                  : "border border-slate-800 text-slate-400 hover:border-emerald-500/40 hover:text-emerald-400"
+              }`}
+            >
+              {f.label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* ── Kommende løb ───────────────────────────────────────────────── */}
+        {upcomingRaces.length === 0 ? (
+          ongoingRaces.length === 0 && (
+            <div className="rounded-2xl border border-slate-800 p-16 text-center">
+              <p className="text-slate-600 text-sm">Ingen kommende løb lige nu.</p>
+            </div>
+          )
+        ) : (
+          <div className="space-y-12">
+            {months.map(([month, monthRaces]) => (
+              <section key={month}>
+                <h2 className="font-display text-xl tracking-[0.2em] text-slate-600 uppercase mb-4">
+                  {month}
+                </h2>
+                <div className="space-y-1.5">
+                  {monthRaces.map((race) => {
+                    const days = daysUntil(race.start_date);
+                    const hasStartlist = race.startlist_count > 0;
+                    const hasStages = race.stage_count > 0;
+                    return (
+                      <Link
+                        key={race.slug}
+                        href={`/${race.slug}`}
+                        className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-slate-900 transition-all duration-150"
+                      >
+                        <span className="text-xl w-8 text-center flex-shrink-0 leading-none">
+                          {flagEmoji(race.country_code)}
+                        </span>
+
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-100 group-hover:text-emerald-400 transition-colors truncate">
+                            {race.name}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="text-xs text-slate-500">
+                              {formatDate(race.start_date)}
+                            </span>
+                            {race.race_type === "cyclocross" && (
+                              <span className="text-[10px] font-medium text-amber-300/90 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                {race.category}
+                              </span>
+                            )}
+                            {hasStartlist && (
+                              <span className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                {race.startlist_count} ryttere
+                              </span>
+                            )}
+                            {hasStages && (
+                              <span className="text-[10px] font-medium text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">
+                                {race.stage_count} etaper
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {days >= 0 && (
+                            <span
+                              className={`text-xs px-2.5 py-1 rounded-full font-medium tabular-nums ${
+                                days === 0
+                                  ? "bg-emerald-500/20 text-emerald-300"
+                                  : days <= 14
+                                  ? "bg-emerald-500/10 text-emerald-400"
+                                  : "bg-slate-800 text-slate-500"
+                              }`}
+                            >
+                              {days === 0
+                                ? "i dag"
+                                : days === 1
+                                ? "i morgen"
+                                : `om ${days}d`}
+                            </span>
+                          )}
+                          <svg
+                            className="w-4 h-4 text-slate-700 group-hover:text-emerald-500 transition-colors"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+
+        {/* ── Allerede kørt i år ─────────────────────────────────────────────
+            Uden denne sektion forsvandt hele sæsonens indhold fra kalenderen,
+            efterhånden som løbene blev kørt: man kunne kun nå et afsluttet løb
+            via søgning eller et direkte link. Nyeste først, for det er dem, man
+            typisk leder efter. */}
+        {finishedRaces.length > 0 && (
+          <section className="mt-16 pt-12 border-t border-slate-800/60">
+            <h2 className="font-display text-xl tracking-[0.2em] text-slate-600 uppercase mb-1">
+              {koertOverskrift}
+            </h2>
+            <p className="text-xs text-slate-600 mb-5">
+              {finishedRaces.length} afsluttede løb — resultater, klassementer og etaper
+            </p>
+
+            <div className="space-y-1.5">
+              {finishedRaces.map((race) => (
+                <Link
+                  key={race.slug}
+                  href={`/${race.slug}`}
+                  className="group flex items-center gap-4 rounded-xl border border-slate-800/60 bg-slate-900/20 px-5 py-3.5 hover:border-slate-600 hover:bg-slate-900/60 transition-all duration-150"
+                >
+                  <span className="text-xl w-8 text-center flex-shrink-0 leading-none opacity-70 group-hover:opacity-100 transition-opacity">
+                    {flagEmoji(race.country_code)}
+                  </span>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-300 group-hover:text-emerald-400 transition-colors truncate">
+                      {race.name}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="text-xs text-slate-600">
+                        {formatDate(race.start_date)}
+                        {race.end_date && race.end_date !== race.start_date
+                          ? ` – ${formatDate(race.end_date)}`
+                          : ""}
+                      </span>
+                      {race.stage_count > 1 && (
+                        <span className="text-[10px] font-medium text-slate-500 bg-slate-800/80 px-1.5 py-0.5 rounded">
+                          {race.stage_count} etaper
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Vinderen er det første, man vil vide om et overstået løb.
+                      Mangler klassementet, vises feltet slet ikke — hellere
+                      ingenting end en tom plads, der ligner en fejl. */}
+                  {race.winner && (
+                    <span className="hidden sm:flex items-center gap-1.5 flex-shrink-0 text-xs text-slate-500">
+                      <span className="text-amber-400/80">🏆</span>
+                      <span className="text-slate-400 group-hover:text-slate-300 transition-colors">
+                        {formatRiderName(race.winner.name)}
+                      </span>
+                    </span>
+                  )}
+
+                  <svg
+                    className="w-4 h-4 text-slate-800 group-hover:text-emerald-500 transition-colors flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ── Om kalenderen (SEO-tekst) ──────────────────────────────────── */}
+        {children && (
+          <section className="mt-16 pt-12 border-t border-slate-800/60 max-w-2xl text-sm leading-relaxed text-slate-400 space-y-4 [&_h2]:font-display [&_h2]:text-2xl [&_h2]:tracking-wide [&_h2]:text-slate-200 [&_h2]:pt-2 [&_strong]:text-slate-200">
+            {children}
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}

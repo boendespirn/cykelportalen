@@ -84,7 +84,7 @@ def root():
 
 @app.get("/races")
 def get_races():
-    url = f"{SUPABASE_URL}/rest/v1/races?select=id,name,slug,start_date,end_date,country_code,category&order=start_date.asc"
+    url = f"{SUPABASE_URL}/rest/v1/races?select=id,name,slug,start_date,end_date,country_code,category,race_type&order=start_date.asc"
     races = requests.get(url, headers=get_headers()).json()
     if not races:
         return races
@@ -129,7 +129,7 @@ def get_races():
 @app.get("/upcoming-races")
 def get_upcoming_races():
     today = today_dk().isoformat()
-    url = f"{SUPABASE_URL}/rest/v1/races?select=id,name,slug,start_date,end_date,country_code,category&start_date=gt.{today}&order=start_date.asc"
+    url = f"{SUPABASE_URL}/rest/v1/races?select=id,name,slug,start_date,end_date,country_code,category,race_type&start_date=gt.{today}&order=start_date.asc"
     races = requests.get(url, headers=get_headers()).json()
 
     # Hent startlist-count per løb
@@ -186,14 +186,22 @@ def get_finished_races():
     """
     today = today_dk()
     aarets_start = today.replace(month=1, day=1).isoformat()
+    # Cross-saesonen gaar hen over nytaar (efteraar til februar), saa i januar
+    # skal efteraarets crossloeb stadig med; landevejen tager kun kalenderaaret.
+    cross_start = today.replace(year=today.year if today.month >= 7 else today.year - 1,
+                                month=7, day=1).isoformat()
     races = requests.get(
         f"{SUPABASE_URL}/rest/v1/races"
-        f"?select=id,name,slug,start_date,end_date,country_code,category"
-        f"&start_date=gte.{aarets_start}&end_date=lt.{today.isoformat()}"
+        f"?select=id,name,slug,start_date,end_date,country_code,category,race_type"
+        f"&start_date=gte.{min(aarets_start, cross_start)}&end_date=lt.{today.isoformat()}"
         f"&order=end_date.desc",
         headers=get_headers(),
     ).json()
     if not races or not isinstance(races, list):
+        return []
+    races = [r for r in races
+             if r["start_date"] >= aarets_start or r.get("race_type") == "cyclocross"]
+    if not races:
         return []
 
     id_list = ",".join(r["id"] for r in races)
@@ -234,7 +242,7 @@ def get_ongoing_races():
     today = today_dk().isoformat()
     race_url = (
         f"{SUPABASE_URL}/rest/v1/races"
-        f"?select=id,name,slug,start_date,end_date,country_code,category"
+        f"?select=id,name,slug,start_date,end_date,country_code,category,race_type"
         f"&start_date=lte.{today}&end_date=gte.{today}"
         f"&order=start_date.asc"
     )

@@ -381,6 +381,9 @@ def linkplan_tekst(plan: list[dict] | None, races: list[dict]) -> str:
     for m in plan:
         if m["sti"] == "/":
             anker = 'ankertekst "Klassementet" eller en naturlig beskrivelse af siden'
+        elif m["sti"] == linkstrategi.CROSS_KALENDER:
+            anker = ('ankertekst som "cykelcross-kalenderen", "kalenderen for cykelcross" '
+                     'eller "årets crossløb"')
         else:
             anker = "ankertype: " + linkstrategi.ANKER_FORKLARING[m["ankertype"]].format(
                 navn=m["navn"], aar=m["aar"])

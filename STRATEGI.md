@@ -60,6 +60,7 @@ Google er begyndt at indeksere siden bredt. Det betyder, at flaskehalsen skifter
   - Ugebudgettet tæller link-bærende artikler; over budget skrives artiklen helt uden interne links. Afviste kladder tæller ikke.
   - Et link sættes kun, hvor artiklen er reelt relevant for målet, og kun til den udgave, artiklen handler om. Findes målsiden ikke endnu (Giro og Tour 2027 venter på ejerens data), går andelen midlertidigt til de andre spande.
   - Hver kladdes linkmål står i morgenens Telegram-besked (🔗).
+  - Cross-spandens faste mål er `/races/cykelcross` (ejer-godkendt 2026-10-23); en artikel om et bestemt crossløb linker til løbets side, alt andet cross til kalenderen.
 - **Mål:** fortsæt indtil **hele siden er indekseret** — med få, stærke artikler frem for mange middelmådige.
 - **Det on-page/tekniske arbejde er nu i praksis gjort** (Metadata API, sitemap, JSON-LD, IndexNow — se `state/issues.md` SEO-003 til SEO-012). Seneste kontrol (2026-07-06, SEO-001) viser dog, at kun 3 af 26 tjekkede URL'er reelt er indekseret, og mønsteret ("Discovered - not indexed" / "unknown to Google") peger på et **autoritets-/intern linking-problem, ikke en teknisk blokering**.
 - **Derfor er dette ikke passiv ventetid:** research-agenten skal løbende undersøge de reelle årsager til, at Google ikke indekserer siderne (autoritetssignaler, linkbuilding-taktikker, hvordan sammenlignelige sites er kommet igennem samme flaskehals), og præsentere konkrete, eksekverbare metoder til at forbedre præcis dette punkt — som et vedvarende forbedringsspor, ikke en engangsopgave.

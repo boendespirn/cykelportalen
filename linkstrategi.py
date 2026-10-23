@@ -46,6 +46,9 @@ ANKER_FORKLARING = {
     "beskrivende": 'beskrivende tekst om det, siden viser, fx "stigningsprofilerne" eller "startlisten"',
     "eksakt":      'det præcise søgeord "{navn} {aar} etaper" (for et endagsløb: "{navn} startliste")',
 }
+# Cross-kalenderen er spandens faste mål: den findes hele sæsonen og samler
+# søgningerne på "cykelcross", mens de enkelte løb kun er aktuelle i få uger.
+CROSS_KALENDER = "/races/cykelcross"
 NAER_DAGE  = 42   # "tæt på" = starter inden for 6 uger
 CROSS_DAGE = 21   # et crossløb kan linkes fra 3 uger før til 2 dage efter
 
@@ -91,6 +94,8 @@ def spand_for(sti: str, races_by_slug: dict) -> str | None:
     """Hvilken spand et internt link tilhører. Etapesider tæller som løbet."""
     if sti == "/":
         return "forside"
+    if sti.rstrip("/") == CROSS_KALENDER:
+        return "cross"
     slug = sti.strip("/").split("/")[0]
     for spand, base in GRAND_TOURS.items():
         if slug.startswith(base + "-"):
@@ -127,7 +132,7 @@ def linkmaal(d: date, races: list[dict]) -> dict[str, list[dict]]:
         elif slut >= d and start <= d + timedelta(days=NAER_DAGE):
             naer.append(m)
     if cross:
-        maal["cross"] = cross
+        maal["cross"] = cross + [{"sti": CROSS_KALENDER, "navn": "cykelcross-kalenderen", "aar": None}]
     maal["naer"] = [forside] + naer
     return maal
 

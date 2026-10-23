@@ -81,6 +81,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   return [
     { url: BASE, changeFrequency: "daily", priority: 1.0 },
     { url: `${BASE}/races`, changeFrequency: "daily", priority: 0.6 },
+    { url: `${BASE}/races/landevej`, changeFrequency: "daily", priority: 0.6 },
+    { url: `${BASE}/races/cykelcross`, changeFrequency: "daily", priority: 0.7 },
     { url: `${BASE}/riders`, changeFrequency: "weekly", priority: 0.5 },
     { url: `${BASE}/teams`, changeFrequency: "weekly", priority: 0.5 },
     { url: `${BASE}/nyheder`, changeFrequency: "daily", priority: 0.7 },
