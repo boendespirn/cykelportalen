@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { API_BASE } from "@/lib/api";
+import { raceHref } from "@/lib/evergreen";
 
 /** Hvilke løb en kalenderside viser. Samme layout på alle tre, så brugeren
  *  kun skal lære siden én gang — kun filteret og teksterne skifter. */
@@ -223,7 +224,7 @@ export default async function Kalender({
                 return (
                   <Link
                     key={race.slug}
-                    href={`/${race.slug}`}
+                    href={raceHref(race.slug)}
                     className="group block rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900 to-slate-900/60 p-6 hover:border-emerald-500/40 hover:from-slate-900/90 transition-all duration-200"
                   >
                     <div className="flex items-start justify-between mb-4">
@@ -381,7 +382,7 @@ export default async function Kalender({
                     return (
                       <Link
                         key={race.slug}
-                        href={`/${race.slug}`}
+                        href={raceHref(race.slug)}
                         className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-slate-900 transition-all duration-150"
                       >
                         <span className="text-xl w-8 text-center flex-shrink-0 leading-none">
@@ -469,7 +470,7 @@ export default async function Kalender({
               {finishedRaces.map((race) => (
                 <Link
                   key={race.slug}
-                  href={`/${race.slug}`}
+                  href={raceHref(race.slug)}
                   className="group flex items-center gap-4 rounded-xl border border-slate-800/60 bg-slate-900/20 px-5 py-3.5 hover:border-slate-600 hover:bg-slate-900/60 transition-all duration-150"
                 >
                   <span className="text-xl w-8 text-center flex-shrink-0 leading-none opacity-70 group-hover:opacity-100 transition-opacity">

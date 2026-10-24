@@ -389,7 +389,8 @@ def linkplan_tekst(plan: list[dict] | None, races: list[dict]) -> str:
                 navn=m["navn"], aar=m["aar"])
         linjer.append(f"- {m['navn']}: {m['sti']} ({anker})")
     linjer.append("\nLøbssider der må bruges til link (2) — kun hvis artiklen handler om løbet:")
-    linjer += [f"- {r['name']}: /{r['slug']}" for r in races]
+    linjer += [f"- {r['name']}: {linkstrategi.EVERGREEN.get(r['slug'], '/' + r['slug'])}"
+               for r in races]
     return "\n".join(linjer)
 
 

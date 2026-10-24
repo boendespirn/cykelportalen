@@ -11,6 +11,7 @@ import SpoilerSection from "./SpoilerSection";
 import DnfSection from "./DnfSection";
 import ResultList, { type ResultEntry } from "./ResultList";
 import StageMapLoader from "./stage/[n]/StageMapLoader";
+import { erFastAdresse, raceHref, stageHref } from "@/lib/evergreen";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -530,13 +531,13 @@ export async function generateMetadata(
     title: `${race.name} ${year}`,
     description,
     alternates: {
-      canonical: `/${slug}`,
+      canonical: raceHref(slug),
       types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
     },
     openGraph: {
       title: `${race.name} ${year} | Klassementet`,
       description,
-      url: `/${slug}`,
+      url: raceHref(slug),
       siteName: "Klassementet",
       locale: "da_DK",
       type: "website",
@@ -706,8 +707,11 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           </span>
         )}
       </div>
+      {/* Årstallet står i H1, så siden også rangerer på "Tour de France 2027"
+          — vigtigst på de faste adresser, hvor URL'en ikke har årstallet. */}
       <h1 className="font-display text-5xl sm:text-7xl tracking-wide leading-none text-white mb-3">
         {race.name}
+        {race.start_date && <span className="text-emerald-400"> {race.start_date.slice(0, 4)}</span>}
       </h1>
       <p className="text-slate-400 text-sm">
         {formatDate(race.start_date)}
@@ -743,7 +747,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       name: race.name,
       address: { "@type": "PostalAddress", addressCountry: race.country_code ?? "IT" },
     },
-    url: `https://klassementet.dk/${race.slug}`,
+    url: `https://klassementet.dk${raceHref(race.slug)}`,
     // Superprestige, X2O Trofee og HG Cross er private arrangoerer, ikke UCI
     // WorldTour. Et forkert organizer-felt er en faktafejl Google laeser.
     organizer: isCross
@@ -1349,7 +1353,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
 
       {/* ── Hero elevation profile ── */}
       {isOngoing && heroStage?.elevation_image_url && (
-        <Link href={`/${race.slug}/stage/${heroStage.stage_number}`} className="block mb-8 group">
+        <Link href={stageHref(race.slug, heroStage.stage_number)} className="block mb-8 group">
           <div className="rounded-2xl border border-slate-800 overflow-hidden hover:border-emerald-500/30 transition-colors">
             <div className="flex items-center gap-3 px-5 pt-4 pb-3">
               {todayStage && todayStage.stage_number === heroStage.stage_number ? (
@@ -1648,7 +1652,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                   return <div key={stage.stage_number}>{card}</div>;
                 }
                 return (
-                  <Link key={stage.stage_number} href={`/${race.slug}/stage/${stage.stage_number}`} className="block group">
+                  <Link key={stage.stage_number} href={stageHref(race.slug, stage.stage_number)} className="block group">
                     {card}
                   </Link>
                 );
@@ -1678,7 +1682,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                   key={h.slug}
                   className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
                 >
-                  <Link href={`/${h.slug}`} className="font-mono text-slate-500 text-sm w-10 flex-shrink-0 hover:text-emerald-400 transition-colors">
+                  <Link href={raceHref(h.slug)} className="font-mono text-slate-500 text-sm w-10 flex-shrink-0 hover:text-emerald-400 transition-colors">
                     {h.year}
                   </Link>
                   {winner ? (
@@ -1701,8 +1705,10 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         </section>
       )}
 
-      {/* ── Nyheder & analyser ─────────────────────────────────────────── */}
-      {raceNews.length > 0 && (
+      {/* ── Nyheder & analyser ──────────────────────────────────────────
+          Ikke på de faste adresser (/tour-de-france): ejeren vil have den
+          side til løbet alene (2026-10-24). */}
+      {raceNews.length > 0 && !erFastAdresse(race.slug) && (
         <section className="mt-12">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-xs uppercase tracking-[0.25em] text-slate-400 font-medium">

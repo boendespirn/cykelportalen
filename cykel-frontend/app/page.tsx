@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+import { raceHref } from "@/lib/evergreen";
 
 export const metadata: Metadata = {
   openGraph: {
@@ -225,7 +226,7 @@ export default async function Home() {
                 return (
                   <Link
                     key={race.slug}
-                    href={`/${race.slug}`}
+                    href={raceHref(race.slug)}
                     className="group block rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900 to-slate-900/60 p-6 hover:border-emerald-500/40 hover:from-slate-900/90 transition-all duration-200"
                   >
                     <div className="flex items-start justify-between mb-4">
@@ -350,7 +351,7 @@ export default async function Home() {
                 return (
                   <Link
                     key={race.slug}
-                    href={`/${race.slug}`}
+                    href={raceHref(race.slug)}
                     className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-5 py-4 hover:border-emerald-500/40 hover:bg-slate-900 transition-all duration-150"
                   >
                     <span className="text-xl w-8 text-center flex-shrink-0 leading-none">

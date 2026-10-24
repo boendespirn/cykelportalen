@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { API_BASE } from "@/lib/api";
+import { raceHref } from "@/lib/evergreen";
 
 export const metadata: Metadata = { title: "Søg" };
 
@@ -126,7 +127,7 @@ export default async function SearchPage(props: { searchParams: Promise<{ q?: st
                 {results.races.map((r) => (
                   <Link
                     key={r.slug}
-                    href={`/${r.slug}`}
+                    href={raceHref(r.slug)}
                     className="group flex items-center gap-4 rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/40 hover:bg-slate-900 transition-all duration-150"
                   >
                     <div className="flex-1 min-w-0">
@@ -190,7 +191,7 @@ export default async function SearchPage(props: { searchParams: Promise<{ q?: st
                   const race = c.stages?.races;
                   // Peger på løbssiden, ikke den specifikke etapeside — undgår 404
                   // for historiske etaper, som ikke længere har egen landingsside.
-                  const href = race ? `/${race.slug}` : "#";
+                  const href = race ? raceHref(race.slug) : "#";
                   return (
                     <Link
                       key={i}

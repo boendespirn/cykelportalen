@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_BASE } from "@/lib/api";
+import { raceHref } from "@/lib/evergreen";
 
 type SearchResults = {
   riders: Array<{ name: string; slug: string; nationality: string | null; speciality: string | null }>;
@@ -139,7 +140,7 @@ export default function SearchBar() {
                   {results.races.length > 0 && (
                     <ResultGroup label="Løb">
                       {results.races.map((r) => (
-                        <ResultItem key={r.slug} href={`/${r.slug}`} onClick={() => setOpen(false)}>
+                        <ResultItem key={r.slug} href={raceHref(r.slug)} onClick={() => setOpen(false)}>
                           <span className="text-sm text-slate-200">{r.name}</span>
                           {r.start_date && (
                             <span className="text-xs text-slate-500">
@@ -167,7 +168,7 @@ export default function SearchBar() {
                         const race = c.stages?.races;
                         // Peger på løbssiden, ikke den specifikke etapeside — undgår
                         // 404 for historiske etaper uden egen landingsside.
-                        const href = race ? `/${race.slug}` : "#";
+                        const href = race ? raceHref(race.slug) : "#";
                         return (
                           <ResultItem key={i} href={href} onClick={() => setOpen(false)}>
                             <span className="text-sm text-slate-200">{c.name}</span>

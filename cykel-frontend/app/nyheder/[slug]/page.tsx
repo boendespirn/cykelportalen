@@ -7,6 +7,7 @@ import Link from "next/link";
 import { marked } from "marked";
 import { API_BASE } from "@/lib/api";
 import ShareButtons from "./ShareButtons";
+import { raceHref } from "@/lib/evergreen";
 
 type Article = {
   id: string;
@@ -148,7 +149,7 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
           {CATEGORY_LABELS[article.category] ?? article.category}
         </span>
         {article.races && (
-          <Link href={`/${article.races.slug}`}
+          <Link href={raceHref(article.races.slug)}
             className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
             {article.races.name} →
           </Link>
@@ -216,7 +217,7 @@ export default async function ArticlePage(props: { params: Promise<{ slug: strin
         <div className="mt-8 pt-6 border-t border-slate-800">
           <p className="text-xs text-slate-600 mb-3">Relateret løb</p>
           <Link
-            href={`/${article.races.slug}`}
+            href={raceHref(article.races.slug)}
             className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-emerald-400 transition-colors"
           >
             <span className="text-emerald-500">→</span>

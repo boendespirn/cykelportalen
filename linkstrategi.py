@@ -24,6 +24,12 @@ GRAND_TOURS = {
     "vuelta": "la-vuelta-ciclista-a-espana",
 }
 
+# Den aktuelle udgave bor på en fast adresse (ejer-godkendt 2026-10-24), og
+# dens årstals-adresse sender videre dertil. Linkene skal derfor pege på den
+# faste adresse, så de bliver ved med at arbejde, når næste udgave overtager
+# den. Skal skiftes sammen med cykel-frontend/lib/evergreen.ts.
+EVERGREEN = {"tour-de-france-2027": "/tour-de-france"}
+
 # (fra, til inkl., link-artikler pr. uge, andele). None = dynamisk (maj-sep).
 PERIODER = [
     # Ejerens tilføjelse: to måneder med intensiv cykelcross.
@@ -98,7 +104,7 @@ def spand_for(sti: str, races_by_slug: dict) -> str | None:
         return "cross"
     slug = sti.strip("/").split("/")[0]
     for spand, base in GRAND_TOURS.items():
-        if slug.startswith(base + "-"):
+        if slug == base or slug.startswith(base + "-"):
             return spand
     race = races_by_slug.get(slug)
     if race and race.get("race_type") == "cyclocross":
@@ -118,7 +124,8 @@ def linkmaal(d: date, races: list[dict]) -> dict[str, list[dict]]:
                          key=lambda r: r["start_date"])
         if udgaver:
             r = udgaver[0]
-            maal[spand] = [{"sti": f"/{r['slug']}", "navn": r["name"], "aar": r["start_date"][:4]}]
+            maal[spand] = [{"sti": EVERGREEN.get(r["slug"], f"/{r['slug']}"),
+                            "navn": r["name"], "aar": r["start_date"][:4]}]
     cross, naer = [], []
     for r in races:
         if not r.get("start_date") or any(r["slug"].startswith(b + "-") for b in GRAND_TOURS.values()):

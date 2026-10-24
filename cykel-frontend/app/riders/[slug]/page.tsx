@@ -6,6 +6,7 @@ import Link from "next/link";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
 import CollapsibleList from "./CollapsibleList";
+import { raceHref, stageHref } from "@/lib/evergreen";
 
 type Rider = {
   name: string;
@@ -345,7 +346,7 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
               return (
                 <Link
                   key={i}
-                  href={`/${r.races.slug}`}
+                  href={raceHref(r.races.slug)}
                   className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
                 >
                   <span className={`text-xs font-bold w-8 h-8 flex items-center justify-center rounded-lg border flex-shrink-0 ${podiumStyle}`}>
@@ -419,7 +420,7 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
                 return (
                   <Link
                     key={i}
-                    href={`/${s.races.slug}/stage/${s.stage_number}`}
+                    href={stageHref(s.races.slug, s.stage_number)}
                     className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
                   >
                     {inner}
@@ -449,7 +450,7 @@ export default async function RiderPage(props: { params: Promise<{ slug: string 
               return (
                 <Link
                   key={i}
-                  href={`/${race.slug}`}
+                  href={raceHref(race.slug)}
                   className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors hover:border-emerald-500/30
                     ${isOngoing ? "border-emerald-500/30 bg-emerald-500/5" : "border-slate-800 bg-slate-900/40"}`}
                 >

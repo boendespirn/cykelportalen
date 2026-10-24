@@ -10,6 +10,7 @@ import ResultList, { type ResultEntry } from "../../ResultList";
 import ClassificationTabs, { type StandingEntry } from "../../ClassificationTabs";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
+import { raceHref, stageHref } from "@/lib/evergreen";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -430,13 +431,13 @@ export async function generateMetadata(
     title,
     description: desc,
     alternates: {
-      canonical: `/${slug}/stage/${n}`,
+      canonical: stageHref(slug, n),
       types: { "application/rss+xml": "https://klassementet.dk/api/rss" },
     },
     openGraph: {
       title: `${title} | Klassementet`,
       description: desc,
-      url: `/${slug}/stage/${n}`,
+      url: stageHref(slug, n),
       siteName: "Klassementet",
       locale: "da_DK",
       type: "website",
@@ -479,7 +480,7 @@ export default async function StagePage(props: {
   if (n === "1") {
     const allStages = await getAllStages(slug);
     if (allStages.length <= 1) {
-      permanentRedirect(`/${slug}`);
+      permanentRedirect(raceHref(slug));
     }
   }
 
@@ -579,7 +580,7 @@ export default async function StagePage(props: {
       "@type": "Place",
       name: stage.finish_location ?? stage.start_location ?? race.name,
     },
-    url: `https://klassementet.dk/${slug}/stage/${n}`,
+    url: `https://klassementet.dk${stageHref(slug, n)}`,
     organizer: { "@type": "Organization", name: "UCI WorldTour", url: "https://www.uci.org" },
     winner: {
       "@type": "Person",
@@ -592,8 +593,8 @@ export default async function StagePage(props: {
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Klassementet", item: "https://klassementet.dk" },
-      { "@type": "ListItem", position: 2, name: race.name, item: `https://klassementet.dk/${slug}` },
-      { "@type": "ListItem", position: 3, name: `Etape ${stage.stage_number}`, item: `https://klassementet.dk/${slug}/stage/${n}` },
+      { "@type": "ListItem", position: 2, name: race.name, item: `https://klassementet.dk${raceHref(slug)}` },
+      { "@type": "ListItem", position: 3, name: `Etape ${stage.stage_number}`, item: `https://klassementet.dk${stageHref(slug, n)}` },
     ],
   };
 
@@ -606,7 +607,7 @@ export default async function StagePage(props: {
       {/* Navigationsbar: tilbage + forrige/næste etape */}
       <div className="flex items-center justify-between mb-8 gap-2">
         <Link
-          href={`/${slug}`}
+          href={raceHref(slug)}
           className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-emerald-400 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -618,7 +619,7 @@ export default async function StagePage(props: {
         <div className="flex items-center gap-1">
           {prevStage ? (
             <Link
-              href={`/${slug}/stage/${prevStage.stage_number}`}
+              href={stageHref(slug, prevStage.stage_number)}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-400 hover:border-slate-600 hover:text-slate-200 transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -632,7 +633,7 @@ export default async function StagePage(props: {
 
           {nextStage ? (
             <Link
-              href={`/${slug}/stage/${nextStage.stage_number}`}
+              href={stageHref(slug, nextStage.stage_number)}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-400 hover:border-slate-600 hover:text-slate-200 transition-colors"
             >
               E{nextStage.stage_number}

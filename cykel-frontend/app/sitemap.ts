@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
+import { raceHref, stageHref } from "@/lib/evergreen";
 
 const BASE = "https://klassementet.dk";
 
@@ -34,7 +35,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const raceUrls: MetadataRoute.Sitemap = races.map((r) => {
     const isOngoing = r.start_date <= today && (!r.end_date || r.end_date >= today);
     return {
-      url: `${BASE}/${r.slug}`,
+      url: `${BASE}${raceHref(r.slug)}`,
       lastModified: r.start_date,
       changeFrequency: isOngoing ? "hourly" : isHistoricRaceSlug(r.slug) ? "monthly" : "weekly",
       priority: isOngoing ? 1.0 : isHistoricRaceSlug(r.slug) ? 0.5 : 0.9,
@@ -52,7 +53,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       const historic = isHistoricRaceSlug(r.slug);
       const count = historic ? Math.min(r.ready_through_stage ?? 0, r.stage_count ?? 0) : (r.stage_count ?? 0);
       return Array.from({ length: count }, (_, i) => ({
-        url: `${BASE}/${r.slug}/stage/${i + 1}`,
+        url: `${BASE}${stageHref(r.slug, i + 1)}`,
         lastModified: r.start_date,
         changeFrequency: historic ? ("monthly" as const) : ("daily" as const),
         priority: historic ? 0.5 : 0.8,
