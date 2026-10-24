@@ -71,8 +71,12 @@ ELITE_MOENSTRE = [
 # klistrede sidefoden ("BERENCROSS MEULEBEKE ... STARTLIST MEN ELITE") sig
 # fast paa den sidste rytters holdnavn.
 CHROME = re.compile(
-    r"^(nr|naam|nom|uci\s*id|nat|team|ploeg|uci\s*rank|rank)$"
-    r"|start\s*-?\s*list|startlijst|\d{1,2}/\d{1,2}/\d{4}", re.I)
+    r"^(nr|naam|nom|uci\s*id|nat|team|ploeg|club|uci\s*rank|rank)$"
+    r"|start\s*-?\s*list|startlijst|\d{1,2}/\d{1,2}/\d{4}"
+    # Superprestige saetter loebsnavnet paa sin egen linje over "STARTLIST";
+    # uden dette blev "SUPERPRESTIGE DRUIVENCROSS OVERIJSE" en del af sidste
+    # rytters klubnavn (Overijse 2026-10-25).
+    r"|^(superprestige|x2o|hg\s*cross)\b", re.I)
 
 NUM = re.compile(r"^\d{1,3}$")
 UCI_ID = re.compile(r"^\d{8,12}$")
