@@ -87,6 +87,38 @@ def _find_plot_box(im: Image.Image) -> tuple[int, int, int, int] | None:
     return x0, 0, x1, y1
 
 
+def _is_dark(px) -> bool:
+    return max(px) < 60
+
+
+def _find_aso_box(im: Image.Image) -> tuple[int, int, int, int] | None:
+    """Plotfeltet i ASO's profilbilleder (letour.fr, stil "aso").
+
+    Fyldet staar direkte paa et sort km-baand, og baandets km-tal er skrevet
+    med SAMME gule farve som fyldet. _find_plot_box ville derfor laegge
+    bundlinjen nede i tallene, og sporingen ville starte i et "18" i stedet
+    for i terraenet. Bundlinjen er i stedet raekken lige over baandet: den
+    foerste raekke, hvor stoerstedelen af billedbredden er sort."""
+    w, h = im.size
+    bar_top = None
+    for y in range(h // 3, h):
+        if sum(1 for x in range(0, w, 2) if _is_dark(im.getpixel((x, y)))) > 0.35 * (w / 2):
+            bar_top = y
+            break
+    if bar_top is None:
+        return None
+    # Raekken lige over baandet er en blandingsfarve (JPEG/anti-aliasing) og
+    # kun delvist gul. Bundlinjen er den af de naermeste raekker, hvor fyldet
+    # daekker mest — ellers blev plotfeltet paa etape 8 kun 200 px bredt.
+    def fyld(y):
+        return [x for x in range(w) if _is_fill(im.getpixel((x, y)))]
+    y1 = max(range(bar_top - 6, bar_top), key=lambda y: len(fyld(y)))
+    xs = fyld(y1)
+    if not xs:
+        return None
+    return min(xs), 0, max(xs), y1
+
+
 def _trace_surface(im: Image.Image, box) -> dict[int, int]:
     """Terraenets overkant pr. kolonne. Fyldet er sammenhaengende fra bundlinjen
     op til overfladen; hjaelpelinjer og gitterlinjer er aldrig fyldfarvede."""
@@ -206,11 +238,13 @@ def digitize_stage_profile(
     if cfg.get("style") == "edgecycling":
         return _digitize_edgecycling(cfg, st, report, n_samples, verbose)
 
-    url = cfg["source_url_pattern"].format(stage=stage_number)
+    # ASO-billederne (letour.fr) har en signeret URL pr. etape, saa der kan
+    # ikke staa et moenster — dér ligger URL'en paa selve etapen.
+    url = st.get("source_url") or cfg["source_url_pattern"].format(stage=stage_number)
     report["source_url"] = url
     im = _fetch_image(url)
 
-    box = _find_plot_box(im)
+    box = _find_aso_box(im) if cfg.get("style") == "aso" else _find_plot_box(im)
     if not box:
         report["error"] = "plotfelt ikke fundet i billedet"
         return None, report
