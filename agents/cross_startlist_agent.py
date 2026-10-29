@@ -362,7 +362,9 @@ def laes_startliste(pdf_bytes: bytes) -> list[dict]:
                 and UCI_ID.match(linjer[j + 2]) and NAT.match(linjer[j + 3])):
             rest.append(linjer[j])
             j += 1
-        rank = rest.pop() if len(rest) > 1 and NUM.match(rest[-1]) else None
+        # Et tal til sidst er rankingen — ogsaa naar rytteren ingen klub har.
+        # Med "len(rest) > 1" blev Dean Harveys ranking (145) hans holdnavn.
+        rank = rest.pop() if rest and NUM.match(rest[-1]) else None
         ryttere.append({
             "bib": int(bib), "navn": navn, "nat": nat,
             "hold": " ".join(rest).strip() or None,
@@ -397,23 +399,23 @@ def omvendt_navn(navn: str) -> str:
     return " ".join(for_ + efter) if efter and for_ else navn
 
 
-def omvendt_navn(navn: str) -> str:
-    """"VAN DE PUTTE Victor" → "Victor VAN DE PUTTE". Efternavnet er ordene
-    med store bogstaver; et split ved foerste mellemrum ville give noget andet."""
+def navne_rotationer(navn: str) -> list[str]:
+    """Alle ordstillinger, der bevarer raekkefoelgen: "Mats Vanden Eynde" →
+    "Vanden Eynde Mats", "Eynde Mats Vanden". Arrangoer-PDF'erne skriver
+    "EFTERNAVN Fornavn", KNWU og PCS "Fornavn Efternavn" — og store bogstaver
+    kan ikke bruges til at finde efternavnet ("senn bossaerts" fra KNWU)."""
     ord_ = navn.split()
-    efter = [o for o in ord_ if o.isupper() and len(o) > 1]
-    foer = [o for o in ord_ if o not in efter]
-    return " ".join(foer + efter) if efter and foer else navn
+    return [" ".join(ord_[i:] + ord_[:i]) for i in range(len(ord_))]
 
 
 def find_eller_opret_rytter(r: dict, kilde: str, toer: bool) -> str | None:
     """Rytteren. PDF'en skriver "EFTERNAVN Fornavn" — samme form som PCS og som
     vores egen database, saa slug'en bliver den samme."""
     slug = slugify(r["navn"])
-    # Begge ordstillinger: landevejsrytterne kom ind fra PCS som "Joran
-    # Wyseure" (joran-wyseure), og uden det andet opslag fik 18 af dem en
-    # dublet som "WYSEURE Joran" (opdaget 2026-10-29).
-    for s in (slug, slugify(omvendt_navn(r["navn"]))):
+    # Alle ordstillinger: KNWU skrev "Joran Wyseure", HG Cross-PDF'en
+    # "WYSEURE Joran", og med kun ét opslag fik 18 ryttere en dublet
+    # (lagt sammen 2026-10-29).
+    for s in [slugify(n) for n in navne_rotationer(r["navn"])]:
         rows = sb_get("riders", f"slug=eq.{s}&select=id&limit=1")
         if rows:
             return rows[0]["id"]
