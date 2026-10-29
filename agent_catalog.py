@@ -263,16 +263,24 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
     _job("resultater", "Resultater og klassementer", PHASE_DURING, [
             _step("results_agent.py", ["--race", "{db_slug}"],
                   whole=["--all-stages"], stage=["--stage", "{stage}"],
-                  label="1/2 Top 10 og alle fire klassementer"),
+                  label="1/3 Top 10 og alle fire klassementer"),
+            # Cykelcross har ingen PCS-URL, saa trinnet ovenfor finder intet.
+            # Serierne udgiver selv resultatet (Superprestige som PDF,
+            # HG Cross via chronorace). Agenten melder paent fra og slutter
+            # med 0 paa et landevejsloeb — samme moenster som startlisten.
+            _step("cross_results_agent.py", ["--race", "{db_slug}"],
+                  whole=["--all-stages"], stage=["--stage", "{stage}"],
+                  label="2/3 Top 10 (cykelcross, seriens egen kilde)"),
             # Referatet er ikke et selvstændigt job længere (2026-09-09). Det
             # grundfæster sig i etapens resultat og klassement og skal derfor
             # ALTID køre lige efter dem: var det en knap for sig, kunne man
             # komme til at skrive et referat oven på forældede resultater.
             _step("stage_recap_agent.py", ["--race", "{db_slug}"],
                   whole=["--all-stages"], stage=["--stage", "{stage}"],
-                  label="2/2 Etapereferat fra PCS LiveStats"),
+                  label="3/3 Etapereferat fra PCS LiveStats"),
          ],
-         description="Etaperesultat, klassement og etapereferat i én kørsel. "
+         description="Etaperesultat, klassement og etapereferat i én kørsel "
+                     "(cykelcross: resultatet fra seriens egen kilde). "
                      "Hele ræset lukker huller bagud; én etape henter netop den.",
          covers=["resultater", "klassementer", "referater"],
          est_minutes=45, est_stage_minutes=4),

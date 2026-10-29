@@ -176,6 +176,7 @@ Il Lombardia 2026 er den opsætning, et **endagsløb** skal kopiere næste gang.
 
 - **Ryttere:** `startlist_agent.py`, `rider_photo_agent.py` (**ude af drift 2026-09-09** — vi må ikke bruge PCS' rytterfotos; filen ligger stadig på disken, men er ude af kataloget, ude af `race_prep_pipeline.py` og ude af fuldstændighedstjekket), `fix_rider_photos.py`, `rider_stats_agent.py`, `rider_speciality_agent.py`, `hometown_agent.py`, `local_favorite_agent.py`.
 - **Resultater:** `results_agent.py`, `giro_results_agent.py`, `historical_results_agent.py`, `run_results.py`.
+- **Cykelcross (ingen PCS):** `agents/cross_startlist_agent.py` (startliste: HG Cross-PDF på hgcross.be, KNWU-API for hollandske løb, Superprestige "participants"-PDF på løbets kalenderside) og `agents/cross_results_agent.py` (top 10: Superprestige-PDF fra superprestigecyclocross.be/nl/uitslagen, HG Cross via chronorace-linket på hgcross.be → chronoraces åbne JSON-API bag acn-timing.com). Begge er trin i de faste job "startliste" og "resultater" og springer pænt over på landevejsløb. X2O Trofee har endnu ingen kilde.
 - **Etapereferater:** `agents/stage_recap_agent.py` (kørte etaper, PCS LiveStats → `stages.stage_recap`), `agents/historic_recap_agent.py` (historiske løb, TourTracker → `stages.historic_recap`).
 - **Løb:** `race_agent.py`, `race_description_agent.py`, `historical_race_agent.py`, `read_races.py`.
 - **Nyheder:** `news_agent.py`, `news_publisher_agent.py`, `ai_news_processor.py`, `rss_news_scraper.py`.

@@ -65,6 +65,8 @@ ELITE_MOENSTRE = [
     re.compile(r"men[-_ ]?elite", re.I),
     re.compile(r"elite[-_ ]?men", re.I),
     re.compile(r"heren[-_ ]?elite", re.I),
+    # Heerde 2026: "ELITE-MANNEN-Startlijst-22-10-2026.pdf" — hollandsk.
+    re.compile(r"elite[-_ ]?mannen", re.I),
 ]
 
 # Linjer i PDF'en, der er dokument-chrome og aldrig rytterdata. Uden dette
@@ -180,6 +182,11 @@ def find_loebsside(race: dict) -> tuple[str | None, list[str]]:
             continue
         if any(t in " ".join(pdfs).lower() for t in tokens):
             return side, pdfs
+        # Heerdes PDF'er hed bare "ELITE-MANNEN-Startlijst-22-10-2026.pdf"
+        # (2026-10-22), saa adressen maa ogsaa tælle: /heerde/ ↔ heerderstrand.
+        by = side.rstrip("/").rsplit("/", 1)[1].lower()
+        if len(by) > 3 and any(by in t or t in by for t in tokens):
+            return side, pdfs
     return None, []
 
 
@@ -245,10 +252,65 @@ def hent_fra_knwu(race: dict) -> tuple[list[dict], str | None]:
     return [], None
 
 
+# ── Superprestige ────────────────────────────────────────────────────────────
+# Startlisten ligger paa loebets side under "participants" pr. kategori
+# (ejeren pegede paa den 2026-10-24, Overijse). PDF-navnet er bare et
+# loebenummer (/storage/programs/file_participants/439/439.pdf), saa
+# kategorien og datoen laeses i PDF'ens sidefod: "STARTLIST MEN ELITE
+# 25/10/2026". Linkene forsvinder fra siden igen, naar loebet er koert.
+SP_BASE = "https://www.superprestigecyclocross.be"
+SP_SIDEFOD = re.compile(r"STARTLIST\s+(.+?)\s+(\d{2})/(\d{2})/(\d{4})")
+
+
+def hent_fra_superprestige(race: dict) -> tuple[bytes | None, str | None, str]:
+    """(pdf, url, besked). Loebets side findes paa kalenderen ud fra byen i
+    navnet — "Superprestige Middelkerke - Noordzeecross" → /middelkerke."""
+    aar = int(race["start_date"][:4])
+    md = int(race["start_date"][5:7])
+    saeson = f"{aar}-{aar + 1}" if md >= 7 else f"{aar - 1}-{aar}"
+    kal = hent(f"{SP_BASE}/en/calendar")
+    if kal is None or not kal.ok:
+        return None, None, "kalenderen svarede ikke"
+    navn = (race.get("name") or "").lower().replace("superprestige", " ")
+    tokens = {t for t in re.split(r"[^a-z]+", navn) if len(t) > 3}
+    sider = sorted({u for u in re.findall(
+        rf'href="({re.escape(SP_BASE)}/en/calendar/{saeson}/[^"/]+)"', kal.text)
+        if any(t in u.rsplit("/", 1)[1].lower() for t in tokens)})
+    if not sider:
+        return None, None, f"loebet staar ikke paa kalenderen for {saeson}"
+
+    r = hent(sider[0])
+    if r is None or not r.ok:
+        return None, None, f"{sider[0]} svarede ikke"
+    pdfs = sorted(set(re.findall(r'href="([^"]*file_participants/[^"]+?\.pdf)[^"]*"', r.text)))
+    if not pdfs:
+        return None, None, "ingen startlister paa loebets side endnu — kommer typisk i loebsugen"
+
+    for url in pdfs:
+        url = url if url.startswith("http") else SP_BASE + url
+        p = hent(url)
+        if p is None or not p.ok:
+            continue
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
+        with fitz.open(stream=p.content, filetype="pdf") as doc:
+            m = SP_SIDEFOD.search(" ".join(side.get_text() for side in doc))
+        if not m:
+            continue
+        kat, dag = m.group(1).upper(), f"{m.group(4)}-{m.group(3)}-{m.group(2)}"
+        if re.search(r"\bMEN ELITE\b|\bELITE MEN\b", kat) and "WOMEN" not in kat:
+            if dag != race["start_date"]:
+                return None, None, f"herre-elite-PDF'en er dateret {dag}, ikke {race['start_date']}"
+            return p.content, url, f"{kat} {dag}"
+    return None, None, f"{len(pdfs)} startlister, men ingen for herre-elite endnu"
+
+
 def vaelg_elite_pdf(pdfs: list[str]) -> str | None:
     for moenster in ELITE_MOENSTRE:
         for p in pdfs:
-            if "startlist" in p.lower() and moenster.search(p):
+            if re.search(r"startli[sj]t", p, re.I) and moenster.search(p):
                 return p
     return None
 
@@ -325,13 +387,36 @@ def find_hold(navn: str | None, cache: dict) -> str | None:
     return cache[navn]
 
 
+def omvendt_navn(navn: str) -> str:
+    """"VAN DE PUTTE Victor" → "Victor VAN DE PUTTE". Efternavnet er ordene
+    med store bogstaver; et simpelt split ved første mellemrum ville give
+    "DE PUTTE Victor VAN"."""
+    ord_ = navn.split()
+    efter = [o for o in ord_ if o.isupper() and len(o) > 1]
+    for_ = [o for o in ord_ if o not in efter]
+    return " ".join(for_ + efter) if efter and for_ else navn
+
+
+def omvendt_navn(navn: str) -> str:
+    """"VAN DE PUTTE Victor" → "Victor VAN DE PUTTE". Efternavnet er ordene
+    med store bogstaver; et split ved foerste mellemrum ville give noget andet."""
+    ord_ = navn.split()
+    efter = [o for o in ord_ if o.isupper() and len(o) > 1]
+    foer = [o for o in ord_ if o not in efter]
+    return " ".join(foer + efter) if efter and foer else navn
+
+
 def find_eller_opret_rytter(r: dict, kilde: str, toer: bool) -> str | None:
     """Rytteren. PDF'en skriver "EFTERNAVN Fornavn" — samme form som PCS og som
     vores egen database, saa slug'en bliver den samme."""
     slug = slugify(r["navn"])
-    rows = sb_get("riders", f"slug=eq.{slug}&select=id&limit=1")
-    if rows:
-        return rows[0]["id"]
+    # Begge ordstillinger: landevejsrytterne kom ind fra PCS som "Joran
+    # Wyseure" (joran-wyseure), og uden det andet opslag fik 18 af dem en
+    # dublet som "WYSEURE Joran" (opdaget 2026-10-29).
+    for s in (slug, slugify(omvendt_navn(r["navn"]))):
+        rows = sb_get("riders", f"slug=eq.{s}&select=id&limit=1")
+        if rows:
+            return rows[0]["id"]
     if toer:
         return None
     ny = {"name": r["navn"], "slug": slug, "nationality": iso2(r["nat"]),
@@ -414,6 +499,13 @@ def behandl(race: dict, toer: bool) -> bool:
             return n > 0
         print("    KNWU har ingen startliste endnu — proever arrangoeren")
 
+    if race.get("category") == "Superprestige":
+        indhold, pdf, besked = hent_fra_superprestige(race)
+        print(f"    superprestige: {besked}")
+        if not indhold:
+            return False
+        return _gem_pdf(race, indhold, pdf, toer)
+
     side, pdfs = find_loebsside(race)
     if not side:
         kendt = SERIE_SITES.get(race.get("category") or "")
@@ -431,8 +523,11 @@ def behandl(race: dict, toer: bool) -> bool:
     if r is None or not r.ok or "pdf" not in (r.headers.get("content-type") or ""):
         print(f"    kunne ikke hente {pdf[:70]}")
         return False
+    return _gem_pdf(race, r.content, pdf, toer)
 
-    ryttere = laes_startliste(r.content)
+
+def _gem_pdf(race: dict, indhold: bytes, pdf: str, toer: bool) -> bool:
+    ryttere = laes_startliste(indhold)
     if not ryttere:
         print("    PDF'en kunne ikke laeses som en startliste")
         return False
