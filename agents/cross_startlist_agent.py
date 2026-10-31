@@ -15,10 +15,9 @@ bot-beskyttelse og svarer "Performing security verification" paa en headless
 browser. Vi omgaar ikke en bot-spaerre (CLAUDE.md §7). Arrangoerernes egne
 sider er derimod helt aabne.
 
-DAEKNING. Kun de serier, hvis arrangoer selv udgiver PDF'erne. HG Cross goer
-(hgcross.be, fire af vores loeb). Superprestige og X2O Trofee lagde ingen ud,
-da dette blev skrevet — men deres loeb laa ogsaa uger ude i fremtiden, og
-moenstret er, at PDF'en kommer i loebsugen. Agenten proever derfor alle
+DAEKNING. Kun de serier, hvis arrangoer selv udgiver PDF'erne: HG Cross
+(hgcross.be), Superprestige (loebets kalenderside) og X2O Trofee (hvert loebs
+eget site, /renners/). PDF'en kommer i loebsugen, saa agenten proever alle
 cross-loeb og melder aerligt, naar der intet er.
 
 Koer:
@@ -62,7 +61,9 @@ IKKE_LOEB = re.compile(
 # Vi vil have HERRE-ELITE-listen. Raekkefoelgen er prioriteret: det foerste
 # moenster, der rammer, vinder — saa en generisk "Men" ikke kaprer juniorlisten.
 ELITE_MOENSTRE = [
-    re.compile(r"men[-_ ]?elite", re.I),
+    # "(?<!wo)": Koppenbergcross 2026 havde baade "...-Men-Elite.pdf" og
+    # "...-Women-Elite.pdf", og "men-elite" staar ogsaa i den sidste.
+    re.compile(r"(?<!wo)men[-_ ]?elite", re.I),
     re.compile(r"elite[-_ ]?men", re.I),
     re.compile(r"heren[-_ ]?elite", re.I),
     # Heerde 2026: "ELITE-MANNEN-Startlijst-22-10-2026.pdf" — hollandsk.
@@ -78,7 +79,9 @@ CHROME = re.compile(
     # Superprestige saetter loebsnavnet paa sin egen linje over "STARTLIST";
     # uden dette blev "SUPERPRESTIGE DRUIVENCROSS OVERIJSE" en del af sidste
     # rytters klubnavn (Overijse 2026-10-25).
-    r"|^(superprestige|x2o|hg\s*cross)\b", re.I)
+    r"|^(superprestige|x2o|hg\s*cross)\b"
+    # X2O-sidefoden slutter med "Page 1 of 1" (Koppenbergcross 2026).
+    r"|^page\s+\d+\s+of\s+\d+$", re.I)
 
 NUM = re.compile(r"^\d{1,3}$")
 UCI_ID = re.compile(r"^\d{8,12}$")
@@ -307,6 +310,62 @@ def hent_fra_superprestige(race: dict) -> tuple[bytes | None, str | None, str]:
     return None, None, f"{len(pdfs)} startlister, men ingen for herre-elite endnu"
 
 
+# ── X2O Trofee ───────────────────────────────────────────────────────────────
+# Hvert X2O-loeb har sit eget site (koppenbergcross.be, bollekescross.be ...),
+# og x2otrofee.be's forside linker til dem alle. Startlisterne ligger paa
+# sitets /renners/ som "Koppenbergcross-Startlist-Men-Elite.pdf" (ejeren pegede
+# paa den 2026-10-31). Filnavnet har ingen dato, saa datoen laeses i PDF'ens
+# sidefod ("KOPPENBERGCROSS-OUDENAARDE 1/11/2026") — en PDF fra sidste saeson
+# maa ikke blive denne saesons startliste.
+X2O_BASE = "https://x2otrofee.be"
+X2O_IKKE_SITE = re.compile(r"x2otrofee|golazo|sporza|eurosport|nieuwsblad|coca-cola", re.I)
+DATO = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+
+
+def hent_fra_x2o(race: dict) -> tuple[bytes | None, str | None, str]:
+    """(pdf, url, besked). Loebets site findes ud fra navnet: "X2O Trofee
+    Hamme-Zogge - Bollekescross" → bollekescross.be."""
+    forside = hent(X2O_BASE + "/")
+    if forside is None or not forside.ok:
+        return None, None, "x2otrofee.be svarede ikke"
+    sites = sorted({u.rstrip("/") for u in re.findall(
+        r'href="(https?://(?:www\.)?[a-z0-9\-]+\.be)/?"', forside.text, re.I)
+        if not X2O_IKKE_SITE.search(u)})
+
+    # "cross" staar i alle domaenerne og kan ikke skelne loebene fra hinanden.
+    navn = (race.get("name") or "").lower().replace("x2o trofee", " ")
+    tokens = {t for t in re.split(r"[^a-z]+", navn) if len(t) > 3} - {"cross"}
+    traef = [s for s in sites if any(
+        t in re.sub(r"^https?://(www\.)?", "", s).split(".")[0] for t in tokens)]
+    if len(traef) != 1:
+        return None, None, f"loebets site ikke entydigt fundet ({len(traef)} kandidater)"
+
+    side = traef[0] + "/renners/"
+    r = hent(side)
+    if r is None or not r.ok:
+        # Bollekescross (Hamme-Zogge) ligger ikke paa X2O's platform og har
+        # ingen /renners/ — 404 dér er "anden opbygning", ikke en nedetid.
+        return None, None, f"{side} svarede {r.status_code if r is not None else 'ikke'}"
+    pdf = vaelg_elite_pdf(sorted(set(re.findall(r'href="([^"]+\.pdf)"', r.text, re.I))))
+    if not pdf:
+        return None, None, f"ingen herre-elite-startliste paa {side} endnu"
+    p = hent(pdf)
+    if p is None or not p.ok:
+        return None, None, f"kunne ikke hente {pdf}"
+
+    try:
+        import pymupdf as fitz
+    except ImportError:
+        import fitz
+    with fitz.open(stream=p.content, filetype="pdf") as doc:
+        tekst = " ".join(s.get_text() for s in doc)
+    datoer = {f"{a}-{int(m):02d}-{int(d):02d}" for d, m, a in DATO.findall(tekst)}
+    if race["start_date"] not in datoer:
+        return None, None, (f"PDF'en er dateret {', '.join(sorted(datoer)) or 'intet'}, "
+                            f"ikke {race['start_date']}")
+    return p.content, pdf, f"{side} ({race['start_date']})"
+
+
 def vaelg_elite_pdf(pdfs: list[str]) -> str | None:
     for moenster in ELITE_MOENSTRE:
         for p in pdfs:
@@ -504,6 +563,13 @@ def behandl(race: dict, toer: bool) -> bool:
     if race.get("category") == "Superprestige":
         indhold, pdf, besked = hent_fra_superprestige(race)
         print(f"    superprestige: {besked}")
+        if not indhold:
+            return False
+        return _gem_pdf(race, indhold, pdf, toer)
+
+    if race.get("category") == "X2O Trofee":
+        indhold, pdf, besked = hent_fra_x2o(race)
+        print(f"    x2o: {besked}")
         if not indhold:
             return False
         return _gem_pdf(race, indhold, pdf, toer)
