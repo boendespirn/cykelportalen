@@ -530,6 +530,10 @@ def gem(race: dict, ryttere: list[dict], kilde: str, toer: bool) -> int:
             # cross-felt er klubber og smaahold, og uden teksten stod 55 af
             # 57 ryttere som "Ukendt hold".
             "team_name": r["hold"],
+            # Cross-rankingen hoerer til startlisten, ikke til rytteren:
+            # riders.uci_ranking er landevejsrankingen, og Thibau Nys stod som
+            # 666 paa Koppenbergcross 2026, hvor PDF'en sagde 3.
+            "uci_rank": r["uci_rank"],
             "bib_number": r["bib"], "status": "active", "source_url": kilde,
         })
     if toer:

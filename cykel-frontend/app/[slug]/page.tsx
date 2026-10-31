@@ -50,6 +50,10 @@ type StartlistEntry = {
   // Holdet som kilden skrev det. Cykelcross-feltet er klubber og småhold, der
   // ikke findes i teams-tabellen, så relationen er tom for dem.
   team_name: string | null;
+  // Rankingen fra løbets egen startliste. Kun cross har den: riders.uci_ranking
+  // er landevejsrankingen, og Thibau Nys stod som nr. 666 på Koppenbergcross
+  // 2026, hvor arrangørens PDF sagde nr. 3.
+  uci_rank: number | null;
   riders: { name: string; slug: string; nationality: string | null; speciality: string | null; date_of_birth: string | null; uci_ranking: number | null; photo_url: string | null } | null;
   teams: { name: string; slug: string; country_code: string | null } | null;
 };
@@ -653,6 +657,12 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   const totalRiders = startlist.filter(e => e.status === "active").length;
 
   const danishRiders = startlist.filter((e) => e.riders?.nationality === "DK" && e.status === "active");
+  // Cross bruger startlistens egen ranking, når kilden havde en. Ældre cross-
+  // startlister (fra før 2026-10-31) og KNWU's har ingen, og dér er rytterens
+  // egen ranking stadig det bedste bud.
+  const brugStartlisteRang = isCross && startlist.some((e) => e.uci_rank != null);
+  const rang = (e: StartlistEntry): number | null =>
+    brugStartlisteRang ? e.uci_rank : (e.riders?.uci_ranking ?? null);
   const GC_SPECIALITIES = new Set(["GC", "Climber", "All-rounder", "Puncheur"]);
   // Endagsløb og etapeløb vælger forskelligt HVEM der er kandidater, men
   // rangordner ens. Indtil 2026-10-10 tog endagsgrenen bare de første otte
@@ -662,16 +672,16 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   // værre end ingen.
   const gcFavorites = (isOneDay
     ? startlist.filter((e) => e.status === "active" &&
-        (e.is_gc_captain || e.is_sprint_captain || e.riders?.uci_ranking != null))
+        (e.is_gc_captain || e.is_sprint_captain || rang(e) != null))
     : startlist
         .filter((e) => e.status === "active" && (
-          e.riders?.uci_ranking != null ||
+          rang(e) != null ||
           e.is_gc_captain ||
           GC_SPECIALITIES.has(e.riders?.speciality ?? "")
         )))
         .sort((a, b) => {
-          const rankA = a.riders?.uci_ranking ?? 9999;
-          const rankB = b.riders?.uci_ranking ?? 9999;
+          const rankA = rang(a) ?? 9999;
+          const rankB = rang(b) ?? 9999;
           if (rankA !== rankB) return rankA - rankB;
           if (a.is_gc_captain !== b.is_gc_captain) return a.is_gc_captain ? -1 : 1;
           const gcA = GC_SPECIALITIES.has(a.riders?.speciality ?? "") ? 0 : 1;
@@ -982,9 +992,9 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                           {hold}
                         </span>
                       )}
-                      {r.uci_ranking != null && (
+                      {rang(entry) != null && (
                         <span className="font-mono text-xs text-amber-400 flex-shrink-0" title="UCI-ranking">
-                          #{r.uci_ranking}
+                          #{rang(entry)}
                         </span>
                       )}
                     </Link>
@@ -1447,8 +1457,8 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
       {/* ── Fremhævede profiler ── */}
       {(() => {
         const featured = startlist
-          .filter((e) => e.status === "active" && e.riders?.uci_ranking != null)
-          .sort((a, b) => (a.riders!.uci_ranking ?? 9999) - (b.riders!.uci_ranking ?? 9999))
+          .filter((e) => e.status === "active" && e.riders && rang(e) != null)
+          .sort((a, b) => (rang(a) ?? 9999) - (rang(b) ?? 9999))
           .slice(0, 20);
         if (featured.length < 3) return null;
         return (
@@ -1465,7 +1475,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                         {flagEmoji(r.nationality)}
                       </div>
                       <span className="absolute top-1 left-1 text-[10px] font-mono font-bold text-white/90 bg-black/50 px-1 rounded leading-4">
-                        #{r.uci_ranking}
+                        #{rang(entry)}
                       </span>
                     </div>
                     <div className="w-full">
@@ -1501,9 +1511,9 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
                     className="group flex flex-col items-center gap-1.5 text-center">
                     <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-slate-900 border border-red-900/40 group-hover:border-red-700/40 transition-colors">
                       <div className="w-full h-full flex items-center justify-center text-2xl">🇩🇰</div>
-                      {r.uci_ranking != null && (
+                      {rang(entry) != null && (
                         <span className="absolute top-1 left-1 text-[10px] font-mono font-bold text-white/90 bg-black/50 px-1 rounded leading-4">
-                          #{r.uci_ranking}
+                          #{rang(entry)}
                         </span>
                       )}
                     </div>

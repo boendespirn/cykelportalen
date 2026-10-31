@@ -540,7 +540,9 @@ def get_startlist_for_race(slug: str):
         # team_name er holdet, som KILDEN skrev det. Cykelcross-feltet er
         # klubber og smaahold, der ikke findes i teams, og uden feltet stod de
         # alle som "Ukendt hold" paa loebssiden.
-        f"&select=bib_number,is_gc_captain,is_sprint_captain,status,role,team_name,"
+        # uci_rank er rankingen fra loebets egen startliste — til cross, hvor
+        # riders.uci_ranking er landevejsranking (Nys: 666 mod cross nr. 3).
+        f"&select=bib_number,is_gc_captain,is_sprint_captain,status,role,team_name,uci_rank,"
         f"riders(name,slug,nationality,speciality,date_of_birth,uci_ranking,photo_url,hometown_region,training_region),"
         f"teams(name,slug,country_code)"
         f"&status=eq.active"
