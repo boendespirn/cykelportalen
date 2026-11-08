@@ -21,6 +21,9 @@ type Race = {
   name: string; slug: string; start_date: string; end_date: string | null;
   country_code: string | null; category: string; pcs_url: string | null;
   race_type: string; cover_image_url: string | null; description: string | null;
+  // Arrangørens side med det officielle rutekort (kun cross). Vi linker og
+  // viser aldrig selve billedet (ophavsret, cross_course_agent.py).
+  course_map_page?: string | null;
   // Samlet beretning om hele ræsets forløb, skrevet af race_recap_agent.py
   // efter sidste etape. Findes kun for afsluttede flerdagesløb.
   race_recap: string | null;
@@ -823,6 +826,12 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
           )}
           {crossStage?.start_location && (
             <span className="text-sm text-slate-400">{crossStage.start_location}</span>
+          )}
+          {race.course_map_page && (
+            <a href={race.course_map_page} target="_blank" rel="noopener noreferrer"
+              className="text-xs font-medium text-amber-300 hover:text-amber-200 transition-colors">
+              Se rutekortet hos arrangøren →
+            </a>
           )}
           {crossStage?.pcs_stage_url && (
             <a href={crossStage.pcs_stage_url} target="_blank" rel="noopener noreferrer"

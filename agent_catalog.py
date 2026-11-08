@@ -211,6 +211,10 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
             # Den står også som selvstændig knap under "Uafhængigt af løb".
             _step("tv_agent.py", [], stage=None,
                   label="7/7 TV-tider (sendeplan)"),
+            # Kun cykelcross: link til arrangørens rutekort, når det er lagt op
+            # i løbets egen sæson. Melder pænt fra på landevej.
+            _step("cross_course_agent.py", ["--race", "{db_slug}"], stage=None,
+                  label="Rutekort hos arrangøren (cykelcross)"),
          ],
          description="Alt om løbet og dets etaper i én kørsel: etapedata, profilbilleder, "
                      "vores egen højdeprofil, stigningsrækker (både fra tekst og fra "

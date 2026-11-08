@@ -322,12 +322,13 @@ X2O_IKKE_SITE = re.compile(r"x2otrofee|golazo|sporza|eurosport|nieuwsblad|coca-c
 DATO = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 
 
-def hent_fra_x2o(race: dict) -> tuple[bytes | None, str | None, str]:
-    """(pdf, url, besked). Loebets site findes ud fra navnet: "X2O Trofee
-    Hamme-Zogge - Bollekescross" → bollekescross.be."""
+def x2o_site(race: dict) -> tuple[str | None, str]:
+    """(site, besked). Loebets eget site findes ud fra navnet via
+    x2otrofee.be's forside: "X2O Trofee Hamme-Zogge - Bollekescross" →
+    bollekescross.be. Bruges ogsaa af cross_course_agent.py (rutekortet)."""
     forside = hent(X2O_BASE + "/")
     if forside is None or not forside.ok:
-        return None, None, "x2otrofee.be svarede ikke"
+        return None, "x2otrofee.be svarede ikke"
     sites = sorted({u.rstrip("/") for u in re.findall(
         r'href="(https?://(?:www\.)?[a-z0-9\-]+\.be)/?"', forside.text, re.I)
         if not X2O_IKKE_SITE.search(u)})
@@ -338,9 +339,17 @@ def hent_fra_x2o(race: dict) -> tuple[bytes | None, str | None, str]:
     traef = [s for s in sites if any(
         t in re.sub(r"^https?://(www\.)?", "", s).split(".")[0] for t in tokens)]
     if len(traef) != 1:
-        return None, None, f"loebets site ikke entydigt fundet ({len(traef)} kandidater)"
+        return None, f"loebets site ikke entydigt fundet ({len(traef)} kandidater)"
+    return traef[0], ""
 
-    side = traef[0] + "/renners/"
+
+def hent_fra_x2o(race: dict) -> tuple[bytes | None, str | None, str]:
+    """(pdf, url, besked)."""
+    site, besked = x2o_site(race)
+    if not site:
+        return None, None, besked
+
+    side = site + "/renners/"
     r = hent(side)
     if r is None or not r.ok:
         # Bollekescross (Hamme-Zogge) ligger ikke paa X2O's platform og har
