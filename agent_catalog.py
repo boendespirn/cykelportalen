@@ -296,6 +296,11 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
             _step("cross_results_agent.py", ["--race", "{db_slug}"],
                   whole=["--all-stages"], stage=["--stage", "{stage}"],
                   label="2/3 Top 10 (cykelcross, seriens egen kilde)"),
+            # Seriens samlede stilling, lige efter løbets resultat. Melder pænt
+            # fra på løb uden officiel stilling (landevej, World Cup, HG Cross).
+            _step("cross_standings_agent.py", ["--race", "{db_slug}"],
+                  whole=[], stage=[],
+                  label="Seriens samlede stilling (officiel kilde)"),
             # Referatet er ikke et selvstændigt job længere (2026-09-09). Det
             # grundfæster sig i etapens resultat og klassement og skal derfor
             # ALTID køre lige efter dem: var det en knap for sig, kunne man
@@ -353,6 +358,19 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
                      "løb røres ikke. Nye løb får ingen tekst — den skrives "
                      "bagefter.",
          est_minutes=3),
+
+    # Serierne opdaterer ikke altid stillingen samme aften som løbet, og
+    # resultat-jobbet holder op, så snart løbets resultat står. Derfor også en
+    # daglig kørsel: agenten gemmer kun en stilling, der passer med antallet af
+    # kørte løb, så en forældet side kan ikke overskrive en rigtig.
+    _job("seriestillinger", "Cykelcross — seriernes samlede stillinger", PHASE_GLOBAL, [
+            _step("cross_standings_agent.py", ["--alle"], stage=None,
+                  label="X2O Trofee og Superprestige fra seriernes egne sider"),
+         ], needs_race=False,
+         description="Henter de officielle samlede stillinger (X2O på tid, "
+                     "Superprestige på point) og gemmer dem kun, hvis de passer "
+                     "med de løb, der er kørt.",
+         est_minutes=1),
 
     _job("tv_tider", "TV-tider", PHASE_GLOBAL, [
             _step("tv_agent.py", [], stage=None, label="Sendeplan for kommende løb"),

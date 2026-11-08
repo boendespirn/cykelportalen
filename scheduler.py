@@ -218,6 +218,9 @@ DAGLIGE_GLOBALE = [
     # ejeren kan godkende dem, før dagen går i gang. Står efter tv_tider i
     # listen og tages derfor efter den af runneren.
     (4, "nyheder", "dagligt-0400-nyheder"),
+    # Seriernes samlede stillinger (ejer-godkendt 2026-11-08). Kl. 05, så en
+    # stilling, serien først lagde op efter aftenløbet, når siden om morgenen.
+    (5, "seriestillinger", "dagligt-0500-seriestillinger"),
 ]
 
 

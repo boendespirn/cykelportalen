@@ -91,3 +91,8 @@ export const CROSS_SERIER: CrossSerie[] = [
 export function serieFor(slug: string): CrossSerie | undefined {
   return CROSS_SERIER.find((s) => s.slug === slug);
 }
+
+/** Serien, et løb hører til, ud fra `races.category`. */
+export function serieForKategori(kategori: string | null | undefined): CrossSerie | undefined {
+  return CROSS_SERIER.find((s) => kategori && s.kategorier.includes(kategori));
+}

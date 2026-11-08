@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { API_BASE } from "@/lib/api";
 import { raceHref } from "@/lib/evergreen";
 import { CROSS_SERIER, type CrossSerie } from "@/lib/crossSerier";
+import Seriestilling from "./Seriestilling";
 
 /** Hvilke løb en kalenderside viser. Samme layout på alle tre, så brugeren
  *  kun skal lære siden én gang — kun filteret og teksterne skifter. */
@@ -388,6 +389,12 @@ export default async function Kalender({
               );
             })}
           </nav>
+        )}
+
+        {/* Seriens samlede stilling øverst på seriesiden. Mesterskaber og
+            øvrige løb har ingen — komponenten viser da intet. */}
+        {serie && serie.kategorier.length === 1 && (
+          <Seriestilling kategori={serie.kategorier[0]} serieNavn={serie.navn} />
         )}
 
         {/* ── Kommende løb ───────────────────────────────────────────────── */}

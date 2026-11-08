@@ -524,6 +524,27 @@ def get_riders():
     return response.json()
 
 
+@app.get("/cross-standings")
+def get_cross_standings(category: str, limit: int = 60):
+    """Seriens officielle samlede stilling i den nyeste saeson, vi har
+    (series_standings, hentet af agents/cross_standings_agent.py)."""
+    from urllib.parse import quote
+    limit = max(1, min(limit, 200))
+    base = f"{SUPABASE_URL}/rest/v1/series_standings?category=eq.{quote(category)}"
+    seneste = requests.get(f"{base}&select=season&order=season.desc&limit=1",
+                           headers=get_headers()).json()
+    if not seneste:
+        return {"category": category, "season": None, "rows": []}
+    saeson = seneste[0]["season"]
+    rows = requests.get(
+        f"{base}&season=eq.{quote(saeson)}"
+        f"&select=position,rider_name,team_name,points,time_seconds,races_counted,"
+        f"source_url,updated_at,riders(name,slug,nationality)"
+        f"&order=position.asc,rider_name.asc&limit={limit}",
+        headers=get_headers()).json()
+    return {"category": category, "season": saeson, "rows": rows}
+
+
 @app.get("/races/{slug}/startlist")
 def get_startlist_for_race(slug: str):
     race_url = f"{SUPABASE_URL}/rest/v1/races?select=id&slug=eq.{slug}&limit=1"

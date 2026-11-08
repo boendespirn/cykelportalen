@@ -12,6 +12,8 @@ import DnfSection from "./DnfSection";
 import ResultList, { type ResultEntry } from "./ResultList";
 import StageMapLoader from "./stage/[n]/StageMapLoader";
 import { erFastAdresse, raceHref, stageHref } from "@/lib/evergreen";
+import { serieForKategori } from "@/lib/crossSerier";
+import Seriestilling from "../races/Seriestilling";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -788,6 +790,7 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
   // høj værdi, og til sidst den lange startliste.
   if (isCross) {
     const crossStage = stages.length > 0 ? stages[0] : null;
+    const crossSerie = serieForKategori(race.category);
     const erAfviklet = race.start_date < today;
 
     // Højdeprofilen er bevidst udeladt, ikke blot fraværende:
@@ -912,6 +915,14 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
               })}
             </div>
           </section>
+        )}
+
+        {/* Seriens samlede stilling (top 5), med link til seriesiden. Står
+            efter resultatet: efter løbet er det næste spørgsmål "hvad betød
+            det for serien?". Intet vises, når serien ingen stilling har. */}
+        {crossSerie && crossSerie.kategorier.length === 1 && (
+          <Seriestilling kategori={race.category} serieNavn={crossSerie.navn} antal={5}
+            serieHref={`/races/cykelcross/${crossSerie.slug}`} />
         )}
 
         {/* ── 4. Baneinfo ──
