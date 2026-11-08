@@ -616,27 +616,33 @@ def dagens_plan() -> list[str]:
 
 
 def nye_kladder() -> list[str]:
-    """Overskrifterne på nyhedskladder skrevet det sidste døgn, til godkendelse.
+    """Det sidste døgns nyheder: publiceret og kasseret af faktatjekket.
 
-    Jobbet `nyheder` kører kl. 04 UTC og skriver højst to kladder. Uden
-    overskrifterne her skulle ejeren åbne admin hver morgen for at se, om der
-    overhovedet lå noget."""
+    Artiklerne publiceres automatisk, når faktatjekket godkender dem (ejerens
+    beslutning 2026-11-08). Beskeden er til orientering — der er intet at
+    godkende — men et kasseret emne står her med begrundelsen."""
     siden = _url_tid(nu() - timedelta(hours=24))
     try:
-        nye = hent(f"news_articles?select=title,category,link_spand,link_maal&status=eq.draft"
+        nye = hent(f"news_articles?select=title,category,status,link_spand,link_maal,faktatjek"
+                   f"&status=in.(published,rejected)&faktatjek=not.is.null"
                    f"&created_at=gte.{siden}&order=created_at&limit=10")
     except requests.RequestException as e:
         # Et fejlet opslag her må ikke tage resten af morgenbeskeden med sig.
-        return [f"\n📰 Nyhedskladder: kunne ikke hentes ({e.__class__.__name__})"]
+        return [f"\n📰 Nyheder: kunne ikke hentes ({e.__class__.__name__})"]
     if not nye:
         return []
-    ud = [f"\n📰 Nye nyhedskladder ({len(nye)}) — godkend på {ADMIN_URL}:"]
+    ud = [f"\n📰 Nyheder det sidste døgn ({len(nye)}):"]
     for a in nye:
         maerke = " [cross]" if a.get("category") == "cykelcross" else ""
-        # Link-bærende kladder tæller i linkstrategiens ugebudget (linkstrategi.py).
+        if a["status"] == "rejected":
+            grund = (a.get("faktatjek") or {}).get("begrundelse", "")
+            ud.append(f"  ✗ kasseret: {a['title']}{maerke} — {grund}")
+            continue
+        # Link-bærende artikler tæller i linkstrategiens ugebudget (linkstrategi.py).
         if a.get("link_spand"):
             maerke += f" 🔗 {a['link_spand']} → {a['link_maal']}"
-        ud.append(f"  • {a['title']}{maerke}")
+        rettet = " (rettet af faktatjekket)" if (a.get("faktatjek") or {}).get("rettet") else ""
+        ud.append(f"  ✓ {a['title']}{maerke}{rettet}")
     return ud
 
 

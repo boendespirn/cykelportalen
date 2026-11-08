@@ -45,7 +45,7 @@ Google er begyndt at indeksere siden bredt. Det betyder, at flaskehalsen skifter
 - Parallelt: producér nyheder der linker **internt** til en anden relevant side (intern linking styrker indeksering og autoritet) — men **kvalitet frem for mængde**:
   - **Max 2 artikler om dagen, mål er 1.** Vi venter stadig på indeksering — at spamme artikler ud skader både SEO'en (svag, tynd content frem for få stærke sider) og brandets løfte om kun det vigtige (jf. `CLAUDE.md` §5).
   - **Workflow:** artikel-agenten scorer alle relevante nyhedskandidater og vælger **den allerbedste** (højst dansk-relevans) til at blive skrevet — ikke alt der overstiger relevans-tærsklen. Kun i undtagelsestilfælde (to reelt store, uafhængige nyheder samme dag) skrives der 2.
-  - Menneskelig godkendelse er stadig påkrævet før publicering (admin-køen på `klassementet.dk/admin`).
+  - **Publiceringen er fuldautomatisk (ejerens beslutning 2026-11-08).** Gaten er faktatjekket i `artikel_faktatjek.py`: hele kildeartiklen hentes (for lidt kilde = ingen artikel), rytternavne tjekkes mod vores data, og en separat AI-gennemgang fjerner hver påstand uden grundlag i kilde eller data — eller kasserer artiklen. Kasserede artikler gemmes som afviste med begrundelsen og står i morgenens Telegram-besked. Links går gennem `artikel_links.py` (højst 2 interne, hvert mål én gang, ingen døde sider), og workerjobbet `linktjek` gennemgår de publicerede hver morgen.
 - **Intern linkstrategi (ejer-godkendt 2026-10-23, mål: top 5 på Grand Tour-søgeordene i 2027).** Maskinen ligger i `linkstrategi.py`, som `ai_news_processor.py` følger; ændres planen, ændres den dér og her.
 
   | Periode | Link-artikler/uge | Fordeling af linkene |
@@ -57,9 +57,9 @@ Google er begyndt at indeksere siden bredt. Det betyder, at flaskehalsen skifter
 
   - Det giver ca. 33 links til Tour 2027, 22 til Giro og 20 til Vuelta før start — en hurtigere optrapning for Grand Tours end SEO-agentens generelle 8-10 pr. løb.
   - **Ankertekst pr. landingsside:** 40 % løbsnavn + årstal, 30 % delvist match, 20 % beskrivende, 10 % præcist søgeord.
-  - Ugebudgettet tæller link-bærende artikler; over budget skrives artiklen helt uden interne links. Afviste kladder tæller ikke.
+  - Ugebudgettet tæller link-bærende artikler; over budget skrives artiklen helt uden interne links. Kasserede artikler tæller ikke.
   - Et link sættes kun, hvor artiklen er reelt relevant for målet, og kun til den udgave, artiklen handler om. Findes målsiden ikke endnu (Giro og Tour 2027 venter på ejerens data), går andelen midlertidigt til de andre spande.
-  - Hver kladdes linkmål står i morgenens Telegram-besked (🔗).
+  - Hver artikels linkmål står i morgenens Telegram-besked (🔗).
   - Tour-linkene går til den faste adresse `/tour-de-france`, som altid viser den aktuelle udgave (ejer-godkendt 2026-10-24; se `cykel-frontend/lib/evergreen.ts`). Årstals-adressen for den aktuelle udgave sender videre dertil, og ældre udgaver ligger som arkiv på `/tour-de-france-2026` osv. Giro-linkene går tilsvarende til `/giro-d-italia` (ejer-godkendt 2026-11-08).
   - Cross-spandens faste mål er `/races/cykelcross` (ejer-godkendt 2026-10-23); en artikel om et bestemt crossløb linker til løbets side, alt andet cross til kalenderen.
 - **Mål:** fortsæt indtil **hele siden er indekseret** — med få, stærke artikler frem for mange middelmådige.

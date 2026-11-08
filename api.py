@@ -1139,6 +1139,16 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
     except Exception:
         raise HTTPException(status_code=500, detail="Claude returnerede ugyldig JSON")
 
+    # Samme faste datakontrol som de automatiske artikler: et forkert fornavn
+    # eller en forkert nationalitet ved et rytternavn publiceres ikke.
+    import artikel_faktatjek
+    ryttere = artikel_faktatjek.hent_ryttere(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    _, data_fejl = artikel_faktatjek.tjek_mod_data(
+        f"{result.get('title', '')}\n\n{result.get('content', '')}", ryttere)
+    if data_fejl:
+        raise HTTPException(status_code=422,
+                            detail="Ikke publiceret — passer ikke med vores rytterdata: " + "; ".join(data_fejl))
+
     # Gem og publicer
     patch = requests.patch(
         f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",

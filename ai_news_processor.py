@@ -5,7 +5,12 @@ Behandler råartikler fra raw_news med Claude (Anthropic API):
   2. Rangerer de kvalificerede kandidater og omskriver kun den/de allerbedste
      til dansk med interne links (max MAX_DRAFTS_PER_RUN, mål er 1 — se
      STRATEGI.md §1: kvalitet frem for mængde, mens vi venter på indeksering)
-  3. Gemmer i news_articles som kladde (kræver godkendelse i /admin)
+  3. Henter hele kildeartiklen (RSS giver ofte kun en teaser) og faktatjekker
+     den færdige tekst mod kilden og vores rytterdata (artikel_faktatjek.py)
+  4. Publicerer automatisk, når faktatjekket godkender — ellers gemmes den
+     som afvist med faktatjekkets begrundelse (ejerens beslutning 2026-11-08:
+     "artikler skal køre fuldautomatisk fremover"). Publiceringen melder
+     artiklen til IndexNow og poster den på Facebook, som godkend-knappen gør.
 
 Interne links følger linkstrategi.py: ugebudget for link-bærende artikler og
 andele pr. spand (cross, Giro, Tour, forside ...). Hvert gemt links spand
@@ -33,6 +38,7 @@ import requests
 from datetime import datetime, timezone
 from urllib.parse import quote
 from anthropic import Anthropic
+import artikel_faktatjek
 import artikel_links
 import linkstrategi
 from dotenv import load_dotenv
@@ -51,7 +57,7 @@ DB_HEADERS = {
     "Prefer": "return=minimal",
 }
 
-WRITE_MODEL        = "claude-sonnet-5"            # scoring og artikel — ejeren skal godkende resultatet, så kvalitet før pris
+WRITE_MODEL        = "claude-sonnet-5"            # scoring og artikel — publiceres uden menneske, så kvalitet før pris
 # Claude 5 tænker, før den svarer, og tænkningen tæller med i max_tokens. Med
 # 3-4000 gik hele budgettet til tænkning, og svaret kom tomt tilbage
 # (stop_reason=max_tokens, kun en thinking-blok). Loftet er et loft, ikke et
@@ -267,16 +273,47 @@ def slug_from_title(title: str) -> str:
     return f"{s[:60]}-{date.today().strftime('%Y%m%d')}"
 
 
-def save_article(data: dict) -> bool:
+def save_article(data: dict) -> str | None:
+    """Gemmer artiklen og returnerer dens id (None ved fejl eller dublet)."""
     res = requests.post(
         f"{SUPABASE_URL}/rest/v1/news_articles",
         json=data,
-        headers={**DB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=minimal"},
+        headers={**DB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
     )
     if not res.ok:
         print(f"  [DB FEJL] {res.status_code}: {res.text[:200]}")
-        return False
-    return True
+        return None
+    rows = res.json()
+    return rows[0]["id"] if rows else None
+
+
+INDEXNOW_KEY = "1a5a3688cfd86781c40cef01ce453403"   # samme som api.py
+
+
+def efter_publicering(article_id: str, data: dict) -> None:
+    """Det, godkend-knappen i admin gør efter publicering: IndexNow og
+    Facebook. Fejl her må aldrig vælte jobbet — artiklen er allerede på siden."""
+    url = f"https://klassementet.dk/nyheder/{data['slug']}"
+    try:
+        requests.post("https://api.indexnow.org/indexnow", json={
+            "host": "klassementet.dk", "key": INDEXNOW_KEY,
+            "keyLocation": f"https://klassementet.dk/{INDEXNOW_KEY}.txt",
+            "urlList": [url]}, timeout=10)
+    except requests.RequestException as e:
+        print(f"     [INDEXNOW] {e}")
+    token, page_id = os.getenv("META_PAGE_ACCESS_TOKEN", ""), os.getenv("META_PAGE_ID", "")
+    if not token or not page_id:
+        print("     [FACEBOOK] META_PAGE_ACCESS_TOKEN/META_PAGE_ID mangler — ikke postet")
+        return
+    try:
+        from fb_article_image import generate_and_post
+        generate_and_post(article_id=article_id, slug=data["slug"], title=data["title"],
+                          category=data.get("category", "generelt"), excerpt=data.get("excerpt"),
+                          sb_url=SUPABASE_URL, sb_key=SUPABASE_KEY,
+                          meta_token=token, page_id=page_id)
+        print("     Facebook: postet")
+    except Exception as e:
+        print(f"     [FACEBOOK] {e}")
 
 
 def extract_json(text: str) -> dict:
@@ -310,7 +347,7 @@ REWRITE_SYSTEM = """Du skriver cykel-nyheder til klassementet.dk — Danmarks be
 Regler:
 - Skriv altid på korrekt, engageret dansk (sportsmedie-tone som TV 2 Sport)
 - Omskriv originalen grundigt — aldrig direkte oversæt
-- Artiklerne skal være fyldestgørende: giv al vigtig information, forklar kontekst og baggrund
+- Giv al den vigtige information, kilden har — men en kort kilde giver en kort artikel. Opfind aldrig detaljer for at nå en længde (navne, nationalitet, alder, hold, tal); alt bliver faktatjekket mod kilden
 - LINKS — følg linkplanen i opgaven:
   - Står der "INGEN interne links", må artiklen ikke indeholde et eneste internt link.
   - Ellers MAKSIMALT 2 interne links: (1) ét strategisk link til det FØRSTE mål i linkplanen, artiklen er reelt relevant for, med den angivne ankertype, og (2) valgfrit ét link til det løb, artiklen primært handler om, ved første naturlige omtale (kun løbsnavnet som ankertekst).
@@ -319,6 +356,7 @@ Regler:
   - Link kun til den UDGAVE, artiklen handler om: en nyhed om Tour de France 2027 må ikke linke til /tour-de-france-2026. Står udgaven ikke på listen, så link ikke til løbet.
   - Gentag ALDRIG samme link. Skriv løbsnavnet plain text alle andre gange det nævnes.
 - Omvendt pyramide: det vigtigste først, derefter baggrund og detaljer
+- Titlen siger sagligt, hvad nyheden er — ingen clickbait, ingen overdrivelser ("vanvittig", "vild", "chok") og intet, artiklen ikke indfrier
 - Lov aldrig live-dækning: klassementet.dk har ingen live-opdateringer eller live-tracking. Skriv ikke "følg med undervejs/under løbet/live" — en henvisning må kun love det, siden har: startliste, etaper, stigningsprofiler, resultater og klassement
 - Brug SEO-søgeord naturligt: løbets navn, rytternes navne, "cykling" — og "cykelcross" i cross-artikler
 - KUN FAKTA FRA KILDEN: tilføj aldrig resultater, tal, holdtilknytninger eller citater, der ikke står i originalen. Baggrund må kun være almen, sikker viden — er du i tvivl om et faktum, så udelad det
@@ -409,7 +447,7 @@ Vigtigt: Hvis artiklen nævner en rytter i forbindelse med et igangværende løb
 Original titel: {article['title']}
 Kilde: {article['source']}
 Indhold:
-{article['content'][:3000]}
+{article['content'][:artikel_faktatjek.MAX_KILDE_TEGN]}
 {factcheck_block}
 {linkplan_tekst(plan, races)}
 
@@ -417,7 +455,7 @@ Returner præcis dette JSON:
 {{
   "title": "Dansk titel (SEO-optimeret, max 70 tegn)",
   "excerpt": "Kort resume på dansk (max 160 tegn, bruges som meta-description)",
-  "content": "Fuld artikel på dansk (600-900 ord). Brug \\n\\n mellem afsnit. Dæk emnet grundigt: baggrund, context, citater, hvad det betyder fremadrettet. Links efter linkplanen ovenfor; alle andre nævnelser af løbet skrives som plain text.",
+  "content": "Artiklen på dansk. Længden følger kilden: så lang, som kildens fakta bærer (typisk 250-600 ord) — fyld aldrig op. Brug \\n\\n mellem afsnit. Dæk det, kilden fortæller: hvad der skete, citater, baggrund og hvad det betyder. Links efter linkplanen ovenfor; alle andre nævnelser af løbet skrives som plain text.",
   "category": "resultater|startliste|transfer|profil|analyse|cykelcross|generelt (brug cykelcross for alle cross-nyheder)",
   "linkmaal": "stien på det strategiske linkmål, du brugte, fx /, eller null"
 }}"""
@@ -488,6 +526,29 @@ def vaelg_kladder(scored: list[tuple[float, dict]], max_drafts: int) -> list[tup
     return valgt[:max_drafts]
 
 
+def med_kildetekst(scored: list[tuple[float, dict]], max_opslag: int = 8) -> list[tuple[float, dict]]:
+    """De kandidater, der har kildetekst nok til en artikel — med den fulde
+    tekst i art["_kilde"]. Hentes i scorerækkefølge, kun til der er nok til
+    dagens slots, så en teaser uden stof ikke tager pladsen fra næstbedste."""
+    ud, vej, cross, opslag = [], 0, 0, 0
+    for score, art in sorted(scored, key=lambda p: p[0], reverse=True):
+        if score < MIN_SCORE_CROSS or opslag >= max_opslag or (vej >= 2 and cross >= 1):
+            break
+        if (cross >= 1 if art.get("_cross") else vej >= 2 or score < MIN_SCORE):
+            continue
+        opslag += 1
+        art["_kilde"] = artikel_faktatjek.hent_kildetekst(art["external_url"], art.get("content") or "")
+        if len(art["_kilde"]) < artikel_faktatjek.MIN_KILDE_TEGN:
+            print(f"  For lidt kildetekst ({len(art['_kilde'])} tegn) — springes over: {art['title'][:60]}")
+            continue
+        ud.append((score, art))
+        if art.get("_cross"):
+            cross += 1
+        else:
+            vej += 1
+    return ud
+
+
 def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
     if not ANTHROPIC_KEY:
         print("FEJL: ANTHROPIC_API_KEY mangler i .env")
@@ -505,7 +566,7 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
     print(f"Fandt {len(articles)} ubehandlede artikler (seneste {MAX_ALDER_TIMER} t) | "
           f"{len(races)} løb til interne links | {len(recent_titles)} egne overskrifter til dublet-tjek")
     print(f"Max {max_drafts} artikel(er) skrives denne kørsel: én landevej + én cykelcross (jf. STRATEGI.md §2)")
-    print(f"Artikler gemmes som kladder — godkend på klassementet.dk/admin\n")
+    print(f"Artikler faktatjekkes og publiceres automatisk, når de består\n")
 
     # ── Trin 1: Score ALLE kandidater først, før vi skriver noget ────────────
     # Vi skal kunne sammenligne dagens nyheder og vælge den allerbedste,
@@ -529,7 +590,7 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
     # ── Trin 2: Vælg kun den/de allerbedste ─────────────────────────────────
     # Stabil sortering: ved lige score vinder den nyeste (articles kom allerede
     # i published_at-faldende rækkefølge fra get_unprocessed()).
-    to_draft = vaelg_kladder(scored, max_drafts)
+    to_draft = vaelg_kladder(med_kildetekst(scored), max_drafts)
     valgte = {id(a) for _, a in to_draft}
     skipped = len(scored) - len(to_draft)
 
@@ -554,14 +615,16 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
     from datetime import date
     linkstatus = get_linkstatus(linkstrategi.periode_fra(date.today()).isoformat())
     races_by_slug = {r["slug"]: r for r in races}
+    ryttere = artikel_faktatjek.hent_ryttere(SUPABASE_URL, SUPABASE_KEY)
 
-    drafted = failed = 0
+    drafted = kasseret = failed = 0
     for score, art in to_draft:
-        print(f"\nSkriver: {art['title'][:70]} (score {score:.0f}/10)")
+        print(f"\nSkriver: {art['title'][:70]} (score {score:.0f}/10, kilde {len(art['_kilde'])} tegn)")
         plan, plan_log = lav_linkplan(linkstatus, races)
         print(f"  Linkplan: {plan_log}")
 
-        result = rewrite_article(client, art, races, startlist_context, plan)
+        result = rewrite_article(client, {**art, "content": art["_kilde"]}, races,
+                                 startlist_context, plan)
         if not result or not result.get("title") or not result.get("content"):
             print("  -> FEJL ved omskrivning")
             mark_processed(art["id"], score)
@@ -569,8 +632,17 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
             time.sleep(DELAY)
             continue
 
-        content = sanitize_links(result["content"], races)
-        if plan is None:
+        # Faktatjek mod kilden og vores data. Det er den eneste kontrol før
+        # siden — der er intet menneske i køen.
+        fk = artikel_faktatjek.faktatjek(client, art["_kilde"], result["title"],
+                                         result["content"], ryttere)
+        result["title"] = fk["titel"]
+        print(f"  Faktatjek: {fk['rapport']['dom']} — {fk['rapport'].get('begrundelse', '')}")
+        for p in fk["rapport"].get("fjernede_paastande", []):
+            print(f"     fjernet: {p[:120]}")
+
+        content = sanitize_links(fk["content"], races)
+        if plan is None or not fk["godkendt"]:
             content = fjern_interne_links(content)
         # Hvad artiklen faktisk linker til — ikke hvad modellen siger, den
         # gjorde. Det første link til et mål i planen er det strategiske.
@@ -586,7 +658,7 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
                            "link_maal": links[0]}
 
         slug = slug_from_title(result["title"])
-        saved = save_article({
+        data = {
             "slug":             slug,
             "title":            result["title"],
             "excerpt":          result.get("excerpt", ""),
@@ -597,14 +669,20 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
             "author":           "Klassementet AI",
             "source_url":       art["external_url"],
             "is_advertorial":   False,
-            "status":           "draft",
-            "published_at":     None,
-        })
+            "status":           "published" if fk["godkendt"] else "rejected",
+            "published_at":     datetime.now(timezone.utc).isoformat() if fk["godkendt"] else None,
+            "faktatjek":        fk["rapport"],
+        }
+        article_id = save_article(data)
 
         mark_processed(art["id"], score)
 
-        if saved:
-            print(f"  -> Kladde gemt: /nyheder/{slug}")
+        if article_id and not fk["godkendt"]:
+            print(f"  -> Kasseret af faktatjekket (gemt som afvist): /nyheder/{slug}")
+            kasseret += 1
+        elif article_id:
+            print(f"  -> Publiceret: https://klassementet.dk/nyheder/{slug}")
+            efter_publicering(article_id, data)
             if link_felter:
                 print(f"     Interne links: {', '.join(links)} (spand: {link_felter['link_spand']})")
                 linkstatus["uge"] += 1
@@ -619,8 +697,8 @@ def run(limit: int, max_drafts: int, dry_run: bool = False) -> None:
 
         time.sleep(DELAY)
 
-    print(f"\nFærdig: {drafted} kladder gemt, {skipped} fravalgt, {failed} fejl")
-    print(f"Godkend på: klassementet.dk/admin")
+    print(f"\nFærdig: {drafted} publiceret, {kasseret} kasseret af faktatjekket, "
+          f"{skipped} fravalgt, {failed} fejl")
 
 
 if __name__ == "__main__":

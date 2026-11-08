@@ -68,8 +68,9 @@ forsøges aldrig.
 |---|---|
 | **03:00 UTC dagligt** | `datakilde_research` — gennemgår løbene og leder efter de kilder, der mangler. Kun gratis probes; søgetrinnet (`datakilde_research_llm`) koster penge og startes manuelt |
 | **04:00 UTC dagligt** | `tv_tider` — hele sendeplanen hentes forfra |
-| **04:00 UTC dagligt** | `nyheder` — henter RSS (CyclingNews, VeloNews, CyclingWeekly, INRNG, WielerFlits) og skriver dagens bedste nyheder som **kladder**: højst én landevej + én cykelcross. Intet publiceres uden godkendelse i `/admin` |
-| **06:00 UTC dagligt** | Telegram-sammendrag: hvad kørte i går, hvad fejlede, hvilke kørte etaper mangler stadig resultat, og **overskrifterne på nattens nyhedskladder** |
+| **04:00 UTC dagligt** | `nyheder` — henter RSS (CyclingNews, VeloNews, CyclingWeekly, INRNG, WielerFlits) og skriver dagens bedste nyheder: højst én landevej + én cykelcross. Hver artikel faktatjekkes (`artikel_faktatjek.py`) og **publiceres automatisk**, når den består; ellers gemmes den som afvist med begrundelsen |
+| **05:00 UTC dagligt** | `seriestillinger` (cross) og `linktjek` — gennemgår alle publicerede artikler: højst 2 interne links, ingen gentagelser, ingen døde sider (fjernes kun ved et klart 404) |
+| **06:00 UTC dagligt** | Telegram-sammendrag: hvad kørte i går, hvad fejlede, hvilke kørte etaper mangler stadig resultat, og **nattens nyheder: publiceret ✓ eller kasseret ✗ med begrundelse** |
 
 De to workers deler opgaven om TV mellem sig: **`datakilde_research` finder
 kilden** (står løbet på den danske tv-oversigt, og med hvilken kanal?), og
@@ -87,7 +88,7 @@ endnu" indtil dagen før. Den daglige kørsel fylder dem ud, så snart de findes
 | Hvornår | Kanal | Indhold |
 |---|---|---|
 | Et job fejler (exit ≠ 0, eller dommen `error`) | Telegram, straks | Job, løb, etape, exit-kode og de sidste seks linjer af loggen |
-| Hver morgen 06:00 UTC | Telegram | Gårsdagens kørsler, fejl, **kørte etaper uden resultat**, dagens plan og **nye nyhedskladder til godkendelse** |
+| Hver morgen 06:00 UTC | Telegram | Gårsdagens kørsler, fejl, **kørte etaper uden resultat**, dagens plan og **nattens nyheder (publiceret/kasseret)** |
 
 Advarsler sender ikke besked. En kanal, der bipper ved hvert normalt job, holder
 man op med at læse — de står i stedet i `/admin/pipelines`.
