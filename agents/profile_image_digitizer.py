@@ -186,6 +186,123 @@ def _despike(surface: dict[int, int]) -> dict[int, int]:
     return surface
 
 
+# ── stil: "giro" (giroditalia.it) ─────────────────────────────────────────────
+# RCS tegner terraenet som en magenta LINJE over et lyst gulgroent fyld, og
+# fyldet skifter farve paa stigningerne (groent) — saa fyldet kan ikke spores,
+# men linjen kan. Plotfeltet er afgraenset af to sorte lodrette streger: start
+# ved km 0 og maalstregen ved sidste km (venstre/hoejre akse), og bunden af en
+# sort vandret akse. Maalt paa Giro 2027's 20 billeder, 2026-11-08: akserne ved
+# x≈58 og x≈1215, bundlinjen ved y=604, linjen ~(235, 10, 130).
+
+def _giro_is_line(px) -> bool:
+    r, g, b = px
+    return r > 180 and g < 110 and 80 < b < 200 and r - g > 110
+
+
+def _giro_box_and_surface(im: Image.Image):
+    w, h = im.size
+    dark = _is_dark
+
+    # Bundlinjen: den raekke i nederste halvdel, hvor flest pixels er sorte.
+    def moerke_i_raekke(y):
+        return sum(1 for x in range(0, w, 2) if dark(im.getpixel((x, y))))
+    baseline = max(range(h // 2, h - 40), key=moerke_i_raekke)
+
+    # Akserne: kolonner, der er sorte det meste af vejen fra toppen af
+    # plotfeltet ned til bundlinjen. GPM-markoerernes streger er kortere.
+    top = max(40, baseline - 520)
+    moerke = {x: sum(1 for y in range(top, baseline) if dark(im.getpixel((x, y))))
+              for x in range(w)}
+
+    # Aksen er den LAENGSTE sorte lodrette streg i hver yderste tredjedel. En
+    # fast taerskel holdt ikke: etape 5 og 17 har kortere akser end resten.
+    def akse(xs):
+        bedst = max(moerke[x] for x in xs)
+        if bedst < 250:
+            return None
+        valgte = [x for x in xs if moerke[x] >= 0.9 * bedst]
+        return round(sum(valgte) / len(valgte))
+    x0 = akse(range(0, w // 3))
+    x1 = akse(range(2 * w // 3, w))
+    if x0 is None or x1 is None:
+        return None, {}
+
+    # Linjens midte pr. kolonne. Ved flere magentaforekomster i samme kolonne
+    # (tekst, markoerer) vaelges den, der ligger naermest naboen til venstre.
+    surface: dict[int, int] = {}
+    forrige = None
+    for x in range(x0 + 2, x1 - 1):
+        runs, start = [], None
+        for y in range(top - 30, baseline):
+            if _giro_is_line(im.getpixel((x, y))):
+                if start is None:
+                    start = y
+            elif start is not None:
+                runs.append((start, y - 1))
+                start = None
+        if start is not None:
+            runs.append((start, baseline - 1))
+        # Paa en stejl stigning er linjen naesten lodret, og én kolonne rammer
+        # et langt magenta-stykke. Med en graense paa 12 px blev Zoncolans
+        # stejleste kilometer (etape 20) kasseret, og kurven faldt til 0 m.
+        runs = [r for r in runs if r[1] - r[0] <= 120]
+        if not runs:
+            continue
+        if forrige is None:
+            run = max(runs, key=lambda r: r[0])     # laveste: terraenet, ikke tekst
+        else:
+            run = min(runs, key=lambda r: min(abs(r[0] - forrige), abs(r[1] - forrige)))
+        # Midten af stykket er terraenet i kolonnens midte — ogsaa paa en
+        # stejl flanke, hvor stykket spaender over hele kolonnens hoejdeforskel.
+        midt = round((run[0] + run[1]) / 2)
+        surface[x] = midt
+        forrige = midt
+
+    # GPM-toppene er markeret med en sort prik OVEN PAA linjen, saa selve
+    # toppunktet mangler i magenta. Uden dette blev Prebeneg (etape 1) aflaest
+    # 70 m for lavt. Prikken er en udfyldt skive (~10 px); tekst og
+    # hjaelpelinjer er tynde streger og giver aldrig saa taet et sort felt.
+    # Kun en prik, der ligger PAA kurven, er en top. Den fede sorte tekst ved
+    # slutstigningen ("13.1 km / 7.4% -> 14%") er ogsaa et taet sort felt, og
+    # uden afstandskravet traak den kurven 200 px ned paa etape 5, 7, 9 og 14.
+    for (cx, cy, r) in _giro_prikker(im, x0, x1, top, baseline, dark):
+        naer = [surface[x] for x in range(cx - 12, cx + 13) if x in surface]
+        if not naer or min(abs(y - cy) for y in naer) > 25:
+            continue
+        for x in range(cx - r, cx + r + 1):
+            if x0 < x < x1:
+                surface[x] = min(surface.get(x, cy), cy)
+    return (x0, 0, x1, baseline), _despike(surface)
+
+
+def _giro_prikker(im, x0, x1, top, baseline, dark) -> list[tuple[int, int, int]]:
+    """Centre af de sorte GPM-prikker: felter, hvor et 7x7-vindue er naesten
+    helt sort."""
+    fund: list[tuple[int, int]] = []
+    for y in range(top, baseline - 20, 2):
+        for x in range(x0 + 4, x1 - 4, 2):
+            if not dark(im.getpixel((x, y))):
+                continue
+            n = sum(1 for dy in range(-3, 4) for dx in range(-3, 4)
+                    if dark(im.getpixel((x + dx, y + dy))))
+            if n >= 44:
+                fund.append((x, y))
+    prikker: list[list[tuple[int, int]]] = []
+    for p in fund:
+        for g in prikker:
+            if abs(g[0][0] - p[0]) < 12 and abs(g[0][1] - p[1]) < 12:
+                g.append(p)
+                break
+        else:
+            prikker.append([p])
+    ud = []
+    for g in prikker:
+        cx = round(sum(p[0] for p in g) / len(g))
+        cy = round(sum(p[1] for p in g) / len(g))
+        ud.append((cx, cy, 4))
+    return ud
+
+
 # ── digitalisering ────────────────────────────────────────────────────────────
 
 def _interp(points: list[tuple[float, float]], x: float) -> float:
@@ -244,12 +361,15 @@ def digitize_stage_profile(
     report["source_url"] = url
     im = _fetch_image(url)
 
-    box = _find_aso_box(im) if cfg.get("style") == "aso" else _find_plot_box(im)
+    if cfg.get("style") == "giro":
+        box, surface = _giro_box_and_surface(im)
+    else:
+        box = _find_aso_box(im) if cfg.get("style") == "aso" else _find_plot_box(im)
+        surface = _trace_surface(im, box) if box else {}
     if not box:
         report["error"] = "plotfelt ikke fundet i billedet"
         return None, report
     x0, _, x1, _y1 = box
-    surface = _trace_surface(im, box)
     span = x1 - x0
     if len(surface) < span * 0.9:
         report["error"] = f"kun {len(surface)} af {span} kolonner kunne spores"
@@ -354,6 +474,25 @@ def digitize_stage_profile(
     fix_pts.sort(key=lambda p: p[0])
 
     resampled = [(km, m + _interp(fix_pts, km)) for km, m in resampled]
+
+    # Ankrene kontrollerer kun de punkter, der HAR et anker. En sporingsfejl
+    # imellem dem slipper ellers igennem: Zoncolan (Giro 2027 E20) dykkede til
+    # under 0 m paa de km, hvor intet anker staar. Ingen landevej har en
+    # kilometer paa over 25 % — hverken op eller ned.
+    stejlest = 0.0
+    for i, (km, m) in enumerate(resampled):
+        j = next((k for k in range(i + 1, len(resampled))
+                  if resampled[k][0] - km >= 1.0), None)
+        if j is None:
+            break
+        stejlest = max(stejlest, abs(resampled[j][1] - m) / ((resampled[j][0] - km) * 10))
+    report["max_km_gradient_pct"] = round(stejlest, 1)
+    if stejlest > 25:
+        report["error"] = (f"en kilometer på {stejlest:.0f} % — fysisk umuligt, "
+                           "sporingen er gået galt mellem ankrene")
+        if verbose:
+            _print_report(report)
+        return None, report
 
     report["points"] = len(resampled)
     report["anchor_corrected"] = len(fix_pts)

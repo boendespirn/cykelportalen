@@ -727,10 +727,16 @@ export default async function RacePage(props: { params: Promise<{ slug: string }
         {formatDate(race.start_date)}
         {race.end_date && race.end_date !== race.start_date && ` — ${formatDate(race.end_date)}`}
       </p>
+      {/* Én linje på de fleste løb, men en Grand Tour kan have en hel
+          rutetekst (Giro 2027). Afsnit adskilles af en tom linje. */}
       {race.description && (
-        <p className="mt-4 text-slate-400 text-sm leading-relaxed max-w-2xl">
-          {race.description}
-        </p>
+        <div className="mt-4 max-w-2xl space-y-3">
+          {race.description.split(/\n\s*\n/).map((afsnit, i) => (
+            <p key={i} className="text-slate-400 text-sm leading-relaxed">
+              {afsnit.trim()}
+            </p>
+          ))}
+        </div>
       )}
       {race.pcs_url && (
         <a href={race.pcs_url} target="_blank" rel="noopener noreferrer"
