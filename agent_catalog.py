@@ -376,6 +376,14 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
                      "2 interne links. Ankerteksten bliver stående.",
          est_minutes=2),
 
+    _job("facebook_test", "Facebook — test af nøgle og opslag", PHASE_GLOBAL, [
+            _step("fb_article_image.py", ["--test"], cwd="root", stage=None,
+                  label="Nøgle, billede og et skjult foto, der slettes igen"),
+         ], needs_race=False,
+         description="Prøver hele Facebook-kæden med workerens egen nøgle uden at "
+                     "noget bliver synligt på siden. Kør efter en nøglefornyelse.",
+         est_minutes=1),
+
     _job("seriestillinger", "Cykelcross — seriernes samlede stillinger", PHASE_GLOBAL, [
             _step("cross_standings_agent.py", ["--alle"], stage=None,
                   label="X2O Trofee og Superprestige fra seriernes egne sider"),

@@ -330,3 +330,41 @@ def generate_and_post(
                   _side_noegle(meta_token, page_id), page_id, sb_url, sb_key)
     print(f"[FB] {'✓' if ok else '✗'} {title[:65]}")
     return ok
+
+
+def test() -> int:
+    """Prøver hele kæden uden at noget bliver synligt: nøglen, billedet,
+    upload og et IKKE-publiceret foto på siden, som slettes igen med det
+    samme. Workerjobbet `facebook_test` kører den på Railway."""
+    from dotenv import load_dotenv
+    load_dotenv()
+    token, page_id = os.getenv("META_PAGE_ACCESS_TOKEN", ""), os.getenv("META_PAGE_ID", "")
+    sb_url, sb_key = os.getenv("SUPABASE_URL", ""), os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    ok, tekst = token_status(token, page_id)
+    print(f"Nøgle: {'✓' if ok else '✗'} {tekst}")
+    if not ok:
+        return 1
+    img = generate_fb_image("Test af Facebook-billedet fra workeren — slettes med det samme", "generelt")
+    url = _upload(img, "_test", sb_url, sb_key)
+    print(f"Billede: {'✓ ' + url if url else '✗ upload fejlede'}")
+    if not url:
+        return 1
+    tok = _side_noegle(token, page_id)
+    res = requests.post(f"{GRAPH_URL}/{page_id}/photos",
+                        data={"url": url, "published": "false", "access_token": tok}, timeout=40)
+    if not res.ok:
+        print(f"Foto på siden: ✗ {_fejltekst(res)}")
+        return 1
+    foto_id = res.json().get("id")
+    slet = requests.delete(f"{GRAPH_URL}/{foto_id}", params={"access_token": tok}, timeout=20)
+    print(f"Foto på siden: ✓ uploadet skjult ({foto_id}) og "
+          f"{'slettet igen' if slet.ok else 'IKKE slettet: ' + _fejltekst(slet)}")
+    print("Facebook-pipelinen virker." if slet.ok else "Pipelinen virker, men test-fotoet skal slettes manuelt.")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if "--test" in sys.argv:
+        sys.exit(test())
