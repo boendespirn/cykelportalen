@@ -221,6 +221,9 @@ DAGLIGE_GLOBALE = [
     # Seriernes samlede stillinger (ejer-godkendt 2026-11-08). Kl. 05, så en
     # stilling, serien først lagde op efter aftenløbet, når siden om morgenen.
     (5, "seriestillinger", "dagligt-0500-seriestillinger"),
+    # Links i de publicerede artikler (ejerens ønske 2026-11-08): et løb kan
+    # skifte adresse, og en rettelse kan have sneget et dødt link ind.
+    (5, "linktjek", "dagligt-0500-linktjek"),
 ]
 
 

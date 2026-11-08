@@ -33,6 +33,7 @@ import requests
 from datetime import datetime, timezone
 from urllib.parse import quote
 from anthropic import Anthropic
+import artikel_links
 import linkstrategi
 from dotenv import load_dotenv
 
@@ -445,49 +446,23 @@ Returner præcis dette JSON:
 
 def interne_links(content: str) -> list[str]:
     """Stierne på alle interne links i artiklen, i rækkefølge."""
-    stier = []
-    for url in re.findall(r"\[[^\]]+\]\(([^)]+)\)", content):
-        if url.startswith("https://klassementet.dk"):
-            url = url[len("https://klassementet.dk"):] or "/"
-        if url.startswith("/"):
-            stier.append(url)
-    return stier
+    return artikel_links.interne_stier(content)
 
 
 def fjern_interne_links(content: str) -> str:
     """Interne links bliver til plain text — ugens linkbudget er brugt."""
-    def replace(match: re.Match) -> str:
-        url = match.group(2)
-        intern = url.startswith("/") or url.startswith("https://klassementet.dk")
-        return match.group(1) if intern else match.group(0)
-    return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace, content)
+    return artikel_links.rens(content, set(), max_interne=0)[0]
 
 
 def sanitize_links(content: str, races: list[dict]) -> str:
-    """Fjerner (til plain text) ethvert INTERNT markdown-link, der ikke peger på
-    et kendt løb (evt. dets etapesider), eller forsiden. Ægte eksterne links
-    (kilder som uci.org) røres ikke. rewrite_article()s prompt beder Claude om
-    kun at bruge løbslinks, men LLM'en følger det ikke altid (se NEWS-001:
-    publicerede artikler med hallucinerede links som /jonas-vingegaard,
-    /tour-de-france-klassement). Dette er et deterministisk sikkerhedsnet
-    før DB-skrivning."""
-    race_slugs = {r["slug"] for r in races}
-
-    def is_allowed(url: str) -> bool:
-        if url.startswith("https://klassementet.dk"):
-            url = url[len("https://klassementet.dk"):] or "/"
-        elif url.startswith("http://") or url.startswith("https://"):
-            return True  # ægte ekstern kilde
-        if url == "/":
-            return True
-        m = re.match(r"^/([^/]+)(?:/stage/\d+)?$", url)
-        return bool(m) and m.group(1) in race_slugs
-
-    def replace(match: re.Match) -> str:
-        text, url = match.group(1), match.group(2)
-        return match.group(0) if is_allowed(url) else text
-
-    return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", replace, content)
+    """Fjerner (til plain text) ethvert internt link, der ikke peger på et
+    kendt løb (evt. dets etapesider), forsiden eller cross-kalenderen — og
+    alt ud over 2 interne links og gentagne mål. Ægte eksterne links røres
+    ikke. Prompten beder om det samme, men LLM'en følger det ikke altid (se
+    NEWS-001: /jonas-vingegaard, /tour-de-france-klassement). Reglerne bor i
+    artikel_links.py, så godkend-knappen og workerens linktjek bruger de
+    samme."""
+    return artikel_links.rens(content, {r["slug"] for r in races})[0]
 
 
 # ── Hoved ─────────────────────────────────────────────────────────────────────

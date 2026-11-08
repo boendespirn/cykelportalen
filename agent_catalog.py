@@ -367,6 +367,15 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
     # resultat-jobbet holder op, så snart løbets resultat står. Derfor også en
     # daglig kørsel: agenten gemmer kun en stilling, der passer med antallet af
     # kørte løb, så en forældet side kan ikke overskrive en rigtig.
+    _job("linktjek", "Nyheder — tjek links i publicerede artikler", PHASE_GLOBAL, [
+            _step("artikel_linktjek.py", ["--apply"], cwd="root", stage=None,
+                  label="Højst 2 interne links, ingen gentagelser, ingen 404"),
+         ], needs_race=False,
+         description="Gennemgår alle publicerede artikler: fjerner links til sider, "
+                     "der ikke findes eller svarer 404, gentagne links og alt over "
+                     "2 interne links. Ankerteksten bliver stående.",
+         est_minutes=2),
+
     _job("seriestillinger", "Cykelcross — seriernes samlede stillinger", PHASE_GLOBAL, [
             _step("cross_standings_agent.py", ["--alle"], stage=None,
                   label="X2O Trofee og Superprestige fra seriernes egne sider"),

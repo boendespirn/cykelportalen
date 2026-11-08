@@ -1028,13 +1028,29 @@ def _ig_task(article_id: str) -> None:
         pass
 
 
+def _rens_artikel_links(content: str) -> str:
+    """Sidste port før publicering: højst 2 interne links, hvert mål én gang,
+    kun sider der findes (artikel_links.py). Fanger også et link, der er kommet
+    ind ved en manuel rettelse efter kladden blev skrevet."""
+    import artikel_links
+    slugs = artikel_links.hent_race_slugs(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return artikel_links.rens(content, slugs)[0]
+
+
 @app.patch("/admin/articles/{article_id}/approve")
 def admin_approve_article(article_id: str, request: Request, background_tasks: BackgroundTasks):
     _require_admin(request)
     from datetime import datetime, timezone
+    fetch = requests.get(
+        f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}&select=content",
+        headers=get_headers(),
+    )
+    if not fetch.ok or not fetch.json():
+        raise HTTPException(status_code=404, detail="Article not found")
     res = requests.patch(
         f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
-        json={"status": "published", "published_at": datetime.now(timezone.utc).isoformat()},
+        json={"status": "published", "published_at": datetime.now(timezone.utc).isoformat(),
+              "content": _rens_artikel_links(fetch.json()[0]["content"])},
         headers={**get_headers(), "Content-Type": "application/json", "Prefer": "return=minimal"},
     )
     if res.ok:
@@ -1094,6 +1110,8 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
         f"FEEDBACK: {body.feedback}\n\n"
         f"ARTIKEL TITEL: {article['title']}\n\n"
         f"ARTIKEL INDHOLD:\n{article['content']}\n\n"
+        "Bevar artiklens format (markdown) og dens eksisterende links. Tilføj "
+        "ingen nye links, medmindre feedbacken beder om det.\n\n"
         "Returner KUN dette JSON (ingen markdown-blokke):\n"
         '{"title": "...", "content": "..."}'
     )
@@ -1126,7 +1144,7 @@ async def admin_edit_article(article_id: str, body: EditFeedbackRequest, request
         f"{SUPABASE_URL}/rest/v1/news_articles?id=eq.{article_id}",
         json={
             "title": result.get("title", article["title"]),
-            "content": result.get("content", article["content"]),
+            "content": _rens_artikel_links(result.get("content", article["content"])),
             "status": "published",
             "published_at": datetime.now(timezone.utc).isoformat(),
         },
