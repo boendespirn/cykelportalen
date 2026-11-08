@@ -152,6 +152,20 @@ SERIER = {
     "X²O TROFEE": "X2O Trofee",
     "HG CROSS": "HG Cross",
 }
+# Mesterskaber og enkeltstaaende crosser, vi forventer sendt paa dansk tv
+# (ejerens udvaelgelse 2026-11-08: "dem vi forventer bliver vist paa TV ...
+# og saa maa vi fjerne dem, hvis de ikke bliver vist"). EM blev bekraeftet
+# samme dag: HBO Max og Eurosport 2. Noeglen er starten af cykelkalenderens
+# slug; vaerdien er (vores slug-stamme, navn, kategori).
+EKSTRA = {
+    "vm-i-cyklecross": ("vm-i-cykelcross", "VM i cykelcross", "UCI Cyclocross World Championships"),
+    "em-i-cyklecross": ("em-i-cykelcross", "EM i cykelcross", "UEC Cyclocross European Championships"),
+    "dm-i-cyklecross": ("dm-i-cykelcross", "DM i cykelcross", "DM i cykelcross"),
+    "cyclocross-otegem": ("cyclocross-otegem", "Cyclocross Otegem", "Internationale crossløb"),
+    "internationale-sluitingsprijs-oostmalle": ("internationale-sluitingsprijs-oostmalle",
+                                                "Internationale Sluitingsprijs Oostmalle",
+                                                "Internationale crossløb"),
+}
 MAANEDER = {"JAN": 1, "FEB": 2, "MAR": 3, "SEP": 9, "OKT": 10, "NOV": 11, "DEC": 12}
 SERIE_SITE = {"HG Cross": "https://hgcross.be"}
 
@@ -183,11 +197,14 @@ def cross(aar: int) -> list[dict]:
         linjer = [x.strip().upper() if len(x.strip()) <= 14 else x.strip()
                   for x in kort.get_text("\n", strip=True).split("\n") if x.strip()]
         serie = next((s for s in SERIER if s in linjer), None)
-        er_vm = href.startswith("/loeb/vm-i-cyklecross-")
-        if not serie and not er_vm:
+        ck_slug = href.rsplit("/", 1)[1]
+        ekstra = next((v for k, v in EKSTRA.items() if ck_slug.startswith(k + "-")), None)
+        if not serie and not ekstra:
             continue
         navn = next((x for x in linjer if "[M" in x), None)
-        if not navn or "[M+K]" in navn and not er_vm:
+        # Serieloebene staar som separate [M]/[K]-loeb; mesterskaber og
+        # enkelte klassikere kun som faelles [M+K].
+        if not navn or "[M+K]" in navn and not ekstra:
             continue
         # Datoen staar som "01" + "JAN" lige foer serien
         dag = next((int(x) for x in linjer if re.fullmatch(r"\d{1,2}", x)), None)
@@ -197,11 +214,9 @@ def cross(aar: int) -> list[dict]:
             continue
         navn = re.sub(r"\s*\[[^\]]*\]\s*", "", navn)
         navn = re.sub(r"\s*\(tidl\.[^)]*\)", "", navn).strip()
-        ck_slug = href.rsplit("/", 1)[1]
-        if er_vm:
-            kategori = "UCI Cyclocross World Championships"
-            slug = f"vm-i-cykelcross-{aar}"
-            navn = "VM i cykelcross"
+        if ekstra:
+            stamme, navn, kategori = ekstra
+            slug = f"{stamme}-{aar}"
         else:
             kategori = SERIER[serie]
             # Samme form som 2026-raekkerne: "uci-cx-world-cup-<by>-<aar>".
@@ -231,6 +246,16 @@ def opret(raekker: list[dict], skriv: bool) -> int:
         arvet = r.pop("_arvet", None)
         if r["slug"] in eksisterende:
             print(f"  findes   {r['slug']}")
+            continue
+        # Samme serie paa samme dato er samme loeb, ogsaa naar slug'en er
+        # en anden: flere 2026-raekker blev forkortet i haanden
+        # ("superprestige-niel-2026" mod cykelkalenderens
+        # "superprestige-niel-jaarmarktcross-2026"), og uden dette tjek
+        # ville agenten have oprettet seks dubletter.
+        tvilling = sb_get("races", f"select=slug&start_date=eq.{r['start_date']}"
+                                   f"&category=eq.{requests.utils.quote(r['category'])}&limit=1")
+        if tvilling:
+            print(f"  findes   {tvilling[0]['slug']}  (= {r['slug']})")
             continue
         mark = "" if arvet in (None, True) else "  (NYT loeb — tjek navn og land)"
         print(f"  {'opretter' if skriv else 'ville oprette'} {r['slug']:<52} "

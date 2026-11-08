@@ -31,7 +31,7 @@ export default function CykelcrossPage() {
       overlinje={`Kalender · Cykelcross ${saeson}`}
       titel="Cykel"
       accent="cross"
-      intro={`Alle løb i cross-sæsonen ${saeson}: World Cup, Superprestige, X2O Trofee og HG Cross.`}
+      intro={`Alle løb i cross-sæsonen ${saeson}: World Cup, Superprestige, X2O Trofee, HG Cross og mesterskaberne. Vælg en serie for at se dens kalender.`}
     >
       <h2>Cykelcross-sæsonen {saeson}</h2>
       <p>

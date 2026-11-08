@@ -19,6 +19,8 @@
  */
 export const AKTUELLE_UDGAVER: Record<string, string> = {
   "tour-de-france": "tour-de-france-2027",
+  // Ejer-godkendt 2026-11-08, samme dag som 2027-ruten blev lagt ind.
+  "giro-d-italia": "giro-d-italia-2027",
 };
 
 const FAST_ADRESSE: Record<string, string> = Object.fromEntries(

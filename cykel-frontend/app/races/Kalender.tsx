@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { API_BASE } from "@/lib/api";
 import { raceHref } from "@/lib/evergreen";
+import { CROSS_SERIER, type CrossSerie } from "@/lib/crossSerier";
 
 /** Hvilke løb en kalenderside viser. Samme layout på alle tre, så brugeren
  *  kun skal lære siden én gang — kun filteret og teksterne skifter. */
@@ -168,9 +169,12 @@ export default async function Kalender({
   titel,
   accent,
   intro,
+  serie,
   children,
 }: {
   filter: Filter;
+  /** Kun cykelcross: vis én serie (/races/cykelcross/<serie>). */
+  serie?: CrossSerie;
   overlinje: string;
   titel: string;
   accent: string;
@@ -183,9 +187,10 @@ export default async function Kalender({
     getUpcomingRaces(),
     getFinishedRaces(),
   ]);
-  const ongoingRaces = alleIgang.filter((r) => passer(r, filter));
-  const upcomingRaces = alleKommende.filter((r) => passer(r, filter));
-  const finishedRaces = alleKoert.filter((r) => passer(r, filter));
+  const iSerie = (r: { category: string }) => !serie || serie.kategorier.includes(r.category);
+  const ongoingRaces = alleIgang.filter((r) => passer(r, filter) && iSerie(r));
+  const upcomingRaces = alleKommende.filter((r) => passer(r, filter) && iSerie(r));
+  const finishedRaces = alleKoert.filter((r) => passer(r, filter) && iSerie(r));
   const months = groupByMonth(upcomingRaces);
   const koertOverskrift =
     filter === "cykelcross"
@@ -359,6 +364,31 @@ export default async function Kalender({
             </Link>
           ))}
         </nav>
+
+        {/* ── Serier (kun cykelcross) ──
+            Hver serie har sin egen adresse, så den kan deles og rangere på
+            "Superprestige kalender" — ikke et filter i browseren. */}
+        {filter === "cykelcross" && (
+          <nav aria-label="Vælg serie" className="-mt-8 mb-12 flex flex-wrap gap-2">
+            {[{ slug: "", navn: "Alle serier" }, ...CROSS_SERIER].map((s) => {
+              const aktiv = (serie?.slug ?? "") === s.slug;
+              return (
+                <Link
+                  key={s.slug || "alle"}
+                  href={s.slug ? `/races/cykelcross/${s.slug}` : "/races/cykelcross"}
+                  aria-current={aktiv ? "page" : undefined}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    aktiv
+                      ? "bg-amber-400 text-slate-950"
+                      : "border border-slate-800 text-slate-400 hover:border-amber-400/40 hover:text-amber-300"
+                  }`}
+                >
+                  {s.navn}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
 
         {/* ── Kommende løb ───────────────────────────────────────────────── */}
         {upcomingRaces.length === 0 ? (

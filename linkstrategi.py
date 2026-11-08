@@ -28,7 +28,8 @@ GRAND_TOURS = {
 # dens årstals-adresse sender videre dertil. Linkene skal derfor pege på den
 # faste adresse, så de bliver ved med at arbejde, når næste udgave overtager
 # den. Skal skiftes sammen med cykel-frontend/lib/evergreen.ts.
-EVERGREEN = {"tour-de-france-2027": "/tour-de-france"}
+EVERGREEN = {"tour-de-france-2027": "/tour-de-france",
+             "giro-d-italia-2027": "/giro-d-italia"}
 
 # (fra, til inkl., link-artikler pr. uge, andele). None = dynamisk (maj-sep).
 PERIODER = [

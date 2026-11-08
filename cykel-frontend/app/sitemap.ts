@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { API_BASE } from "@/lib/api";
 import { isHistoricRaceSlug } from "@/lib/historic-stage";
 import { raceHref, stageHref } from "@/lib/evergreen";
+import { CROSS_SERIER } from "@/lib/crossSerier";
 
 const BASE = "https://klassementet.dk";
 
@@ -84,6 +85,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/races`, changeFrequency: "daily", priority: 0.6 },
     { url: `${BASE}/races/landevej`, changeFrequency: "daily", priority: 0.6 },
     { url: `${BASE}/races/cykelcross`, changeFrequency: "daily", priority: 0.7 },
+    ...CROSS_SERIER.map((s) => ({
+      url: `${BASE}/races/cykelcross/${s.slug}`,
+      changeFrequency: "daily" as const,
+      priority: 0.6,
+    })),
     { url: `${BASE}/riders`, changeFrequency: "weekly", priority: 0.5 },
     { url: `${BASE}/teams`, changeFrequency: "weekly", priority: 0.5 },
     { url: `${BASE}/nyheder`, changeFrequency: "daily", priority: 0.7 },
