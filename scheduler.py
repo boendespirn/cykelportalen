@@ -646,6 +646,20 @@ def nye_kladder() -> list[str]:
     return ud
 
 
+def facebook_status() -> list[str]:
+    """Én linje, kun når Facebook-nøglen ikke kan poste eller snart udløber."""
+    try:
+        from fb_article_image import token_status
+        ok, tekst = token_status(os.getenv("META_PAGE_ACCESS_TOKEN", ""), os.getenv("META_PAGE_ID", ""))
+    except Exception as e:
+        return [f"\n📘 Facebook: status kunne ikke tjekkes ({e.__class__.__name__})"]
+    if ok and not tekst.startswith("nøglen udløber"):
+        return []
+    hvad = "artiklerne postes IKKE på Facebook" if not ok else "postes stadig"
+    return [f"\n📘 Facebook: {tekst} — {hvad}. Forny med facebook_auth.py og læg "
+            f"sidens nøgle i Railway (worker og web)."]
+
+
 def dagligt_sammendrag(tving: bool = False) -> None:
     """Én besked om morgenen: hvad kørte i går, hvad fejlede, hvad mangler.
 
@@ -694,9 +708,10 @@ def dagligt_sammendrag(tving: bool = False) -> None:
     # det, han selv skal handle paa.
     linjer += dagens_plan()
 
-    # Nyhedskladder til godkendelse — også en opgave til ejeren, men en, der
-    # haster mere end kilderne: en nyhed er kun en nyhed i dag.
+    # Nattens nyheder (publiceret/kasseret) og om Facebook kan poste dem.
+    # Nøglen udløb i juli 2026, og ingen opdagede det i fire måneder.
     linjer += nye_kladder()
+    linjer += facebook_status()
 
     # Kilder, vi ikke selv kan skaffe. Står til sidst, fordi det er en
     # OPGAVE til ejeren, ikke en fejlmelding — og den skal kunne læses som
