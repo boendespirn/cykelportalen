@@ -50,7 +50,10 @@ def main() -> int:
     race_slugs = artikel_links.hent_race_slugs(SUPABASE_URL, SUPABASE_KEY)
     artikler = requests.get(
         f"{SUPABASE_URL}/rest/v1/news_articles?select=id,slug,title,content,source_url"
-        f"&status=eq.published&faktatjek=is.null&order=published_at.desc&limit=500",
+        # Kun omskrevne nyheder: artikler uden kildeadresse er redaktionelle
+        # (Giro-guiderne) og kan ikke tjekkes mod en kilde.
+        f"&status=eq.published&faktatjek=is.null&source_url=not.is.null"
+        f"&order=published_at.desc&limit=500",
         headers=HDR, timeout=60).json()
     print(f"{len(artikler)} publicerede artikler uden faktatjek\n")
 

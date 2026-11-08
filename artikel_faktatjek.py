@@ -284,7 +284,11 @@ def faktatjek(client, kilde: str, titel: str, content: str, ryttere: list[dict])
         return afvis(svar.get("begrundelse") or "kasseret af faktatjekket")
 
     ny_titel, nyt = svar.get("titel") or titel, svar["content"]
+    # Efter rettelsen er kun nationalitet en hård regel. Et "forkert fornavn"
+    # har faktatjekket fået forelagt og afgjort mod kilden — "Strava King" er
+    # ikke rytteren Carden King, og reglen kan ikke se forskel.
     _, rest = tjek_mod_data(f"{ny_titel}\n\n{nyt}", ryttere, kilde)
+    rest = [f for f in rest if "i vores data" in f]
     if rest:
         rapport["data_fejl_efter"] = rest
         return afvis("fejl mod vores data stod tilbage efter rettelsen: " + "; ".join(rest))
