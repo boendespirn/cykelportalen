@@ -60,7 +60,26 @@ Derfor hentes den officielle stilling.
 - Frontend: stillingen øverst på hver serieunderside (`/races/cykelcross/<serie>`)
   og en lille "Stillingen i serien"-boks på løbssiden.
 
-## Hvad ejeren skal sige ja/nej til
+## Status (2026-11-08, samme dag — ejeren sagde ja til alt tre)
+
+- **Rutekort: bygget** som fakta-link (`agents/cross_course_agent.py` →
+  `races.course_map_page`, trin i Ræsinfo). Kun X2O-løbene udgiver planer; en
+  plan, der er uploadet før løbets sæson, linkes ikke (Hofstade viste 2025/12).
+  Tilladelse til at vise billederne er stadig en menneskeopgave.
+- **Stillinger: bygget** for X2O og Superprestige (`agents/cross_standings_agent.py`
+  → `series_standings`, `GET /cross-standings`, vist på seriesiden og som top 5 på
+  løbssiden). Hentes efter hvert løbs resultat og dagligt kl. 05 UTC.
+- **World Cup: kilde fundet, ikke bygget.** `ucicyclocrossworldcup.com/nl/klassement`
+  → "Bekijk" under Elite Mannen → ChronoRace-PDF ("Individual Standings", pointskala
+  40-30-25-22-21-…-1, kolonner pr. afdeling med "-" for ikke-startet, Total). UCI's
+  dataride har IKKE World Cup-stillingen (kun UCI-ranglister). Fortolkeren kan testes
+  mod 2025-26-slutstillingen (Van der Poel vandt) og skal tilføjes `SERIER` i
+  agenten, før første afdeling 27/11-2026.
+- **Gammel, tom funktion:** `/races/{slug}/series-standings` (classifications med
+  `classification_type='series'`) fra en tidligere commit har aldrig fået data og
+  viser intet. Kan fjernes, når den nye stilling har kørt en tid.
+
+## Hvad ejeren skulle sige ja/nej til
 
 1. Rutekort: start med **fakta + link** (1), og skal vi skrive til serierne om lov (2)?
 2. Stillinger: må vi hente de **officielle** stillinger fra X2O og Superprestige
