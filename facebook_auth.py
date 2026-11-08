@@ -120,6 +120,19 @@ page_id    = page["id"]
 print()
 print("=" * 60)
 print(f"✓ Side fundet: {page['name']} (ID: {page_id})")
+
+# Kontrol: det skal være sidens nøgle (PAGE), og den skal ikke udløbe. En
+# sidenøgle fra en langtids-brugernøgle udløber aldrig; uden META_APP_SECRET
+# bliver den kortlivet — det var derfor, nøglen døde i juli 2026.
+d = requests.get("https://graph.facebook.com/debug_token",
+                 params={"input_token": page_token, "access_token": page_token},
+                 timeout=10).json().get("data", {})
+udloeb = d.get("expires_at") or 0
+print(f"  Type: {d.get('type')}  ·  gyldig: {d.get('is_valid')}  ·  "
+      + ("udløber ALDRIG ✓" if not udloeb else
+         f"udløber {__import__('datetime').datetime.fromtimestamp(udloeb):%d-%m-%Y %H:%M} ✗"))
+if d.get("type") != "PAGE" or udloeb:
+    print("  [!] Ikke en varig sidenøgle. Sæt META_APP_SECRET i .env og kør scriptet igen.")
 print("=" * 60)
 
 if args.save:
