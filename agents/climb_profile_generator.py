@@ -124,6 +124,24 @@ CYCLINGSTAGE_CDN_SLUG: dict[str, str] = {
     "volta-ciclista-a-catalunya-2026":                    "volta-a-catalunya",
 }
 
+# Kommende saesoner. cyclingstage bruger samme adresse hvert aar med nyt
+# aarstal (giro-2026-gpx -> giro-2027-gpx, gpx-2026-pro-cycling-races ->
+# gpx-2027-...), og CDN-slugs er de samme. Posterne udledes derfor af
+# 2026-listen i stedet for at blive skrevet af i haanden — saa ligger
+# Giro 2027's GPX klar til brug, den dag den udkommer.
+#
+# Siderne findes ikke, foer cyclingstage laegger dem op (2026-11-08:
+# giro-2027-gpx og tour-de-france-2027-gpx gav 404). Det er ufarligt:
+# get_gpx_url_for_stage() svarer None, og agenterne springer over. Om en
+# kilde FINDES, afgoeres af gpx_tilgaengelig() — ikke af, at loebet staar her.
+for _aar in (2027, 2028):
+    for _slug, _url in list(CYCLINGSTAGE_GPX_PAGES.items()):
+        if _slug.endswith("-2026"):
+            CYCLINGSTAGE_GPX_PAGES.setdefault(_slug[:-4] + str(_aar), _url.replace("2026", str(_aar)))
+    for _slug, _cdn in list(CYCLINGSTAGE_CDN_SLUG.items()):
+        if _slug.endswith("-2026"):
+            CYCLINGSTAGE_CDN_SLUG.setdefault(_slug[:-4] + str(_aar), _cdn)
+
 
 # ── GPX henter/parser ──────────────────────────────────────────────────────────
 
@@ -218,6 +236,16 @@ def get_gpx_url_for_stage(race_slug: str, stage_number: int) -> str | None:
             oneday_match = href if href.startswith("http") else "https://cdn.cyclingstage.com" + href
 
     return oneday_match
+
+
+def gpx_tilgaengelig(race_slug: str) -> str | None:
+    """URL'en paa loebets foerste GPX, hvis cyclingstage HAR lagt den op —
+    ellers None. At loebet staar i CYCLINGSTAGE_GPX_PAGES er ikke nok:
+    2027-posterne staar der, laenge foer filerne findes."""
+    try:
+        return get_gpx_url_for_stage(race_slug, 1)
+    except requests.RequestException:
+        return None
 
 
 def download_stage_gpx(race_slug: str, stage_number: int) -> list[tuple[float, float, float]] | None:

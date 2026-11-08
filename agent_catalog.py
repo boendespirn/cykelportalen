@@ -37,6 +37,10 @@ import os
 import re
 import sys
 
+from datetime import date as _date
+
+_NAESTE_AAR = _date.today().year + 1
+
 ROOT_DIR   = os.path.dirname(os.path.abspath(__file__))
 AGENTS_DIR = os.path.join(ROOT_DIR, "agents")
 
@@ -248,9 +252,30 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
          description="Udfylder vægt og højde for ryttere, der mangler det. Gælder hele startlisten.",
          covers=["rytterstats"], est_minutes=6),
 
+    # De tre agenter bag "🏠 Lokale favoritter" i etapernes "Værd at vide".
+    # Indtil 2026-11-08 stod de uden for kataloget og blev kun kørt i hånden
+    # — derfor havde Giro 2026 dem og ingen andre løb. Rækkefølgen er
+    # tvungen: rytternes hjemregion og stigningernes region skal findes, før
+    # de kan krydses. Uden startliste eller stigninger finder agenten intet
+    # at krydse og slutter pænt; det er netop dét, der gør den sikker at
+    # køre ved hver forberedelse.
+    _job("lokale_favoritter", "Lokale favoritter", PHASE_BEFORE, [
+            _step("hometown_agent.py", ["--race", "{db_slug}"], cwd="root",
+                  stage=None, label="1/3 Rytternes fødeby og region (PCS)"),
+            _step("climb_region_agent.py", ["--race", "{db_slug}"],
+                  stage=None, label="2/3 Stigningernes region"),
+            _step("local_favorite_agent.py", ["--race", "{db_slug}"], cwd="root",
+                  stage=["--stage", "{stage}"],
+                  label="3/3 Lokale favoritter pr. etape"),
+         ],
+         description="Finder ryttere, der er opvokset eller træner i området "
+                     "omkring etapens stigninger, og skriver dem i \"Værd at "
+                     "vide\". Kræver startliste og stigninger.",
+         covers=["lokale_favoritter"], est_minutes=6),
+
     _job("fuld_forberedelse", "Fuld forberedelse (hele pipelinen)", PHASE_BEFORE, [
             "startliste", "raesinfo", "stigningsprofiler", "rytterstats",
-            "resultater",
+            "lokale_favoritter", "resultater",
          ],
          description="Kører samtlige trin i rækkefølge. Tager lang tid. "
                      "Vælges én etape, springes de trin over, der kun giver mening for hele løbet.",
@@ -315,6 +340,19 @@ JOBS: dict[str, dict] = {j["key"]: j for j in [
          ["nyheder_rss", "nyheder_ai"], needs_race=False,
          description="Henter RSS og skriver dagens bedste nyheder som kladder. "
                      "Overskrifterne står i morgenens Telegram-besked.", est_minutes=8),
+
+    # Næste sæsons kalender. Opretter kun løb, der ikke findes, og rører
+    # aldrig en eksisterende række (se kalender_agent.py). Årstallet regnes,
+    # når kataloget indlæses, så knappen altid gælder den kommende sæson.
+    _job("kalender", "Kalender — opret næste sæsons løb", PHASE_GLOBAL, [
+            _step("kalender_agent.py", ["--aar", str(_NAESTE_AAR), "--write"],
+                  stage=None, label=f"WorldTour (PCS) og cykelcross {_NAESTE_AAR}"),
+         ], needs_race=False,
+         description="Opretter den kommende sæsons WorldTour-løb fra PCS og "
+                     "vinterens cross-løb i de serier, vi dækker. Eksisterende "
+                     "løb røres ikke. Nye løb får ingen tekst — den skrives "
+                     "bagefter.",
+         est_minutes=3),
 
     _job("tv_tider", "TV-tider", PHASE_GLOBAL, [
             _step("tv_agent.py", [], stage=None, label="Sendeplan for kommende løb"),

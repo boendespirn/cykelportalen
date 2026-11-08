@@ -136,6 +136,25 @@ intet går tabt — jobs tages, når den starter igen.
 - **Vagthund.** Dør workeren helt, er der ingen, der siger til — det daglige
   sammendrag udebliver bare. En GitHub Action, der spørger hver time, er næste
   skridt.
-- **Kalenderen for næste sæson.** 2027-løbene skal oprettes med `pcs_url`, før
-  skemalæggeren har noget at regne på. Kør `agents/pcs_source.py --tjek --aar 2027`
-  før sæsonstart: en tom PCS-side betyder forkert slug, ikke "ikke kørt endnu".
+- **Kalenderen for næste sæson** oprettes med knappen *Kalender* i admin
+  (`agents/kalender_agent.py --aar N --write`): WorldTour fra PCS' kalender og
+  vinterens cross-løb fra cykelkalenderen. 2027 blev oprettet 2026-11-08 (46
+  løb). Den er ikke skemalagt, fordi et nyt løb også skal have en tekst — og
+  den skrives ikke automatisk. **Tjek datoerne bagefter:** PCS havde Vueltaens
+  slutdato forkert (24/9 i stedet for 26/9), og nye løb uden forgænger får
+  ingen landekode. Kør også `agents/pcs_source.py --tjek --aar N` før
+  sæsonstart: en tom PCS-side betyder forkert slug, ikke "ikke kørt endnu".
+
+## 7. Når en ny kilde dukker op
+
+`datakilde_research` (kl. 03 UTC) tjekker hver morgen, om cyclingstage har lagt
+GPX op for løb, vi venter på. 2027-adresserne udledes af 2026-listen i
+`CYCLINGSTAGE_GPX_PAGES`, men et løb regnes først for at **have** GPX, når der
+faktisk ligger en fil (`gpx_tilgaengelig()`). Den morgen, filen dukker op, sætter
+agenten `fuld_forberedelse` i kø med det samme (regel `ny-kilde`): rute,
+egen hel-etape-profil ud fra GPX, stigninger, stigningsprofiler og lokale
+favoritter. Indtil da står Giro og Tour 2027 med profiler digitaliseret fra
+arrangørens officielle billeder, og dem rører trinnene ikke, fordi de kræver GPX.
+
+Startlisten hentes 30, 21, 14 og 10 dage før, dagligt den sidste uge, og 48
+timer, 6 timer og ved start — holdene udtager drypvis de sidste tre uger.

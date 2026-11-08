@@ -141,6 +141,22 @@ def _gpx_configured() -> set[str]:
     return _GPX_CACHE
 
 
+_GPX_FINDES: dict[str, str | None] = {}
+
+
+def _gpx_findes(slug: str) -> str | None:
+    """URL'en paa loebets foerste GPX-fil hos cyclingstage, eller None.
+    Caches pr. koersel: de 15 klassikere deler én indexside."""
+    if slug not in _GPX_FINDES:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from climb_profile_generator import gpx_tilgaengelig
+            _GPX_FINDES[slug] = gpx_tilgaengelig(slug)
+        except Exception:                      # noqa: BLE001
+            _GPX_FINDES[slug] = None
+    return _GPX_FINDES[slug]
+
+
 def _any(path: str) -> bool:
     try:
         return len(sb("GET", path + "&limit=1")) > 0
@@ -170,7 +186,13 @@ def current_status(race: dict, stage_ids: list[str],
     if is_cx:
         out["route_gpx"] = (STATUS_NA, None)
     elif race["slug"] in _gpx_configured():
-        out["route_gpx"] = (STATUS_FOUND, "cyclingstage")
+        # Konfigureret er ikke det samme som fundet: 2027-posterne udledes
+        # af 2026-listen og staar der, laenge foer cyclingstage har lagt
+        # filerne op. Kun en faktisk GPX-fil taeller — ellers saa vi aldrig
+        # dagen, hvor Giro 2027's GPX udkom, og forberedelsen blev ikke sat
+        # i gang (se cmd_seed).
+        out["route_gpx"] = ((STATUS_FOUND, "cyclingstage") if _gpx_findes(race["slug"])
+                            else (STATUS_MISSING, None))
     elif any(s.get("route_points") for s in stages):
         out["route_gpx"] = (STATUS_FOUND, "db")
     else:
@@ -521,6 +543,16 @@ def probe(row: dict, race: dict) -> dict:
     if dt == "streaming":
         return probe_streaming(race)
 
+    # GPX: den kilde, vi allerede kender, foerst. cyclingstage laegger en
+    # Grand Tours GPX op uger eller maaneder foer loebet, og dét er dagen,
+    # hvor rute, profiler og stigninger kan hentes.
+    if dt == "route_gpx" and race["slug"] in _gpx_configured():
+        url = _gpx_findes(race["slug"])
+        tried.append(f"cyclingstage ({race['slug']})")
+        if url:
+            return {"found": True, "url": url, "source_name": "cyclingstage",
+                    "verification": {"foerste_gpx": url}, "tried": tried}
+
     # Trin 1: kilder vi allerede kender.
     if dt in ("results", "stage_info", "startlist") and race.get("pcs_url"):
         res = fetch(race["pcs_url"])
@@ -668,6 +700,12 @@ def cmd_seed(season: int | None, write: bool, slug: str | None = None) -> None:
     races = races_in_scope(season, slug)
     print(f"{len(races)} loeb i omfang\n")
     created = updated = 0
+    # Seed-trinnet koerer FOER --run og kan selv opdage en ny GPX (status
+    # gaar fra missing til found her). Uden dette ville den nyfundne kilde
+    # aldrig udloese forberedelsen: --run tager kun de raekker, der stadig
+    # er missing. Kun GPX taeller — de andre typer bliver "found", fordi VI
+    # har hentet dataen, og det er ikke en ny kilde.
+    ny_gpx: set[str] = set()
     for race in races:
         stages = sb("GET", f"stages?race_id=eq.{race['id']}"
                            "&select=id,distance_km,route_points")
@@ -686,6 +724,8 @@ def cmd_seed(season: int | None, write: bool, slug: str | None = None) -> None:
                        "source_name": source, "updated_at": now().isoformat()}
             if new_status == STATUS_FOUND:
                 payload["verified_at"] = now().isoformat()
+                if dt == "route_gpx" and (not old or old["status"] == STATUS_MISSING):
+                    ny_gpx.add(race["slug"])
             if write:
                 if old:
                     sb("PATCH", f"race_data_sources?id=eq.{old['id']}", json=payload)
@@ -696,6 +736,26 @@ def cmd_seed(season: int | None, write: bool, slug: str | None = None) -> None:
             else:
                 created += 1
     print(f"{'skrev' if write else 'ville skrive'}: {created} nye, {updated} opdaterede")
+    if ny_gpx:
+        print(f"ny GPX-kilde: {', '.join(sorted(ny_gpx))}")
+    if write and ny_gpx:
+        koe_forberedelse(ny_gpx)
+
+
+def koe_forberedelse(slugs: set[str]) -> None:
+    """En nyfundet kilde skal bruges MED DET SAMME, ikke naar kalenderen naar
+    frem til loebet. To grunde: dataen staar klar nu, og hentningen er den
+    eneste rigtige proeve paa, at kilden duer — en URL, der svarer 200, kan
+    stadig vaere ubrugelig. Lykkes jobbet, er kilden bekraeftet i praksis."""
+    for slug in sorted(slugs):
+        try:
+            sb("POST", "agent_runs", json={
+                "job_key": "fuld_forberedelse", "race_slug": slug,
+                "status": "queued", "trigger": "schedule",
+                "args": {"regel": "ny-kilde"}})
+        except requests.HTTPError as exc:          # noqa: PERF203
+            print(f"  (kunne ikke koee forberedelse for {slug}: {exc})")
+    print(f"{len(slugs)} loeb sat til forberedelse med det samme")
 
 
 def cmd_status(season: int | None, slug: str | None = None) -> None:
@@ -810,20 +870,8 @@ def cmd_run(season: int | None, write: bool, use_llm: bool,
           f"{found} nye kilder"
           f"{'' if write else ' — intet gemt, koer med --write'}")
 
-    # En nyfundet kilde skal bruges MED DET SAMME, ikke naar kalenderen naar
-    # frem til loebet. To grunde: dataen staar klar nu, og hentningen er den
-    # eneste rigtige proeve paa, at kilden duer — en URL, der svarer 200, kan
-    # stadig vaere ubrugelig. Lykkes jobbet, er kilden bekraeftet i praksis.
     if write and nye_kilder_paa:
-        for slug in sorted(nye_kilder_paa):
-            try:
-                sb("POST", "agent_runs", json={
-                    "job_key": "fuld_forberedelse", "race_slug": slug,
-                    "status": "queued", "trigger": "schedule",
-                    "args": {"regel": "ny-kilde"}})
-            except requests.HTTPError as exc:          # noqa: PERF203
-                print(f"  (kunne ikke koee forberedelse for {slug}: {exc})")
-        print(f"{len(nye_kilder_paa)} loeb sat til forberedelse med det samme")
+        koe_forberedelse(nye_kilder_paa)
 
 
 def main() -> None:

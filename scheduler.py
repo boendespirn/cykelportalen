@@ -181,7 +181,14 @@ class Udloeser:
 # sjaeldent langt ude, dagligt den sidste uge.
 FOER_LOEB = [
     (timedelta(days=30),  "fuld_forberedelse", "30d"),
+    # Startlisten fyldes drypvis, efterhaanden som holdene udtager deres
+    # ryttere — paa en Grand Tour typisk de sidste tre uger. Mellem 14 og 7
+    # dage foer var der ingen koersel, saa en udtagelse kunne staa en uge
+    # uden at naa siden (ejerens oenske 2026-11-08: "opdatere startlisten
+    # loebende, naar den bliver offentliggjort").
+    (timedelta(days=21),  "startliste",        "21d-startliste"),
     (timedelta(days=14),  "fuld_forberedelse", "14d"),
+    (timedelta(days=10),  "startliste",        "10d-startliste"),
     # Dagligt den sidste uge.
     *[(timedelta(days=d), "fuld_forberedelse", f"{d}d") for d in range(7, 0, -1)],
     (timedelta(hours=48), "startliste",        "48t"),
