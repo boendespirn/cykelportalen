@@ -347,7 +347,8 @@ REWRITE_SYSTEM = """Du skriver cykel-nyheder til klassementet.dk — Danmarks be
 Regler:
 - Skriv altid på korrekt, engageret dansk (sportsmedie-tone som TV 2 Sport)
 - Omskriv originalen grundigt — aldrig direkte oversæt
-- Giv al den vigtige information, kilden har — men en kort kilde giver en kort artikel. Opfind aldrig detaljer for at nå en længde (navne, nationalitet, alder, hold, tal); alt bliver faktatjekket mod kilden
+- Der er intet længdekrav: er nyheden god, er den god. Giv al den vigtige information, kilden har — en kort kilde giver en kort artikel. Opfind aldrig detaljer for at fylde (navne, nationalitet, alder, hold, tal); alt bliver faktatjekket mod kilden
+- Bærer artiklen et strategisk link (linkplanen), må den gerne være grundigere med baggrund og kontekst, så den giver linket en god sammenhæng — men stadig kun med fakta fra kilden eller sikker almen viden
 - LINKS — følg linkplanen i opgaven:
   - Står der "INGEN interne links", må artiklen ikke indeholde et eneste internt link.
   - Ellers MAKSIMALT 2 interne links: (1) ét strategisk link til det FØRSTE mål i linkplanen, artiklen er reelt relevant for, med den angivne ankertype, og (2) valgfrit ét link til det løb, artiklen primært handler om, ved første naturlige omtale (kun løbsnavnet som ankertekst).
@@ -455,7 +456,7 @@ Returner præcis dette JSON:
 {{
   "title": "Dansk titel (SEO-optimeret, max 70 tegn)",
   "excerpt": "Kort resume på dansk (max 160 tegn, bruges som meta-description)",
-  "content": "Artiklen på dansk. Længden følger kilden: så lang, som kildens fakta bærer (typisk 250-600 ord) — fyld aldrig op. Brug \\n\\n mellem afsnit. Dæk det, kilden fortæller: hvad der skete, citater, baggrund og hvad det betyder. Links efter linkplanen ovenfor; alle andre nævnelser af løbet skrives som plain text.",
+  "content": "Artiklen på dansk. Intet længdekrav — så lang, som nyheden og kildens fakta bærer; fyld aldrig op. Brug \\n\\n mellem afsnit. Dæk det, kilden fortæller: hvad der skete, citater, baggrund og hvad det betyder. Links efter linkplanen ovenfor; alle andre nævnelser af løbet skrives som plain text.",
   "category": "resultater|startliste|transfer|profil|analyse|cykelcross|generelt (brug cykelcross for alle cross-nyheder)",
   "linkmaal": "stien på det strategiske linkmål, du brugte, fx /, eller null"
 }}"""

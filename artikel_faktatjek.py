@@ -224,7 +224,7 @@ Du får kildeartiklen, vores data om de nævnte ryttere og vores danske artikel.
    - "uden_grundlag": hverken i kilde eller data
    - "modsagt": kilden eller vores data siger noget andet
 2. Ret artiklen: fjern eller omskriv hver påstand med "uden_grundlag" eller "modsagt", med så små indgreb som muligt. Tilføj intet nyt. Bevar markdown, afsnit og links præcis som de er (et link må kun forsvinde sammen med den sætning, det står i).
-3. Afgør: "publicer" eller "kasser". Kasser, hvis artiklens hovedpåstand (titel eller første afsnit) er uden grundlag eller modsagt, eller hvis der efter rettelserne er under 150 ord tilbage.
+3. Afgør: "publicer" eller "kasser". Kasser, hvis artiklens hovedpåstand (titel eller første afsnit) er uden grundlag eller modsagt, eller hvis der efter rettelserne ikke længere står en sammenhængende nyhed tilbage. Der er intet længdekrav: en kort, korrekt nyhed publiceres.
 
 Svar KUN med JSON:
 {"paastande": [{"paastand": "...", "grundlag": "kilde|data|almen|uden_grundlag|modsagt"}],
@@ -292,8 +292,10 @@ def faktatjek(client, kilde: str, titel: str, content: str, ryttere: list[dict])
     if rest:
         rapport["data_fejl_efter"] = rest
         return afvis("fejl mod vores data stod tilbage efter rettelsen: " + "; ".join(rest))
-    if len(nyt.split()) < 150:
-        return afvis(f"for kort efter rettelser ({len(nyt.split())} ord)")
+    # Intet længdekrav (ejeren 2026-11-08: "er en nyhed god, så er den god") —
+    # kun et værn mod en rest, der ikke er en nyhed længere.
+    if len(nyt.split()) < 50:
+        return afvis(f"der er ingen nyhed tilbage efter rettelserne ({len(nyt.split())} ord)")
 
     rapport["dom"] = "publicer"
     rapport["rettet"] = nyt != content or ny_titel != titel
