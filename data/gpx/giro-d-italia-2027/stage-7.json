@@ -1,0 +1,38 @@
+{
+  "race": "giro-d-italia-2027",
+  "stage": 7,
+  "official_km": 19.6,
+  "method": "itinerary",
+  "neutral_start": false,
+  "source": "giroditalia.it/en/the-route/ — officielt profilbillede, byetiketter (km + højde)",
+  "read_at": "2026-11-08",
+  "waypoints": [
+    {
+      "name": "Sulmona",
+      "km": 0.0,
+      "ele": 405,
+      "q": "Sulmona, L'Aquila, Italia",
+      "lat": 42.0474231,
+      "lon": 13.927011,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Cansano",
+      "km": 13.6,
+      "ele": 843,
+      "q": "Cansano, L'Aquila, Italia",
+      "lat": 42.004432,
+      "lon": 14.01191,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Campo di Giove",
+      "km": 19.6,
+      "ele": 1068,
+      "q": "Campo di Giove, L'Aquila, Italia",
+      "lat": 42.010132,
+      "lon": 14.03941,
+      "geo": "nominatim"
+    }
+  ]
+}

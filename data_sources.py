@@ -208,6 +208,14 @@ def _gpx_source(race_slug):
     if pages is None:
         return _kilde("gpx", "GPX-rute (cyclingstage.com)", UKENDT,
                       "Kunne ikke slå GPX-kilderne op i dette miljø", paavirker)
+    # Egne ruter fra gpx_builder.py — kun lagt i data/gpx/, når de har bestået
+    # kontrollen mod de officielle tal. Reserve for cyclingstage.
+    har_lokal = _agent_attr("climb_profile_generator", "har_lokal_gpx")
+    if har_lokal and har_lokal(race_slug):
+        return _kilde("gpx", "GPX-rute (egen, kontrolleret)", JA,
+                      f"data/gpx/{race_slug}/ — bygget af gpx_builder.py fra officielle oplysninger"
+                      + (f"; cyclingstage vinder, når den har etapen ({pages[race_slug]})"
+                         if race_slug in pages else ""), paavirker)
     if race_slug in pages:
         return _kilde("gpx", "GPX-rute (cyclingstage.com)", JA, pages[race_slug], paavirker)
     return _kilde("gpx", "GPX-rute (cyclingstage.com)", NEJ,

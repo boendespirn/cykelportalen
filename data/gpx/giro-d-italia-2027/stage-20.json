@@ -1,0 +1,262 @@
+{
+  "race": "giro-d-italia-2027",
+  "stage": 20,
+  "official_km": 180.0,
+  "method": "itinerary",
+  "source": "giroditalia.it/en/the-route/ — officielt profilbillede, byetiketter (km + højde)",
+  "read_at": "2026-11-08",
+  "waypoints": [
+    {
+      "name": "Pordenone",
+      "km": 0.0,
+      "ele": 25,
+      "q": "Pordenone, Italia",
+      "lat": 45.9562503,
+      "lon": 12.6597197,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Azzano Decimo",
+      "km": 7.6,
+      "ele": 14,
+      "q": "Azzano Decimo, Pordenone, Italia",
+      "lat": 45.8814199,
+      "lon": 12.7143145,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Cinto Caomaggiore",
+      "km": 15.1,
+      "ele": 12,
+      "q": "Cinto Caomaggiore, Venezia, Italia",
+      "lat": 45.8258929,
+      "lon": 12.7855716,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Sesto al Reghena",
+      "km": 19.7,
+      "ele": 13,
+      "q": "Sesto al Reghena, Pordenone, Italia",
+      "lat": 45.8476416,
+      "lon": 12.8155309,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Cordovado",
+      "km": 27.0,
+      "ele": 15,
+      "q": "Cordovado, Pordenone, Italia",
+      "lat": 45.8457769,
+      "lon": 12.8806648,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Morsano al Tagliamento",
+      "km": 31.2,
+      "ele": 14,
+      "q": "Morsano al Tagliamento, Pordenone, Italia",
+      "lat": 45.8581407,
+      "lon": 12.9293364,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Varmo",
+      "km": 39.0,
+      "ele": 17,
+      "q": "Varmo, Udine, Italia",
+      "lat": 45.887015,
+      "lon": 12.987726,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Codroipo",
+      "km": 49.2,
+      "ele": 42,
+      "q": "Codroipo, Udine, Italia",
+      "lat": 45.9611171,
+      "lon": 12.9789516,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Gradisca",
+      "km": 53.8,
+      "ele": 65,
+      "q": "Gradisca, Sedegliano, Udine, Italia",
+      "lat": 46.0016889,
+      "lon": 12.964901,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Dignano",
+      "km": 64.6,
+      "ele": 112,
+      "q": "Dignano, Udine, Italia",
+      "lat": 46.0850276,
+      "lon": 12.9392936,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Spilimbergo",
+      "km": 69.8,
+      "ele": 130,
+      "q": "Spilimbergo, Pordenone, Italia",
+      "lat": 46.1113355,
+      "lon": 12.9016287,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Valeriano",
+      "km": 76.9,
+      "ele": 181,
+      "q": "Valeriano, Pinzano al Tagliamento, Italia",
+      "lat": 46.1682736,
+      "lon": 12.9206195,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Pinzano al Tagliamento",
+      "km": 80.4,
+      "ele": 199,
+      "q": "Pinzano al Tagliamento, Pordenone, Italia",
+      "lat": 46.1830744,
+      "lon": 12.9454465,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Forgaria nel Friuli",
+      "km": 87.1,
+      "ele": 263,
+      "q": "Forgaria nel Friuli, Udine, Italia",
+      "lat": 46.2228224,
+      "lon": 12.9734865,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Peonis",
+      "km": 95.1,
+      "ele": 178,
+      "q": "Peonis, Trasaghis, Udine, Italia",
+      "lat": 46.2589202,
+      "lon": 13.0393511,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Alesso",
+      "km": 103.7,
+      "ele": 203,
+      "q": "Alesso, Trasaghis, Udine, Italia",
+      "lat": 46.317123,
+      "lon": 13.0534872,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Somplago",
+      "km": 108.2,
+      "ele": 201,
+      "q": "Somplago, Cavazzo Carnico, Udine, Italia",
+      "lat": 46.3485069,
+      "lon": 13.0679208,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Tolmezzo",
+      "km": 118.1,
+      "ele": 319,
+      "q": "Tolmezzo, Udine, Italia",
+      "lat": 46.4053676,
+      "lon": 13.0158357,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Cedarchis",
+      "km": 125.0,
+      "ele": 397,
+      "q": "Cedarchis, Arta Terme, Udine, Italia",
+      "lat": 46.4581673,
+      "lon": 13.0346137,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Paularo",
+      "km": 137.1,
+      "ele": 648,
+      "q": "Paularo, Udine, Italia",
+      "lat": 46.5303455,
+      "lon": 13.1165605,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Passo Duron",
+      "km": 141.4,
+      "ele": 1069,
+      "q": "Forcella Duron, Paularo, Udine, Italia",
+      "lat": 46.5317266,
+      "lon": 13.0824436,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Ligosullo",
+      "km": 144.8,
+      "ele": 896,
+      "q": "Ligosullo, Treppo Ligosullo, Udine, Italia",
+      "lat": 46.5395791,
+      "lon": 13.0748751,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Paluzza",
+      "km": 152.5,
+      "ele": 568,
+      "q": "Paluzza, Udine, Italia",
+      "lat": 46.5308146,
+      "lon": 13.0182065,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Cercivento",
+      "km": 154.4,
+      "ele": 607,
+      "q": "Cercivento, Udine, Italia",
+      "lat": 46.5272704,
+      "lon": 12.9892339,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Sella Valcalda",
+      "km": 159.9,
+      "ele": 958,
+      "q": "Sella Valcalda, Italia",
+      "lat": 46.5241502,
+      "lon": 12.9317962,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Comeglians",
+      "km": 166.3,
+      "ele": 564,
+      "q": "Comeglians, Udine, Italia",
+      "lat": 46.5152338,
+      "lon": 12.8678035,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Ovaro",
+      "km": 170.0,
+      "ele": 530,
+      "q": "Ovaro, Udine, Italia",
+      "lat": 46.4829428,
+      "lon": 12.8653894,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Monte Zoncolan",
+      "km": 180.0,
+      "ele": 1730,
+      "q": "Monte Zoncolan, Italia",
+      "lat": 46.5024667,
+      "lon": 12.9263418,
+      "geo": "nominatim"
+    }
+  ]
+}

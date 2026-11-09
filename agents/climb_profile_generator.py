@@ -142,6 +142,21 @@ for _aar in (2027, 2028):
         if _slug.endswith("-2026"):
             CYCLINGSTAGE_CDN_SLUG.setdefault(_slug[:-4] + str(_aar), _cdn)
 
+# Egne GPX-ruter, bygget af gpx_builder.py ud fra arrangørens oplysninger og
+# KUN lagt her, når de har bestået kontrollen mod officiel distance, byernes km
+# og den officielle højdekurve (ejer-godkendt 2026-11-08). Bruges som reserve,
+# når cyclingstage ikke har etapen — deres fil vinder altid, når den findes.
+LOCAL_GPX_DIR = Path(__file__).resolve().parent.parent / "data" / "gpx"
+
+
+def local_gpx_path(race_slug: str, stage_number: int) -> Path | None:
+    p = LOCAL_GPX_DIR / race_slug / f"stage-{stage_number}.gpx"
+    return p if p.is_file() else None
+
+
+def har_lokal_gpx(race_slug: str) -> bool:
+    return any((LOCAL_GPX_DIR / race_slug).glob("stage-*.gpx"))
+
 
 # ── GPX henter/parser ──────────────────────────────────────────────────────────
 
@@ -258,7 +273,7 @@ def download_stage_gpx(race_slug: str, stage_number: int) -> list[tuple[float, f
     """
     gpx_url = get_gpx_url_for_stage(race_slug, stage_number)
     if not gpx_url:
-        return None
+        return _load_local_gpx(race_slug, stage_number)
     candidates = [gpx_url]
     m = re.fullmatch(r"(.*(?:stage|etappe)-\d+)(?:-route|-parcours)?\.gpx", gpx_url)
     if m:
@@ -275,7 +290,19 @@ def download_stage_gpx(race_slug: str, stage_number: int) -> list[tuple[float, f
         except ValueError as e:
             print(f"    [GPX parse-fejl: {e}]")
             return None
-    return None
+    return _load_local_gpx(race_slug, stage_number)
+
+
+def _load_local_gpx(race_slug: str, stage_number: int) -> list[tuple[float, float, float]] | None:
+    p = local_gpx_path(race_slug, stage_number)
+    if not p:
+        return None
+    print(f"    [GPX: egen rute {p.relative_to(LOCAL_GPX_DIR.parent.parent)}]")
+    try:
+        return parse_gpx_with_elevation(p.read_text(encoding="utf-8"))
+    except ValueError as e:
+        print(f"    [GPX parse-fejl i egen rute: {e}]")
+        return None
 
 
 # ── Geometri ────────────────────────────────────────────────────────────────
@@ -872,8 +899,8 @@ def process_race_all_stages(race_slug: str, style: str, write_db: bool, overwrit
         print("Fejl: --write-db kræver ét enkelt --style (full eller minimal), ikke 'both'")
         return
 
-    if race_slug not in CYCLINGSTAGE_GPX_PAGES:
-        print(f"Ingen GPX-kilde konfigureret for '{race_slug}' (se CYCLINGSTAGE_GPX_PAGES) — springer løbet over.")
+    if race_slug not in CYCLINGSTAGE_GPX_PAGES and not har_lokal_gpx(race_slug):
+        print(f"Ingen GPX-kilde for '{race_slug}' (hverken CYCLINGSTAGE_GPX_PAGES eller data/gpx/) — springer løbet over.")
         return
 
     race_id = get_race_id(race_slug)

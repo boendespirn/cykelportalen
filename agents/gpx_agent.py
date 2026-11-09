@@ -123,7 +123,7 @@ def run(race_slug: str | None) -> None:
     slugs = [race_slug] if race_slug else list(alle)
 
     for slug in slugs:
-        if slug not in alle:
+        if slug not in alle and not cpg.har_lokal_gpx(slug):
             print(f"Ukendt løb: {slug}. Kendte: {', '.join(sorted(alle))}")
             continue
 
@@ -141,12 +141,15 @@ def run(race_slug: str | None) -> None:
             n = stage["stage_number"]
             # Samme opslag som resten af pipelinen: det kender både
             # etapeløbenes "stage-N"-filer og endagsløbenes "route.gpx".
-            gpx_url = cpg.get_gpx_url_for_stage(slug, n)
-            if not gpx_url:
+            gpx_url = cpg.get_gpx_url_for_stage(slug, n) if slug in alle else None
+            lokal = None if gpx_url else cpg.local_gpx_path(slug, n)
+            if not gpx_url and not lokal:
                 print(f"  E{n}: ingen GPX-URL")
                 continue
 
-            points = download_gpx(gpx_url)
+            # Egen rute (gpx_builder.py) kun som reserve — cyclingstage vinder.
+            points = download_gpx(gpx_url) if gpx_url else parse_gpx(lokal.read_text(encoding="utf-8"))
+            gpx_url = gpx_url or str(lokal)
             if not points:
                 print(f"  E{n}: GPX-fejl")
                 continue

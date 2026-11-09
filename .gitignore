@@ -43,6 +43,8 @@ desktop.ini
 .claude/*
 !.claude/agents/
 !.claude/agents/**
+!.claude/skills/
+!.claude/skills/**
 
 # Logs
 *.log

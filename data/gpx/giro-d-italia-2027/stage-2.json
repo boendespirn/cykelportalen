@@ -1,0 +1,100 @@
+{
+  "race": "giro-d-italia-2027",
+  "stage": 2,
+  "official_km": 166.0,
+  "method": "itinerary",
+  "source": "giroditalia.it/en/the-route/ — officielt profilbillede, byetiketter (km + højde)",
+  "read_at": "2026-11-08",
+  "waypoints": [
+    {
+      "name": "Ljubljana",
+      "km": 0.0,
+      "ele": 314,
+      "q": "Ljubljana, Slovenia",
+      "lat": 46.0500268,
+      "lon": 14.5069289,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Logatec",
+      "km": 24.5,
+      "ele": 478,
+      "q": "Logatec, Slovenia",
+      "lat": 45.9178067,
+      "lon": 14.2233802,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Postojna",
+      "km": 46.8,
+      "ele": 548,
+      "q": "Postojna, Slovenia",
+      "lat": 45.7752847,
+      "lon": 14.2139937,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Divača",
+      "km": 73.6,
+      "ele": 442,
+      "q": "Divača, Slovenia",
+      "lat": 45.6827896,
+      "lon": 13.9685734,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Galantiči",
+      "km": 106.4,
+      "ele": 317,
+      "q": "Galantiči, Slovenia",
+      "lat": 45.4944345,
+      "lon": 13.8712536,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Srgaši",
+      "km": 130.8,
+      "ele": 214,
+      "q": "Srgaši, Slovenia",
+      "lat": 45.5088174,
+      "lon": 13.702902,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Portorož",
+      "km": 148.4,
+      "ele": 6,
+      "q": "Portorož, Slovenia",
+      "lat": 45.5146489,
+      "lon": 13.5910112,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Izola",
+      "km": 159.1,
+      "ele": 13,
+      "q": "Izola, Slovenia",
+      "lat": 45.5398936,
+      "lon": 13.65939,
+      "geo": "nominatim"
+    },
+    {
+      "name": "Markovec",
+      "km": 162.7,
+      "ele": 134,
+      "q": "Markovec, Koper, Slovenia",
+      "lat": 45.5418929,
+      "lon": 13.709858,
+      "geo": "manuel: OSM place=neighbourhood Markovec (toppen er natural=peak uden vej)"
+    },
+    {
+      "name": "Koper",
+      "km": 166.0,
+      "ele": 3,
+      "q": "Koper, Slovenia",
+      "lat": 45.5479864,
+      "lon": 13.7304781,
+      "geo": "nominatim"
+    }
+  ]
+}

@@ -93,7 +93,8 @@ Begrundelsen er strategisk, ikke kosmetisk: ujævn dækning giver tynde landings
 
 1. **Officiel roadbook (PDF/site)** — stærkest både fagligt og licensmæssigt, fordi vi udtrækker **fakta** (stigningskategorier, km, hældning, mellemsprints) og ikke billeder. Mønsteret findes allerede i `aso_roadbook_agent.py` (letour.fr, lavuelta.es). Bekræftet tilgængelig for Tour de Pologne: `tourdepologne.pl/wp-content/uploads/2026/roadbook-2026.pdf` (HTTP 200, 121 MB).
 2. **cyclingstage GPX** — rå rutedata, som vi selv renderer profiler ud fra.
-3. **Intet** — markér løbet som udækket frem for at gætte.
+3. **Egen GPX bygget af `agents/gpx_builder.py`** (ejer-godkendt 2026-11-08, skill `gpx-fra-rute`) — ud fra arrangørens spor, køreplan eller profilbilledets byetiketter + BRouter på OpenStreetMap + EU-DEM. Skrives **kun** til `data/gpx/<slug>/stage-N.gpx`, når den består kontrollen (distance ±2 %, byernes km mod en ret linje ±1 km, byernes højde ±50 m, officiel højdekurve, ingen km over 25 %); ellers `output/gpx_kandidater/` til review. `download_stage_gpx()`, `gpx_agent.py` og `data_sources.py` læser den som reserve — cyclingstage vinder, når den har etapen. Kalibreret mod cyclingstages GPX for Vuelta 2026 etape 9 (facit består). Specs og rapporter ligger ved siden af GPX'en, så hver rute kan spores til sin kilde.
+4. **Intet** — markér løbet som udækket frem for at gætte.
 
 **Licens er ikke til forhandling:** færdige profilbilleder fra tredjepart er præcis det, LEG-001 ryddede op efter. GPX-/rutedata og roadbook-fakta er langt mere forsvarlige. Enhver ny billedkilde skal licensvurderes eksplicit, jf. `CLAUDE.md` §7.
 
