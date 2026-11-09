@@ -314,7 +314,12 @@ def planlaeg(fra: datetime, til: datetime) -> list[Udloeser]:
             t = datetime(dag.year, dag.month, dag.day, time_utc,
                          tzinfo=timezone.utc)
             if fra <= t <= til:
-                ud.append(Udloeser(t, job, "", None, regel))
+                # Datoen SKAL i reglen: koer_en_gang() springer en udloeser
+                # over, hvis samme noegle er koeet de sidste to doegn. Uden
+                # datoen spaerrede gaarsdagens koersel dagens, og nyheder,
+                # tv_tider og datakilde_research koerte kun hver anden dag
+                # (2., 4., 6., 8. november 2026 — opdaget 2026-11-09).
+                ud.append(Udloeser(t, job, "", None, f"{regel}-{dag.isoformat()}"))
         dag += timedelta(days=1)
 
     for r in loeb:

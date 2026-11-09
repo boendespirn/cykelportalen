@@ -111,6 +111,16 @@ def navnenoegle(navn: str) -> str:
     return " ".join(sorted(re.findall(r"[a-z]+", s.lower())))
 
 
+def samme_rytter(a: str, b: str) -> bool:
+    """To navnenoegler for samme rytter, ogsaa naar den ene kilde forkorter:
+    oversigtssiden skriver "Felipe Orts", PDF'en "ORTS LLORET Felipe" (Niel
+    2024). Alle ord i det korte navn skal staa i det lange — mindst to ord, saa
+    et fornavn alene aldrig er nok."""
+    sa, sb = set(a.split()), set(b.split())
+    kort, lang = (sa, sb) if len(sa) <= len(sb) else (sb, sa)
+    return len(kort) >= 2 and kort <= lang
+
+
 # ── Superprestige ────────────────────────────────────────────────────────────
 
 def _sp_afsnit(side: str) -> list[dict]:
@@ -138,17 +148,23 @@ def _sp_tid(s: str) -> int | None:
     """'1h03?18.0"' → 3798. Tidtageren skriver minuttegnet som et tegn, der
     ikke overlever PDF-udtraekket, saa vi laeser kun cifrene. Kun en tid MED
     timer er en sluttid; '+15.0"' er en afstand og '2 r' en overhalet rytter."""
-    m = re.fullmatch(r"(\d+)h(\d{2})\D(\d{2})(?:\.\d)?\"?", s.strip())
+    # match, ikke fullmatch: i nogle PDF'er staar afstanden paa samme linje
+    # ('0h57?14.0" +1.0"', Niel 2025-11-11).
+    m = re.match(r"(\d+)h(\d{2})\D(\d{2})(?:\.\d)?\"?(?:\s|$)", s.strip())
     if not m:
         return None
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
 
 
 def _sp_laes_pdf(pdf: bytes) -> tuple[date | None, list[dict]]:
-    """Tidtagerens resultat-PDF. Hver raekke ankres paa UCI-ID'et
-    ("100 071 556 51") med UCI-koden ("BEL19931210") lige foer — to former,
-    der ikke opstaar tilfaeldigt. Foer dem staar navnet (evt. med
-    startnummeret foran) og placeringen; efter dem kategori, klub og tid."""
+    """Tidtagerens resultat-PDF. Hver raekke ankres paa UCI-koden
+    ("BEL19931210") — en form, der ikke opstaar tilfaeldigt. Lige foer den
+    staar navnet (evt. med startnummeret foran) og placeringen; efter den
+    evt. UCI-ID'et ("100 071 556 51"), saa kategori, klub og tid.
+
+    UCI-ID'et var tidligere ankeret, men det staar kun i omkring halvdelen af
+    PDF'erne (Middelkerke 2026-11-05 kom uden), og saa fandt parseren nul
+    raekker. Koden staar i alle udgaver."""
     import pymupdf as fitz
     with fitz.open(stream=pdf, filetype="pdf") as doc:
         linjer = [x.strip() for side in doc for x in side.get_text().splitlines()
@@ -157,24 +173,27 @@ def _sp_laes_pdf(pdf: bytes) -> tuple[date | None, list[dict]]:
     m = re.match(r"(\d{2})/(\d{2})/(\d{4})", linjer[0] if linjer else "")
     dag = date(int(m.group(3)), int(m.group(2)), int(m.group(1))) if m else None
 
-    ankre = [k for k in range(2, len(linjer))
-             if re.fullmatch(r"\d{3} \d{3} \d{3} \d{2}", linjer[k])
-             and re.fullmatch(r"[A-Z]{3}\d{8}", linjer[k - 1])]
+    # Koden kan staa alene eller i samme linje som UCI-ID og kategori
+    # ('NED19960211 100 087 058 33 ELITE MEN', Niel 2025-11-11).
+    ankre = [k for k in range(1, len(linjer)) if re.match(r"[A-Z]{3}\d{8}(?:\s|$)", linjer[k])]
     raekker = []
     for n, k in enumerate(ankre):
-        mb = re.fullmatch(r"(\d{1,3}) (.+)", linjer[k - 2])
+        mb = re.fullmatch(r"(\d{1,3}) (.+)", linjer[k - 1])
         if mb:
-            navn, foer = mb.group(2), k - 3
+            navn, foer = mb.group(2), k - 2
         else:
-            navn, foer = linjer[k - 2], k - 4   # startnummeret paa egen linje
+            navn, foer = linjer[k - 1], k - 3   # startnummeret paa egen linje
         pos = int(linjer[foer]) if foer >= 0 and linjer[foer].isdigit() else None
+        start = k + 1
+        if start < len(linjer) and re.fullmatch(r"\d{3} \d{3} \d{3} \d{2}", linjer[start]):
+            start += 1
         # Naeste raekkes placering + startnummer + navn staar foer dens anker.
-        slut = ankre[n + 1] - 2 if n + 1 < len(ankre) else len(linjer)
-        efter = linjer[k + 1:slut]
+        slut = ankre[n + 1] - 1 if n + 1 < len(ankre) else len(linjer)
+        efter = linjer[start:slut]
         tid = next((t for t in map(_sp_tid, efter) if t), None)
         status = next((s for s in ("DNF", "DNS", "DSQ") if s in efter), None)
         raekker.append({"pos": None if status else pos, "navn": navn,
-                        "nat": linjer[k - 1][:3], "tid": tid, "status": status})
+                        "nat": linjer[k][:3], "tid": tid, "status": status})
     return dag, raekker
 
 
@@ -204,7 +223,8 @@ def superprestige(race: dict) -> tuple[list[dict], str] | None:
         return None
     pdf_top3 = [navnenoegle(x["navn"]) for x in raekker if x["pos"]][:3]
     side_top3 = [navnenoegle(x) for x in kat["top3"]]
-    if pdf_top3 != side_top3:
+    if len(pdf_top3) != len(side_top3) or not all(
+            samme_rytter(p, s) for p, s in zip(pdf_top3, side_top3)):
         print(f"    [KONTROL] PDF'ens top 3 {pdf_top3} passer ikke med siden "
               f"{side_top3} — gemmer intet")
         return None
@@ -310,9 +330,106 @@ def hg_cross(race: dict) -> tuple[list[dict], str] | None:
     return None
 
 
+# ── EM (UEC) — arrangørens resultatside, ChronoRace-PDF ──────────────────────
+
+# EM flytter hvert aar til et nyt site (ek2026.nl), saa adressen kan ikke
+# udledes. Ejeren pegede paa 2026-siden 2026-11-09; tilfoej naeste aars, naar
+# arrangoeren er kendt.
+EM_SIDER = {2026: "https://ek2026.nl/uitslagen/"}
+EM_MAANEDER = {m: i for i, m in enumerate(
+    "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(), 1)}
+
+
+def _em_tid(s: str) -> int | None:
+    """'59:37' → 3577, '1:00:12' → 3612."""
+    m = re.fullmatch(r"(?:(\d+):)?(\d{1,2}):(\d{2})", (s or "").strip())
+    if not m:
+        return None
+    return int(m.group(1) or 0) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+
+
+def _em_laes_pdf(pdf: bytes) -> tuple[date | None, str, list[dict]]:
+    """ChronoRaces resultat-PDF. Teksten staar flere gange i traek (fed skrift
+    tegnes som oven-i-hinanden-tekst), saa gentagne linjer slaas sammen foerst.
+    Hver raekke ankres paa UCI-ID'et (11 cifre); foer det staar
+    "startnr NAVN" og "placering.", efter det nation, foedselsaar, tid, afstand."""
+    import pymupdf as fitz
+    with fitz.open(stream=pdf, filetype="pdf") as doc:
+        raa = [x.strip() for side in doc for x in side.get_text().splitlines() if x.strip()]
+    linjer = [x for i, x in enumerate(raa) if i == 0 or x != raa[i - 1]]
+
+    m = re.match(r"[A-Z]{3} (\d{1,2}) ([A-Z]{3}) (\d{4})", linjer[0] if linjer else "")
+    dag = date(int(m.group(3)), EM_MAANEDER[m.group(2)], int(m.group(1))) if m else None
+    kategori = next((x for x in linjer[:15] if HERRE_ELITE.search(x)), "")
+
+    ankre = [k for k in range(2, len(linjer)) if re.fullmatch(r"\d{11}", linjer[k])]
+    raekker = []
+    for n, k in enumerate(ankre):
+        # Navnet staar baade med og uden startnummer ("4 NYS Thibau",
+        # "NYS Thibau"), saa placeringen soeges et par linjer tilbage.
+        foer = linjer[max(0, k - 4):k][::-1]
+        mb = next((re.fullmatch(r"\d{1,3} (.+)", x) for x in foer
+                   if re.fullmatch(r"\d{1,3} (.+)", x)), None)
+        pos = next((re.fullmatch(r"(\d+)\.", x) for x in foer
+                    if re.fullmatch(r"(\d+)\.", x)), None)
+        slut = ankre[n + 1] - 2 if n + 1 < len(ankre) else len(linjer)
+        efter = linjer[k + 1:slut]
+        tider = [t for t in map(_em_tid, efter) if t is not None]
+        afstand = next((x for x in efter if re.fullmatch(r"\+\d+:\d{2}(?::\d{2})?|-", x)), None)
+        status = next((s for s in ("DNF", "DNS", "DSQ") if s in efter), None)
+        lapped = any(re.search(r"LAP", x) for x in efter)
+        raekker.append({
+            "pos": int(pos.group(1)) if pos and not status else None,
+            "navn": mb.group(1) if mb else linjer[k - 1],
+            "nat": efter[0] if efter and re.fullmatch(r"[A-Z]{3}", efter[0]) else None,
+            "tid": None if (status or lapped or not tider) else tider[0],
+            "kilde_afstand": 0 if afstand == "-" else (_em_tid(afstand[1:]) if afstand else None),
+            "status": status,
+        })
+    return dag, kategori, raekker
+
+
+def em(race: dict) -> tuple[list[dict], str] | None:
+    dag = date.fromisoformat(race["start_date"])
+    side_url = EM_SIDER.get(dag.year)
+    if not side_url:
+        print(f"    ingen kendt EM-resultatside for {dag.year} (se EM_SIDER)")
+        return None
+    side = hent(side_url)
+    if side is None or not side.ok:
+        print("    EM-resultatsiden svarede ikke")
+        return None
+    link = re.search(r'href="([^"]+_Results?_ME\.pdf)"', side.text, re.I)
+    if not link:
+        print("    ingen herre-elite-PDF (…_Results_ME.pdf) paa siden endnu")
+        return None
+    r = hent(link.group(1))
+    if r is None or not r.ok:
+        print(f"    kunne ikke hente {link.group(1)[:80]}")
+        return None
+    pdf_dag, kategori, raekker = _em_laes_pdf(r.content)
+    if pdf_dag != dag:
+        print(f"    [KONTROL] PDF'ens dato {pdf_dag} er ikke loebets {dag} — gemmer intet")
+        return None
+    if not kategori:
+        print("    [KONTROL] PDF'en er ikke herre-elite — gemmer intet")
+        return None
+    # Kildens egen afstand skal vaere den, vi regner ud af sluttiderne.
+    vinder = next((x["tid"] for x in raekker if x["pos"] == 1), None)
+    for x in raekker[:TOP]:
+        if x["tid"] and vinder and x["kilde_afstand"] is not None \
+                and x["tid"] - vinder != x["kilde_afstand"]:
+            print(f"    [KONTROL] {x['navn']}: afstand {x['kilde_afstand']}s i kilden, "
+                  f"{x['tid'] - vinder}s regnet ud — gemmer intet")
+            return None
+    print(f"    {kategori}: {len(raekker)} raekker i PDF'en")
+    return raekker, link.group(1)
+
+
 # races.category → (race_data_sources.source_name, henter)
 KILDER = {"Superprestige": ("superprestige", superprestige),
-          "HG Cross": ("acn-timing", hg_cross)}
+          "HG Cross": ("acn-timing", hg_cross),
+          "UEC Cyclocross European Championships": ("uec-em", em)}
 
 
 # ── Skrivning ────────────────────────────────────────────────────────────────
