@@ -71,15 +71,22 @@ def get_content(entry) -> str:
 def upsert_articles(articles: list[dict]) -> int:
     if not articles:
         return 0
+    # on_conflict SKAL navngive external_url. Uden den gaelder
+    # ignore-duplicates kun primaernoeglen (id), og én allerede kendt artikel
+    # afviste hele feedets portion med 409 — ogsaa de nye. Saa laenge jobbet
+    # koerte hver anden dag, var et feed af og til helt udskiftet og kom
+    # igennem; med daglige koersler blev der ikke gemt en eneste (2026-11-09/10).
     res = requests.post(
-        f"{SUPABASE_URL}/rest/v1/raw_news",
+        f"{SUPABASE_URL}/rest/v1/raw_news?on_conflict=external_url",
         json=articles,
-        headers={**DB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=minimal"},
+        headers={**DB_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
     )
     if not res.ok:
         print(f"  [DB FEJL] {res.status_code}: {res.text[:200]}")
         return 0
-    return len(articles)
+    nye = len(res.json())
+    print(f"  ({nye} nye)")
+    return nye
 
 
 def scrape_feed(cfg: dict) -> list[dict]:
