@@ -152,8 +152,8 @@ def pcs_billeder(pcs_url: str) -> dict[int, str]:
     return ud
 
 
-def hent_billede(url: str) -> tuple[bytes, str] | None:
-    r = requests.get(url, headers={"User-Agent": UA, "Referer": "https://www.procyclingstats.com/"}, timeout=30)
+def hent_billede(url: str, referer: str = "https://www.procyclingstats.com/") -> tuple[bytes, str] | None:
+    r = requests.get(url, headers={"User-Agent": UA, "Referer": referer}, timeout=30)
     ctype = (r.headers.get("content-type") or "").split(";")[0].strip()
     if not r.ok or not ctype.startswith("image/"):
         return None
@@ -161,7 +161,13 @@ def hent_billede(url: str) -> tuple[bytes, str] | None:
 
 
 def aflaes(client: anthropic.Anthropic, url: str, prompt: str) -> Aflaesning | None:
-    b = hent_billede(url)
+    return aflaes_raa(client, url, prompt, Aflaesning)
+
+
+def aflaes_raa(client: anthropic.Anthropic, url: str, prompt: str, schema,
+               referer: str = "https://www.procyclingstats.com/"):
+    """Henter et billede og aflæser det med vision ind i `schema` (pydantic)."""
+    b = hent_billede(url, referer)
     if not b:
         print(f"    [billede] kunne ikke hentes: {url[:90]}")
         return None
@@ -174,7 +180,7 @@ def aflaes(client: anthropic.Anthropic, url: str, prompt: str) -> Aflaesning | N
                                              "data": base64.standard_b64encode(data).decode("ascii")}},
                 {"type": "text", "text": prompt},
             ]}],
-            output_format=Aflaesning,
+            output_format=schema,
         )
     except anthropic.APIError as e:
         print(f"    [vision-fejl] {type(e).__name__}: {e}")
@@ -320,6 +326,35 @@ def behandl(client, race: dict, stage: dict, pcs_url: str | None, cfg: dict | No
     for i, x in enumerate(raekker, 1):
         x["sort_order"] = i
 
+    # Bevar det, tidligere kørsler har fundet og verificeret (VeloViewer-segment,
+    # gradient-tabel, max-hældning), når den nye række er SAMME stigning: samme
+    # navn (eller top inden for 1 km) og længden inden for 15 %. Ellers ville
+    # --overwrite slette ejer-godkendte VeloViewer-match.
+    if eksisterende:
+        gamle = sb_get("stage_climbs", f"stage_id=eq.{stage['id']}&select=name,km_from_start,length_km,"
+                                       "veloviewer_segment_id,gradient_sections,max_gradient")
+        brugt_g = set()
+        for x in raekker:
+            top = x["km_from_start"] + x["length_km"]
+            for j, g in enumerate(gamle):
+                if j in brugt_g or not g.get("length_km"):
+                    continue
+                g_top = g["km_from_start"] + g["length_km"]
+                samme = (_ens(g["name"], x["name"]) > 0.8 and abs(g_top - top) <= 3) or abs(g_top - top) <= 1
+                if samme and abs(g["length_km"] - x["length_km"]) <= 0.15 * x["length_km"]:
+                    brugt_g.add(j)
+                    for felt in ("veloviewer_segment_id", "gradient_sections", "max_gradient"):
+                        if g.get(felt) is not None:
+                            x[felt] = g[felt]
+                    break
+        tabt = [g["name"] for j, g in enumerate(gamle) if j not in brugt_g and g.get("veloviewer_segment_id")]
+        if tabt:
+            print(f"    ⚠ VeloViewer-match uden modstykke i ny aflæsning (tabes): {tabt}")
+            r["veloviewer_tabt"] = tabt
+            if write_db:
+                print("    ✗ etapen skrives IKKE — et verificeret match må ikke forsvinde uden review")
+                return
+
     sprint = []
     for kilde in (officiel, pcs):
         if kilde and kilde.sprint:
@@ -330,15 +365,25 @@ def behandl(client, race: dict, stage: dict, pcs_url: str | None, cfg: dict | No
     if not write_db:
         print(f"    (tørkørsel) {len(raekker)} stigninger, {len(sprint)} sprint")
         return
-    if eksisterende:
-        requests.delete(f"{SUPABASE_URL}/rest/v1/stage_climbs?stage_id=eq.{stage['id']}",
-                        headers=SB_HEADERS, timeout=30).raise_for_status()
+    # PostgREST kræver samme nøgler i alle rækker i en bulk-insert — ellers
+    # 400 PGRST102. (Det slettede Giro 2027 e5/e14/e16 2026-11-12, fordi de
+    # gamle rækker blev slettet FØR den fejlende indsættelse.)
+    noegler = set().union(*(x.keys() for x in raekker)) if raekker else set()
+    raekker = [{k: x.get(k) for k in noegler} for x in raekker]
+    # Indsæt FØRST, slet de gamle bagefter — en fejl må aldrig efterlade en tom etape.
     if raekker:
         res = requests.post(f"{SUPABASE_URL}/rest/v1/stage_climbs", json=raekker,
-                            headers=SB_HEADERS, timeout=30)
+                            headers={**SB_HEADERS, "Prefer": "return=representation"}, timeout=30)
         if not res.ok:
-            print(f"    [DB FEJL] {res.status_code} {res.text[:200]}")
+            print(f"    [DB FEJL] {res.status_code} {res.text[:200]} — de gamle rækker er urørte")
             return
+        nye = {x["id"] for x in res.json()}
+    else:
+        nye = set()
+    gamle_ids = [x["id"] for x in eksisterende if x["id"] not in nye]
+    if gamle_ids:
+        requests.delete(f"{SUPABASE_URL}/rest/v1/stage_climbs?id=in.({','.join(gamle_ids)})",
+                        headers=SB_HEADERS, timeout=30).raise_for_status()
     if sprint and not stage.get("sprints"):
         requests.patch(f"{SUPABASE_URL}/rest/v1/stages?id=eq.{stage['id']}", json={"sprints": sprint},
                        headers=SB_HEADERS, timeout=30).raise_for_status()
