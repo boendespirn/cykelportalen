@@ -1272,13 +1272,13 @@ def search(q: str = ""):
     term = q.strip()
     h = get_headers()
 
-    def sb_ilike(table: str, select: str, field: str = "name", limit: int = 5) -> list:
+    def sb_ilike(table: str, select: str, field: str = "name", limit: int = 5,
+                 order: str | None = None) -> list:
+        params = {"select": select, field: f"ilike.%{term}%", "limit": limit}
+        if order:
+            params["order"] = order
         try:
-            res = requests.get(
-                f"{SUPABASE_URL}/rest/v1/{table}",
-                params={"select": select, field: f"ilike.%{term}%", "limit": limit},
-                headers=h,
-            )
+            res = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", params=params, headers=h)
             data = res.json()
             return data if isinstance(data, list) else []
         except Exception:
@@ -1286,7 +1286,11 @@ def search(q: str = ""):
 
     return {
         "riders": sb_ilike("riders", "name,slug,nationality,speciality"),
-        "races":  sb_ilike("races",  "name,slug,start_date,category"),
+        # Nyeste udgave først: uden sortering returnerede Postgres de 5 første
+        # rækker i lagerorden, og for Giro/Tour (mange historiske udgaver) var
+        # den kommende udgave sjældent iblandt.
+        "races":  sb_ilike("races",  "name,slug,start_date,category",
+                           limit=6, order="start_date.desc.nullslast"),
         "teams":  sb_ilike("teams",  "name,slug,country_code"),
         "climbs": sb_ilike(
             "stage_climbs",
