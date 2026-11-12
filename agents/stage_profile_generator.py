@@ -158,6 +158,7 @@ def render_stage_profile(
     climbs: list[dict],
     sprints: list[dict],
     km_scale: float,
+    snap_window_km: float = 3.0,
 ) -> Image.Image:
     """
     stage_meta: {stage_number, start_location, finish_location, distance_km,
@@ -259,7 +260,7 @@ def render_stage_profile(
             finish_climb = c
             continue
         if c["category"]:
-            summit = snap_to_local_max(resampled, c["summit_km_official"] * km_scale)
+            summit = snap_to_local_max(resampled, c["summit_km_official"] * km_scale, snap_window_km)
         else:
             # Del-stigninger topper ofte paa en fortsat opkoersel — lokalmaks-snap
             # ville skubbe markoeren videre op ad bjerget; brug ren interpolation.
@@ -275,7 +276,8 @@ def render_stage_profile(
             "name": c["name"].upper(),
             # Ukategoriserede er mellempunkter paa en opkoersel — topphoejden er
             # mindre meningsfuld, saa de faar kun laengde/gradient (kompakt).
-            "sub": (f"{fmt_da(c['length_km'])} km · {fmt_da(c['avg_gradient'])}% · {fmt_int_da(summit[1])} m"
+            "sub": (f"{fmt_da(c['length_km'])} km · {fmt_da(c['avg_gradient'])}% · "
+                    f"{fmt_int_da(c.get('top_hoejde_m') or summit[1])} m"
                     if major else f"{fmt_da(c['length_km'])} km · {fmt_da(c['avg_gradient'])}%"),
         })
     for s in sprints:
@@ -461,7 +463,7 @@ def get_climbs_for_stage(stage_id: str) -> list[dict]:
     res = requests.get(
         f"{SUPABASE_URL}/rest/v1/stage_climbs"
         f"?stage_id=eq.{stage_id}"
-        f"&select=name,km_from_start,length_km,avg_gradient,category"
+        f"&select=name,km_from_start,length_km,avg_gradient,category,kategoriseret,top_hoejde_m"
         f"&order=km_from_start.asc",
         headers=SB_AUTH,
     )
@@ -512,6 +514,7 @@ def process_stage(race_slug: str, stage_number: int, write_db: bool, overwrite: 
     print(f"stage_profile_generator.py — {race_slug} etape {stage_number}")
     distance_km_official = float(stage["distance_km"])
 
+    snap_window_km = 3.0
     print("Henter GPX...")
     points = download_stage_gpx(race_slug, stage_number)
 
@@ -542,6 +545,10 @@ def process_stage(race_slug: str, stage_number: int, write_db: bool, overwrite: 
                   f"— ingen kilde tilgængelig, springer over")
             return
         km_scale = 1.0   # digitaliserede km er allerede officielle km
+        # Og derfor intet snap: et bredt vindue flyttede en top midt paa
+        # en lang opkoersel op til naeste top (Côte des Neyrolles, TdF 2027 e9,
+        # viste 912 m mod officielle 825 m).
+        snap_window_km = 0.0   # kurven er tvunget gennem de officielle ankre paa topkm
         print(f"Digitaliseret: {len(resampled)} punkter, max afvigelse "
               f"{dig_report['max_deviation_m']:.0f} m mod officielle højder")
 
@@ -554,10 +561,15 @@ def process_stage(race_slug: str, stage_number: int, write_db: bool, overwrite: 
             continue
         climbs.append({
             "name": c["name"],
-            "category": c.get("category"),
+            # Kategoriseret, men kategorien er ikke offentliggjort endnu
+            # (fx Tour 2027 fra rutepræsentationen): vis som fremhævet
+            # stigning med et neutralt BJERG-badge — kategorien gættes aldrig.
+            "category": c.get("category") or ("BJERG" if c.get("kategoriseret") else None),
             "length_km": float(c["length_km"]),
             "avg_gradient": float(c.get("avg_gradient") or 0.0),
             "summit_km_official": float(c["km_from_start"]) + float(c["length_km"]),
+            # Kildens trykte tophoejde vinder over kurven (som kan ligge 20 m ved siden af)
+            "top_hoejde_m": c.get("top_hoejde_m"),
         })
     n_cat = sum(1 for c in climbs if c["category"])
     print(f"Stigninger: {len(climbs)} ({n_cat} kategoriserede)")
@@ -573,7 +585,7 @@ def process_stage(race_slug: str, stage_number: int, write_db: bool, overwrite: 
         "elevation_gain_m": stage.get("elevation_gain_m"),
     }
 
-    img = render_stage_profile(stage_meta, resampled, climbs, sprints, km_scale)
+    img = render_stage_profile(stage_meta, resampled, climbs, sprints, km_scale, snap_window_km)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
 
