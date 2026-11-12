@@ -126,7 +126,12 @@ def kontroller(climb: dict, seg: dict) -> tuple[bool, list[str]]:
     if re.search(r"\b(rgt|zwift|watopia|bkool|tacx|rouvy|fulgaz|virtual)\b", seg["navn"], re.I):
         fejl.append("virtuelt segment")
     nl = navn_ligner(climb["name"], seg["navn"])
-    if nl < NAVN_MIN:
+    # Sammensatte navne ("Saint-Lary-Soulan Col du Portet") giver lav andel,
+    # selv når segmentet hedder "col de Portet depuis vignec". Ét betydende ord
+    # på mindst 5 bogstaver er nok — tallene skal stadig passe.
+    s_ord = _norm(seg["navn"]).split()
+    langt_ord = any(len(w) >= 5 and w not in _STOP and w in s_ord for w in _norm(climb["name"]).split())
+    if nl < NAVN_MIN and not langt_ord:
         fejl.append(f"navn '{seg['navn']}' ({nl:.2f})")
     return not fejl, fejl
 
@@ -154,6 +159,7 @@ def main() -> int:
             continue
         bedst = None
         afvist = []
+        naesten: list[dict] = []
         for sid in dict.fromkeys(segs):
             if sid not in cache:
                 cache[sid] = hent_segment(sid)
@@ -170,6 +176,16 @@ def main() -> int:
                     bedst = (score, seg)
             else:
                 afvist.append(f"{sid} '{seg['navn']}': " + ", ".join(fejl))
+                # Næsten-match: navnet passer og kun ÉN taltjek fejler. Skrives
+                # aldrig automatisk, men listes til menneskelig vurdering.
+                tal_fejl = [f for f in fejl if not f.startswith(("navn", "virtuelt"))]
+                if len(tal_fejl) == 1 and len(fejl) == 1:
+                    naesten.append({"segment": sid, "navn": seg["navn"], "fejl": tal_fejl[0]})
+        if naesten and not bedst:
+            rapport.setdefault("naesten", []).append({"climb_id": climb_id, "navn": c["name"],
+                                                      "kandidater": naesten})
+            for n in naesten:
+                print(f"  ~ {c['name']}: næsten-match {n['segment']} '{n['navn']}' — {n['fejl']}")
         if bedst:
             seg = bedst[1]
             print(f"✓ {c['name']} → {seg['id']} '{seg['navn']}' ({seg['distance_km']:.2f} km, "

@@ -118,6 +118,21 @@ ASO_PROMPT = (
     "Mellemsprint: kun hvis der er et tydeligt grønt sprintikon. Gæt aldrig."
 )
 
+# Giroens officielle profil (RCS, giroditalia.it). PCS kan være helt uden
+# labels — Giro 2027 etape 20 havde intet, ikke engang målstigningen Monte
+# Zoncolan, som kun står på RCS-billedet ("10.1 km 11.9% → 22%").
+GIRO_PROMPT = (
+    "Dette er Giro d'Italias officielle etapeprofil (RCS).\n"
+    "Lodrette tekster ved linjer: 'højde - NAVN'; bjergspurter (GPM) har et blåt trekant-ikon "
+    "ved bunden og navnet med fed skrift. Km-tal står langs bunden.\n"
+    "Ved en GPM kan der stå 'X km' og 'Y%' (evt. '→ max%') — det er stigningens længde og "
+    "gennemsnitshældning. Målet står til højre (stor ramme); har det et GPM-ikon og 'X km Y%', er "
+    "målet en stigning: navn = målets navn, top_km = etapens distance, er_maal=true.\n\n"
+    "Returnér KUN stigninger, hvor både længde og hældning står på billedet. "
+    "Navn som trykt, men normal skrivemåde (ikke VERSALER). bjergikon=true for GPM. "
+    "Kategori kun hvis den står. Mellemsprint kun med tydeligt sprintikon. Gæt aldrig."
+)
+
 
 # ── Hentning ─────────────────────────────────────────────────────────────────
 
@@ -246,8 +261,9 @@ def behandl(client, race: dict, stage: dict, pcs_url: str | None, cfg: dict | No
     pcs = aflaes(client, pcs_url, PCS_PROMPT) if pcs_url else None
     officiel = None
     st_cfg = (cfg or {}).get("stages", {}).get(str(n), {})
-    if cfg and cfg.get("style") == "aso" and st_cfg.get("source_url"):
-        officiel = aflaes(client, st_cfg["source_url"], ASO_PROMPT)
+    off_prompt = {"aso": ASO_PROMPT, "giro": GIRO_PROMPT}.get((cfg or {}).get("style"))
+    if off_prompt and st_cfg.get("source_url"):
+        officiel = aflaes(client, st_cfg["source_url"], off_prompt)
 
     pcs_st = [s for s in (pcs.stigninger if pcs else []) if s.navn and s.laengde_km and s.gradient]
     off_st = [s for s in (officiel.stigninger if officiel else []) if s.navn and s.laengde_km and s.gradient]
@@ -290,6 +306,16 @@ def behandl(client, race: dict, stage: dict, pcs_url: str | None, cfg: dict | No
                              "top_m": top_m, "kategori": kategori, "kategoriseret": kat_markeret,
                              "kilde": kildenavn})
 
+    # Målstigning-vagt: slutter etapen på et bjerg (højt mål, kurven stiger ind
+    # i mål), skal der være en stigning, der topper ved målstregen. Ellers er
+    # den tabt — typisk fordi kilden kun nævner den i etapens navn.
+    slut_gevinst = kurve[-1][1] - min(h for k, h in kurve if k >= dist - 8)
+    har_maal = any(x["km_from_start"] + x["length_km"] >= dist - 1 for x in raekker)
+    if slut_gevinst >= 250 and not har_maal:
+        print(f"    ⚠ MÅLSTIGNING MANGLER: kurven stiger {slut_gevinst:.0f} m de sidste 8 km, "
+              f"men ingen stigning topper i mål ({stage.get('finish_location')})")
+        r["maalstigning_mangler"] = round(slut_gevinst)
+
     raekker.sort(key=lambda x: x["km_from_start"])
     for i, x in enumerate(raekker, 1):
         x["sort_order"] = i
@@ -328,7 +354,7 @@ def main() -> int:
     a = ap.parse_args()
 
     race = sb_get("races", f"slug=eq.{a.race}&select=id,slug,pcs_url")[0]
-    q = f"race_id=eq.{race['id']}&select=id,stage_number,distance_km,sprints&order=stage_number.asc"
+    q = f"race_id=eq.{race['id']}&select=id,stage_number,distance_km,sprints,finish_location&order=stage_number.asc"
     if a.stage:
         q += f"&stage_number=eq.{a.stage}"
     stages = sb_get("stages", q)
