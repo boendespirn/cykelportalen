@@ -426,10 +426,143 @@ def em(race: dict) -> tuple[list[dict], str] | None:
     return raekker, link.group(1)
 
 
+# ── X2O Trofee — ProCyclingStats ─────────────────────────────────────────────
+# X2O har ingen officiel resultatside, vi kan finde. Ejeren pegede 2026-11-16
+# paa PCS (race/x2o-badkamers-trofee-bollekescross-2026). PCS-slugs kan ikke
+# udledes sikkert ("hofstade-plage-cross-cx"), men hver X2O-side linker til
+# naeste/forrige loeb i serien, saa vi gaar kaeden igennem og vaelger den side,
+# hvis herre-elite-fane (ME) har loebets dato. Kontroller: dato, ME-fanen,
+# PCS' tidsafstand = afstand regnet ud af sluttiderne, og startnumrene i top 10
+# skal passe med arrangoerens startliste, naar vi har den.
+PCS = "https://www.procyclingstats.com/"
+PCS_X2O_FROE = ["race/x2o-badkamers-trofee-bollekescross-2026"]
+PCS_MAANEDER = {m: i for i, m in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july", "august",
+     "september", "october", "november", "december"], 1)}
+
+
+def _pcs_dato(side: str) -> date | None:
+    """Datoen for den foerste (aktive) kategori — ME staar foerst."""
+    m = re.search(r"Date\s*:?\s*</div>\s*<div[^>]*>\s*(\d{1,2}) (\w+) (\d{4})", side)
+    if not m or m.group(2).lower() not in PCS_MAANEDER:
+        return None
+    return date(int(m.group(3)), PCS_MAANEDER[m.group(2).lower()], int(m.group(1)))
+
+
+def _pcs_tid(s: str) -> int | None:
+    dele = s.strip().split(":")
+    if not all(d.isdigit() for d in dele) or not 2 <= len(dele) <= 3:
+        return None
+    t = 0
+    for d in dele:
+        t = t * 60 + int(d)
+    return t
+
+
+def _pcs_x2o_side(race: dict) -> tuple[str, str] | None:
+    """(url, html) for PCS-siden med loebets dato."""
+    from slugify import slugify as _sl
+    dag = date.fromisoformat(race["start_date"])
+    kort = (race.get("name") or "").split(" - ")[-1]
+    koe = [f"race/x2o-badkamers-trofee-{_sl(kort)}-{dag.year}"] + PCS_X2O_FROE
+    set_ = set()
+    while koe and len(set_) < 15:
+        sti = koe.pop(0)
+        if sti in set_:
+            continue
+        set_.add(sti)
+        r = hent(PCS + sti + "/results")
+        if r is None or not r.ok or "Page not found" in r.text[:3000]:
+            continue
+        if _pcs_dato(r.text) == dag:
+            return PCS + sti + "/results", r.text
+        koe += [x for x in re.findall(
+            r'href="(race/x2o-badkamers-trofee-[a-z0-9\-]+?-\d{4})"', r.text)
+            if x not in set_]
+    return None
+
+
+def x2o_pcs(race: dict) -> tuple[list[dict], str] | None:
+    from bs4 import BeautifulSoup
+    fund = _pcs_x2o_side(race)
+    if not fund:
+        print("    PCS har ingen X2O-side med loebets dato endnu")
+        return None
+    url, side = fund
+    soup = BeautifulSoup(side, "html.parser")
+    fane = next((a for a in soup.select("ul.unitTopnav a.resultNav")
+                 if a.get_text(strip=True) == "ME"), None)
+    if not fane or "cur" not in (fane.find_parent("li").get("class") or []):
+        print("    [KONTROL] PCS-sidens aktive fane er ikke herre-elite (ME) — gemmer intet")
+        return None
+    blok = next((d for d in soup.select(f'div.resultCont[data-navid="{fane["data-navid"]}"]')
+                 if not d.find("h4") and d.select_one("table.results")), None)
+    if not blok:
+        print("    [KONTROL] ingen herre-elite-tabel paa PCS — gemmer intet")
+        return None
+    tabel = blok.select_one("table.results")
+    kol = [th.get_text(strip=True) for th in tabel.select("thead th")]
+    if not {"Rnk", "BIB", "Rider", "Laps"} <= set(kol) or kol[-2] != "Timelag":
+        print(f"    [KONTROL] ukendt PCS-tabel {kol} — gemmer intet")
+        return None
+    i_rnk, i_bib, i_rider, i_laps = (kol.index(k) for k in ("Rnk", "BIB", "Rider", "Laps"))
+
+    raekker, forrige = [], None
+    for tr in tabel.select("tbody tr"):
+        td = tr.find_all("td", recursive=False)
+        rnk = td[i_rnk].get_text(strip=True)
+        rytter = td[i_rider].find("a")
+        flag = td[i_rider].select_one("span.flag")
+        s1 = tr.select_one("a.TimeWonLostFromRider2")
+        laps = td[i_laps].get_text(strip=True)
+        lag = td[-2].get_text(strip=True)
+        status = rnk if rnk in ("DNF", "DNS", "DSQ", "OTL") else None
+        lappet = laps not in ("", "0") or "lap" in lag.lower()
+        tid = int(s1["data-s1"]) if s1 and s1.get("data-s1", "0").isdigit() else 0
+        # PCS' egen afstand: ",," = samme tid som rytteren foran.
+        afstand = forrige if lag == ",," else _pcs_tid(lag)
+        # Vinderens felt er hans samlede tid; afstanden bag ham er 0.
+        forrige = 0 if not raekker else afstand
+        raekker.append({
+            "pos": int(rnk) if rnk.isdigit() and not status else None,
+            "navn": rytter.get_text(strip=True) if rytter else "",
+            "nat": flag["class"][-1].upper() if flag else None,
+            "bib": int(td[i_bib].get_text(strip=True) or 0),
+            "tid": None if lappet or status or not tid else tid,
+            "kilde_afstand": afstand, "status": status,
+        })
+
+    placeret = [x for x in raekker if x["pos"]]
+    vinder = placeret[0]["tid"] if placeret else None
+    if vinder and placeret[0]["kilde_afstand"] != vinder:
+        print("    [KONTROL] vinderens tid passer ikke med PCS' tidsfelt — gemmer intet")
+        return None
+    for x in placeret[1:TOP]:
+        if x["tid"] and x["tid"] - vinder != x["kilde_afstand"]:
+            print(f"    [KONTROL] {x['navn']}: afstand {x['kilde_afstand']}s paa PCS, "
+                  f"{x['tid'] - vinder}s regnet ud — gemmer intet")
+            return None
+
+    # Startnumrene skal passe med arrangoerens startliste (hvis vi har den).
+    start = {s["bib_number"]: s["riders"]["name"] for s in sb_get(
+        "startlists", f"race_id=eq.{race['id']}&select=bib_number,riders(name)&limit=500")
+        if s.get("riders") and s.get("bib_number")}
+    if start:
+        for x in placeret[:TOP]:
+            if x["bib"] not in start or not samme_rytter(navnenoegle(start[x["bib"]]), navnenoegle(x["navn"])):
+                print(f"    [KONTROL] nr. {x['bib']} er {x['navn']} paa PCS, men "
+                      f"{start.get(x['bib'], 'ingen')} i startlisten — gemmer intet")
+                return None
+        print(f"    startnumrene i top {TOP} passer med arrangoerens startliste")
+    print(f"    PCS (ME, {race['start_date']}): {len(raekker)} raekker")
+    return raekker, url
+
+
 # races.category → (race_data_sources.source_name, henter)
 KILDER = {"Superprestige": ("superprestige", superprestige),
           "HG Cross": ("acn-timing", hg_cross),
-          "UEC Cyclocross European Championships": ("uec-em", em)}
+          "UEC Cyclocross European Championships": ("uec-em", em),
+          "X2O Trofee": ("procyclingstats", x2o_pcs)}
 
 
 # ── Skrivning ────────────────────────────────────────────────────────────────
@@ -437,9 +570,15 @@ KILDER = {"Superprestige": ("superprestige", superprestige),
 def find_rytter(r: dict, startfelt: dict, kilde: str, toer: bool) -> str | None:
     """Startlisten foerst: rytteren staar der under det navn, vi allerede har
     koblet. Ellers findes eller oprettes han som i startliste-agenten."""
-    rid = startfelt.get(navnenoegle(r["navn"]))
+    noegle = navnenoegle(r["navn"])
+    rid = startfelt.get(noegle)
     if rid:
         return rid
+    # PCS forkorter: "ORTS Felipe" er "ORTS LLORET Felipe" i startlisten.
+    # Kun et entydigt match i startfeltet tæller.
+    fund = {v for k, v in startfelt.items() if samme_rytter(k, noegle)}
+    if len(fund) == 1:
+        return fund.pop()
     return find_eller_opret_rytter({"navn": r["navn"], "nat": r["nat"], "uci_rank": None},
                                    kilde, toer)
 
