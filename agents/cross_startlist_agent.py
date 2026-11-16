@@ -30,6 +30,7 @@ import argparse
 import os
 import re
 import sys
+from urllib.parse import urljoin
 
 import requests
 from dotenv import load_dotenv
@@ -319,6 +320,13 @@ def hent_fra_superprestige(race: dict) -> tuple[bytes | None, str | None, str]:
 # maa ikke blive denne saesons startliste.
 X2O_BASE = "https://x2otrofee.be"
 X2O_IKKE_SITE = re.compile(r"x2otrofee|golazo|sporza|eurosport|nieuwsblad|coca-cola", re.I)
+X2O_STARTLISTE_STIER = ("/renners/", "/info/deelnemers")
+# Loeb, hvor x2otrofee.be linker til Golazo-sitet, men startlisten ligger paa
+# arrangoerens eget domaene. Noegle: ord i vores loebsnavn (smaa bogstaver).
+X2O_EKSTRA_SITES = {
+    # Ejeren pegede 2026-11-16: www.bollekescross.be/info/deelnemers.
+    "bollekescross": "https://www.bollekescross.be",
+}
 DATO = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
 
 
@@ -349,15 +357,26 @@ def hent_fra_x2o(race: dict) -> tuple[bytes | None, str | None, str]:
     if not site:
         return None, None, besked
 
-    side = site + "/renners/"
-    r = hent(side)
-    if r is None or not r.ok:
-        # Bollekescross (Hamme-Zogge) ligger ikke paa X2O's platform og har
-        # ingen /renners/ — 404 dér er "anden opbygning", ikke en nedetid.
-        return None, None, f"{side} svarede {r.status_code if r is not None else 'ikke'}"
-    pdf = vaelg_elite_pdf(sorted(set(re.findall(r'href="([^"]+\.pdf)"', r.text, re.I))))
+    # De fleste X2O-sites (Golazo-platformen) har startlisterne paa /renners/.
+    # Bollekescross (Hamme-Zogge) ligger ikke paa platformen og har dem paa
+    # /info/deelnemers med relative links (ejeren pegede 2026-11-16).
+    navn = (race.get("name") or "").lower()
+    sites = [site] + [s for n, s in X2O_EKSTRA_SITES.items() if n in navn]
+    pdf, side, svar = None, None, []
+    for kandidat in (s + sti for s in sites for sti in X2O_STARTLISTE_STIER):
+        r = hent(kandidat)
+        if r is None or not r.ok:
+            svar.append(f"{kandidat} {r.status_code if r is not None else 'ikke'}")
+            continue
+        links = sorted({urljoin(kandidat, h) for h in
+                        re.findall(r'href="([^"]+\.pdf)"', r.text, re.I)})
+        pdf, side = vaelg_elite_pdf(links), kandidat
+        if pdf:
+            break
     if not pdf:
-        return None, None, f"ingen herre-elite-startliste paa {side} endnu"
+        hvor = side or site
+        return None, None, (f"ingen herre-elite-startliste paa {hvor} endnu"
+                            + (f" ({', '.join(svar)})" if svar else ""))
     p = hent(pdf)
     if p is None or not p.ok:
         return None, None, f"kunne ikke hente {pdf}"
