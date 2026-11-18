@@ -558,11 +558,93 @@ def x2o_pcs(race: dict) -> tuple[list[dict], str] | None:
     return raekker, url
 
 
+# ── X2O Trofee — arrangoerens eget site ──────────────────────────────────────
+# Golazo-sitene har /uitslagen-elite-mannen/ (koppenbergcross.be, ejeren pegede
+# 2026-11-18). Foer loebet viser siden en skabelon med "-0 LAP", saa vi kraever
+# loebets dato som overskrift ("1 november 2026") og at top 10 staar i vores
+# startliste. Det er den officielle kilde og proeves foer PCS.
+NL_MAANEDER = {m: i for i, m in enumerate(
+    ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
+     "september", "oktober", "november", "december"], 1)}
+
+
+def x2o_eget_site(race: dict) -> tuple[list[dict], str] | None:
+    from bs4 import BeautifulSoup
+    from cross_startlist_agent import x2o_site
+    site, besked = x2o_site(race)
+    if not site:
+        print(f"    x2o-site: {besked}")
+        return None
+    url = site + "/uitslagen-elite-mannen/"
+    r = hent(url)
+    if r is None or not r.ok:
+        print(f"    {url} svarede {r.status_code if r is not None else 'ikke'}")
+        return None
+    soup = BeautifulSoup(r.text, "html.parser")
+    dag = date.fromisoformat(race["start_date"])
+    datoer = {date(int(a), NL_MAANEDER[m.lower()], int(d)) for d, m, a in re.findall(
+        r"\b(\d{1,2}) (" + "|".join(NL_MAANEDER) + r") (\d{4})\b",
+        soup.get_text(" "), re.I)}
+    if dag not in datoer:
+        print(f"    {url}: ingen overskrift med loebets dato ({dag}) — ikke dette aars resultat")
+        return None
+
+    raekker, vinder = [], None
+    for tr in soup.select("table tr"):
+        pos = tr.select_one("td.standing-row-pos")
+        navn = tr.select_one("td.standing-row-info h5")
+        res = tr.select_one("td.standing-row-result")
+        if not (pos and navn and res):
+            continue
+        flag = tr.select_one("td.flag img")
+        nat = re.search(r"/countries/([a-z]{2})\.png", flag.get("src", "")) if flag else None
+        felt_tid = (res.find("h5").get_text(strip=True) if res.find("h5") else "")
+        felt_afst = (res.find("p").get_text(strip=True) if res.find("p") else "")
+        tid = _pcs_tid(felt_tid)
+        if vinder is None and tid:
+            vinder = tid
+        raekker.append({
+            "pos": int(pos.get_text(strip=True)) if pos.get_text(strip=True).isdigit() else None,
+            "navn": navn.get_text(" ", strip=True),
+            "nat": nat.group(1).upper() if nat else None,
+            "tid": None if "LAP" in (felt_tid + felt_afst).upper() else tid,
+            "kilde_afstand": 0 if felt_afst in ("-", "") and tid == vinder
+                             else _pcs_tid(felt_afst.lstrip("+")),
+            "status": None,
+        })
+    if not raekker:
+        print(f"    {url}: ingen resultattabel")
+        return None
+    v = raekker[0]["tid"]
+    for x in raekker[:TOP]:
+        if x["tid"] and v and x["kilde_afstand"] is not None and x["tid"] - v != x["kilde_afstand"]:
+            print(f"    [KONTROL] {x['navn']}: afstand {x['kilde_afstand']}s i kilden, "
+                  f"{x['tid'] - v}s regnet ud — gemmer intet")
+            return None
+
+    start = [navnenoegle(s["riders"]["name"]) for s in sb_get(
+        "startlists", f"race_id=eq.{race['id']}&select=riders(name)&limit=500") if s.get("riders")]
+    if start:
+        for x in [y for y in raekker if y["pos"]][:TOP]:
+            n = navnenoegle(x["navn"])
+            if not any(n == k or samme_rytter(n, k) for k in start):
+                print(f"    [KONTROL] {x['navn']} staar ikke i startlisten — gemmer intet")
+                return None
+        print(f"    top {TOP} staar alle i arrangoerens startliste")
+    print(f"    {url} ({dag}): {len(raekker)} raekker")
+    return raekker, url
+
+
+def x2o(race: dict) -> tuple[list[dict], str] | None:
+    """Arrangoerens side foerst (officiel), ellers PCS."""
+    return x2o_eget_site(race) or x2o_pcs(race)
+
+
 # races.category → (race_data_sources.source_name, henter)
 KILDER = {"Superprestige": ("superprestige", superprestige),
           "HG Cross": ("acn-timing", hg_cross),
           "UEC Cyclocross European Championships": ("uec-em", em),
-          "X2O Trofee": ("procyclingstats", x2o_pcs)}
+          "X2O Trofee": ("x2o", x2o)}
 
 
 # ── Skrivning ────────────────────────────────────────────────────────────────

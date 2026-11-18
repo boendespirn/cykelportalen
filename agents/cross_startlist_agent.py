@@ -394,6 +394,85 @@ def hent_fra_x2o(race: dict) -> tuple[bytes | None, str | None, str]:
     return p.content, pdf, f"{side} ({race['start_date']})"
 
 
+# ── Arrangoerens eget site (uden for seriens platform) ───────────────────────
+# Rapencross Lokeren (HG Cross) har sin startliste paa rapencrosslokeren.be/
+# renners/ (ejeren pegede 2026-11-18) — én samlet PDF ("Lokeren-Startlist.pdf")
+# med alle kategorier. Kun siderne med sidefoden "STARTLIST MEN ELITE" (og
+# fortsaettelsessider uden egen sidefod) bruges, og datoen i den sidefod skal
+# vaere loebets. Noegle: ord i vores loebsnavn (smaa bogstaver).
+EGNE_SITES = {
+    "rapencross": "https://rapencrosslokeren.be/renners/",
+}
+
+
+def elite_sider(pdf_bytes: bytes, dag: str) -> tuple[bytes | None, str]:
+    """(pdf med kun herre-elite-blokkene, besked).
+
+    Lokeren 2025 havde herre-elite OG kvinder paa side 1, hver tabel med sin
+    overskrift ("STARTLIST MEN ELITE" y=66, "STARTLIST WOMEN" y=548). Siden
+    deles derfor ved overskrifterne; et stykke tilhoerer overskriften over det
+    (eller den sidste fra forrige side), og alt andet end herre-elite
+    overstreges, foer siden laeses. Datoen staar i herre-elite-overskriften."""
+    try:
+        import pymupdf as fitz
+    except ImportError:
+        import fitz
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        valgt, kat, datoer = [], None, set()
+        for n, side in enumerate(doc):
+            blokke = side.get_text("blocks")
+            overskrifter = sorted((b[1], b[4]) for b in blokke
+                                  if re.match(r"\s*STARTLI[SJ]T\b", b[4], re.I))
+            stykker, y0 = [], 0.0
+            for y, tekst in overskrifter:
+                stykker.append((y0, y, kat))
+                kat = "elite" if re.search(r"MEN\s+ELITE", tekst, re.I) \
+                    and not re.search(r"WOMEN", tekst, re.I) else "anden"
+                y0 = y
+            stykker.append((y0, side.rect.y1, kat))
+            if not any(k == "elite" and b - a > 1 for a, b, k in stykker):
+                continue
+            # Datoen: en linje med dato lige over/ved elite-overskriften.
+            for a, b, k in stykker:
+                if k == "elite":
+                    felt = fitz.Rect(0, max(0, a - 30), side.rect.x1, a + 20)
+                    datoer |= {f"{aa}-{int(m):02d}-{int(d):02d}" for d, m, aa in
+                               DATO.findall(side.get_textbox(felt))}
+                else:
+                    side.add_redact_annot(fitz.Rect(0, a, side.rect.x1, b))
+            side.apply_redactions()
+            valgt.append(n)
+        if not valgt:
+            return None, "ingen blok med overskriften STARTLIST MEN ELITE"
+        if dag not in datoer:
+            return None, (f"herre-elite-blokken er dateret {', '.join(sorted(datoer)) or 'intet'}, "
+                          f"ikke {dag}")
+        doc.select(valgt)
+        return doc.tobytes(), f"side {', '.join(str(v + 1) for v in valgt)} ({dag})"
+
+
+def hent_fra_eget_site(race: dict) -> tuple[bytes | None, str | None, str]:
+    navn = (race.get("name") or "").lower()
+    side = next((u for n, u in EGNE_SITES.items() if n in navn), None)
+    if not side:
+        return None, None, "intet kendt eget site"
+    r = hent(side)
+    if r is None or not r.ok:
+        return None, None, f"{side} svarede {r.status_code if r is not None else 'ikke'}"
+    pdfs = sorted({urljoin(side, h) for h in re.findall(r'href="([^"]+\.pdf)"', r.text, re.I)
+                   if re.search(r"startli[sj]t", h, re.I)})
+    if not pdfs:
+        return None, None, f"ingen startliste-PDF paa {side} endnu"
+    for pdf in pdfs:
+        p = hent(pdf)
+        if p is None or not p.ok:
+            continue
+        indhold, besked = elite_sider(p.content, race["start_date"])
+        if indhold:
+            return indhold, pdf, f"{pdf.rsplit('/', 1)[-1]}: {besked}"
+    return None, None, f"{side}: {besked}"
+
+
 def vaelg_elite_pdf(pdfs: list[str]) -> str | None:
     for moenster in ELITE_MOENSTRE:
         for p in pdfs:
@@ -608,6 +687,10 @@ def behandl(race: dict, toer: bool) -> bool:
 
     side, pdfs = find_loebsside(race)
     if not side:
+        indhold, pdf, besked = hent_fra_eget_site(race)
+        if indhold or besked != "intet kendt eget site":
+            print(f"    eget site: {besked}")
+            return _gem_pdf(race, indhold, pdf, toer) if indhold else False
         kendt = SERIE_SITES.get(race.get("category") or "")
         print("    ingen arrangoerside fundet" if kendt else
               f"    serien '{race.get('category')}' har ingen kendt arrangoerside")
